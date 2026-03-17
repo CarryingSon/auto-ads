@@ -1,0 +1,863 @@
+import { Link } from "wouter";
+import { useState } from "react";
+
+import avatarHero1 from "../assets/images/avatar-hero-1.png";
+import avatarHero2 from "../assets/images/avatar-hero-2.png";
+import avatarHero3 from "../assets/images/avatar-hero-3.png";
+import avatarHero4 from "../assets/images/avatar-hero-4.png";
+import testimonialSarah from "../assets/images/testimonial-sarah.png";
+import testimonialJohn from "../assets/images/testimonial-john.png";
+import testimonialMike from "../assets/images/testimonial-mike.png";
+import testimonialAlice from "../assets/images/testimonial-alice.png";
+import testimonialTom from "../assets/images/testimonial-tom.png";
+import testimonialEmily from "../assets/images/testimonial-emily.png";
+
+const testimonials = [
+  { quote: "The Google Drive sync is a game changer. My creative team just drops files in the folder and they appear in my ads manager ready to launch. Insane.", author: "Sarah Jenkins", role: "Agency Owner", img: testimonialSarah },
+  { quote: "Agency we work for use Auto-ads. WAY better than ads manager by far. The syncing is seamless.", author: "John Doe", role: "Media Buyer", img: testimonialJohn },
+  { quote: "Trying to automate our TikTok creatives to Meta Ads... Tool can be super useful for my needs... other tools charge 1k for API integrations where as Auto-ads has super good pricing", author: "Mike T.", role: "eCom Brand Owner", img: testimonialMike },
+  { quote: "I've been launching my ads through Auto-ads and it seems to never turn any advantage+ enhancements on! Perfect for our strict brand guidelines.", author: "Alice Wong", role: "Marketing Director", img: testimonialAlice },
+  { quote: "Yeah go with Auto-ads, honestly just anything except AdsManager and Kitchn and you're good. The Drive integration is a must-have.", author: "Tom H.", role: "Growth Hacker", img: testimonialTom },
+  { quote: "How am I just discovering Auto-ads? My poor employee who has been manually uploading ads to Meta all this time is going to love this.", author: "Emily R.", role: "Agency CEO", img: testimonialEmily },
+];
+
+const faqItems = [
+  { q: "What is Auto-ads?", a: "Auto-ads is a tool designed to help media buyers sync and bulk upload Facebook & Instagram ads directly from Google Drive folders, saving hours of manual work." },
+  { q: "How much time will it save me?", a: "On average, our users save about 13 minutes per ad launch and reduce their overall workflow time by 88% by removing manual uploads." },
+  { q: "Does it support shared drives?", a: "Yes! You can connect personal Google Drive folders as well as Shared Drives used by teams." },
+  { q: "Can I use different aspect ratios in the same ad?", a: "Yes! Auto-ads supports uploading multiple aspect ratios from your Drive folder and will automatically map them to the correct placements." },
+];
+
+const freePlanFeatures = ["First 10 syncs free", "Unlimited ad accounts", "Dashboard overview", "No credit card required"];
+const paidPlanFeatures = ["Unlimited Drive syncs", "Launch 100's of ads instantly", "Auto-disable enhancements", "Google Drive Integration", "Auto-naming from filenames", "Saved ad copy templates"];
+
+function DemoVideoPlaceholder() {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <div
+      className="w-full max-w-4xl mx-auto mt-12 relative group cursor-pointer"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      data-testid="demo-video-placeholder"
+    >
+      <div className="absolute -inset-2 bg-gradient-to-r from-[#1877F2]/20 via-blue-400/20 to-[#1877F2]/20 rounded-3xl blur-xl opacity-40 group-hover:opacity-70 transition duration-1000 group-hover:duration-200" />
+      <div className="relative bg-white rounded-xl overflow-hidden shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] border border-slate-200 aspect-video ring-1 ring-slate-900/5">
+        <div className="bg-slate-50/80 border-b border-slate-200 p-3 flex items-center gap-2 backdrop-blur-sm z-10 relative">
+          <div className="flex gap-1.5 ml-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-slate-300 group-hover:bg-red-400 transition-colors" />
+            <div className="w-2.5 h-2.5 rounded-full bg-slate-300 group-hover:bg-yellow-400 transition-colors" />
+            <div className="w-2.5 h-2.5 rounded-full bg-slate-300 group-hover:bg-green-400 transition-colors" />
+          </div>
+          <div className="mx-auto bg-white px-3 py-1 rounded-md text-[10px] text-slate-400 font-mono border border-slate-200 flex items-center gap-2 shadow-sm">
+            <i className="fas fa-lock text-[8px] text-slate-300" />
+            <span className="text-slate-600">app.auto-ads.io/demo</span>
+          </div>
+        </div>
+        <div className="absolute inset-0 top-10 bg-white flex">
+          <div className="w-48 h-full border-r border-slate-100 bg-slate-50/50 p-4 hidden sm:block">
+            <div className="h-6 w-24 bg-slate-200 rounded-md mb-6" />
+            <div className="space-y-3">
+              <div className="h-3 w-full bg-blue-50 rounded" />
+              <div className="h-3 w-3/4 bg-slate-100 rounded" />
+              <div className="h-3 w-5/6 bg-slate-100 rounded" />
+            </div>
+          </div>
+          <div className="flex-1 p-6 relative">
+            <div className="flex justify-between mb-8 flex-wrap gap-2">
+              <div className="h-8 w-32 bg-slate-100 rounded-lg" />
+              <div className="h-8 w-8 rounded-full bg-slate-100" />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="aspect-video bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl border border-slate-100 shadow-sm" />
+              <div className="aspect-video bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl border border-slate-100 shadow-sm" />
+              <div className="aspect-video bg-gradient-to-br from-blue-50/50 to-white rounded-xl border border-blue-100 shadow-sm" />
+            </div>
+            <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px]" />
+          </div>
+        </div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
+          <div className={`relative transition-transform duration-500 ${isHovered ? "scale-110" : "scale-100"}`}>
+            <div className="absolute inset-0 bg-[#1877F2] rounded-full animate-ping opacity-20" />
+            <div className="relative w-20 h-20 md:w-24 md:h-24 bg-gradient-to-br from-[#1877F2] to-blue-600 rounded-full flex items-center justify-center shadow-[0_20px_40px_rgba(24,119,242,0.35)] border-4 border-white ring-1 ring-slate-100 group-hover:shadow-[0_25px_50px_rgba(24,119,242,0.5)] transition-all">
+              <i className="fas fa-play text-white text-2xl md:text-3xl ml-1.5 drop-shadow-md" />
+            </div>
+          </div>
+          <div className="mt-6 text-center">
+            <h3 className="text-slate-900 font-extrabold text-lg md:text-xl tracking-tight mb-1">
+              See how it works
+            </h3>
+            <p className="text-slate-500 font-medium text-sm flex items-center justify-center gap-2">
+              <i className="far fa-clock text-[#1877F2]" /> 1 min demo
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Landing() {
+  const handleSmoothScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
+    e.preventDefault();
+    const element = document.getElementById(targetId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  return (
+    <div className="min-h-screen scroll-smooth overflow-x-hidden relative" style={{ fontFamily: "'Inter', sans-serif", background: "#f8f9ff", color: "#1e293b" }}>
+      <style>{`
+        .gradient-text {
+          background: linear-gradient(90deg, #1877F2 0%, #3b82f6 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        .blob-bg {
+          position: absolute;
+          border-radius: 50%;
+          filter: blur(80px);
+          z-index: 0;
+          opacity: 0.5;
+          pointer-events: none;
+          will-change: transform;
+        }
+        .glass-card {
+          background: rgba(255, 255, 255, 0.25);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
+          position: relative;
+          overflow: hidden;
+          transition: all 0.3s ease;
+        }
+        .glass-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: -50%;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.3), transparent);
+          transform: skewX(-25deg);
+          transition: 0.5s;
+          opacity: 0;
+          pointer-events: none;
+        }
+        .glass-card:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 15px 35px rgba(24, 119, 242, 0.15);
+          border-color: rgba(24, 119, 242, 0.3);
+          background: rgba(255, 255, 255, 0.45);
+        }
+        .glass-card:hover::before {
+          left: 150%;
+          opacity: 1;
+          transition: 0.7s;
+        }
+        .glass-heavy {
+          background: rgba(255, 255, 255, 0.6);
+          backdrop-filter: blur(24px);
+          -webkit-backdrop-filter: blur(24px);
+          border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        details summary::-webkit-details-marker { display: none; }
+        details summary { list-style: none; }
+        html { scroll-behavior: smooth; }
+      `}</style>
+
+      <div className="blob-bg" style={{ width: 600, height: 600, background: "#1877F2", top: -150, left: -150, mixBlendMode: "multiply" }} />
+      <div className="blob-bg" style={{ width: 700, height: 700, background: "#93c5fd", top: "10%", right: -300, mixBlendMode: "multiply" }} />
+      <div className="blob-bg" style={{ width: 500, height: 500, background: "#1877F2", top: "40%", left: "5%", opacity: 0.3, mixBlendMode: "multiply" }} />
+      <div className="blob-bg" style={{ width: 600, height: 600, background: "#e9d5ff", bottom: "5%", right: "0%", mixBlendMode: "multiply" }} />
+
+      {/* NAV */}
+      <div className="pt-6 pb-2 px-4 sm:px-6 lg:px-8 fixed top-0 left-0 right-0 z-50 pointer-events-none">
+        <nav className="pointer-events-auto mx-auto max-w-7xl rounded-2xl glass-heavy shadow-lg" style={{ boxShadow: "0 4px 30px rgba(0,0,0,0.05)", border: "1px solid rgba(255,255,255,0.5)" }}>
+          <div className="px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center h-16 gap-4">
+              <div className="flex-shrink-0 flex items-center gap-2">
+                <div className="bg-gradient-to-br from-[#1877F2] to-blue-600 text-white p-1.5 rounded-lg shadow-lg" style={{ boxShadow: "0 4px 14px rgba(59,130,246,0.2)" }}>
+                  <i className="fas fa-sync-alt text-lg" />
+                </div>
+                <span className="font-bold text-xl tracking-tight text-gray-900">Auto-ads</span>
+              </div>
+              <div className="hidden md:flex space-x-8">
+                {[
+                  { label: "Home", href: "#" },
+                  { label: "Features", href: "#features" },
+                  { label: "Benefits", href: "#benefits" },
+                  { label: "How It Works", href: "#how-it-works" },
+                  { label: "Pricing", href: "#pricing" },
+                  { label: "FAQ", href: "#faq" },
+                ].map((item) => (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    onClick={(e) => item.href !== "#" ? handleSmoothScroll(e, item.href.slice(1)) : undefined}
+                    className="text-sm font-medium text-gray-800 hover:text-[#1877F2] transition-colors"
+                    data-testid={`link-nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                  >
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+              <div className="flex items-center space-x-4">
+                <Link href="/login">
+                  <span className="bg-[#1877F2] hover:bg-[#1461c7] text-white px-5 py-2 rounded-full text-sm font-medium transition-all shadow-lg cursor-pointer" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.3)" }} data-testid="button-get-started-nav">
+                    Get Started
+                  </span>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </nav>
+      </div>
+
+      {/* HERO */}
+      <section className="relative pt-28 pb-24 overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <div className="space-y-8">
+              <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-gray-900 leading-[1.15]">
+                Auto-launch ads from{" "}
+                <span className="text-[#1877F2] relative inline-block">
+                  Google Drive
+                  <span className="absolute bottom-1 left-0 w-full h-3 bg-blue-200/50 -z-10 rounded-full blur-sm" />
+                </span>
+                <br />
+                directly to{" "}
+                <span className="text-[#1877F2] inline-flex items-center gap-2">
+                  <i className="fab fa-meta" /> Meta Ads
+                </span>
+              </h1>
+              <p className="text-lg text-gray-500 max-w-xl leading-relaxed">
+                Stop manually downloading and uploading files. Connect a folder, and we'll auto-sync your creatives to Meta Ads manager instantly.
+              </p>
+              <div className="flex flex-wrap gap-3 text-sm font-medium text-gray-600">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg glass-card" style={{ boxShadow: "none", transform: "none" }}>
+                  <i className="fas fa-sync text-[#1877F2]" /> Real-time sync
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg glass-card" style={{ boxShadow: "none", transform: "none" }}>
+                  <i className="fas fa-folder-open text-[#1877F2]" /> No file limits
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg glass-card" style={{ boxShadow: "none", transform: "none" }}>
+                  <i className="fas fa-bolt text-[#1877F2]" /> Instant launch
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4 pt-2">
+                <Link href="/login">
+                  <span className="bg-gradient-to-r from-[#1877F2] to-blue-600 hover:to-blue-700 text-white text-center px-8 py-4 rounded-full text-base font-semibold transition-all shadow-xl flex items-center justify-center gap-2 hover:scale-105 cursor-pointer" style={{ boxShadow: "0 10px 25px rgba(37,99,235,0.3)" }} data-testid="button-try-free-hero">
+                    Get Started <i className="fas fa-arrow-right" />
+                  </span>
+                </Link>
+                <a className="glass-heavy hover:bg-white/80 text-gray-900 border border-white/40 text-center px-8 py-4 rounded-full text-base font-semibold transition-all flex items-center justify-center gap-2 hover:scale-105 cursor-pointer" href="#how-it-works" onClick={(e) => handleSmoothScroll(e, "how-it-works")} data-testid="button-watch-demo">
+                  Watch demo <i className="fas fa-play text-xs" />
+                </a>
+              </div>
+              <div className="flex items-center gap-4 pt-4">
+                <div className="flex -space-x-3">
+                  <img alt="User 1" className="w-10 h-10 rounded-full border-2 border-white shadow-md object-cover" src={avatarHero1} />
+                  <img alt="User 2" className="w-10 h-10 rounded-full border-2 border-white shadow-md object-cover" src={avatarHero2} />
+                  <img alt="User 3" className="w-10 h-10 rounded-full border-2 border-white shadow-md object-cover" src={avatarHero3} />
+                  <img alt="User 4" className="w-10 h-10 rounded-full border-2 border-white shadow-md object-cover" src={avatarHero4} />
+                </div>
+                <div className="text-sm">
+                  <p className="font-bold text-gray-900">1,200+ media buyers</p>
+                  <p className="text-gray-500">Syncing from Google Drive daily</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="flex items-center">
+                  {[...Array(4)].map((_, i) => (
+                    <svg key={i} className="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                  ))}
+                  <div className="relative">
+                    <svg className="w-4 h-4 text-gray-200 fill-current" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                    <div className="absolute top-0 left-0 overflow-hidden w-[70%]">
+                      <svg className="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-bold text-gray-900 leading-none">4.7/5</span>
+                  <span className="text-[11px] text-gray-500 font-medium leading-none">(128 reviews)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* HERO RIGHT - Demo Video */}
+            <div className="relative lg:ml-10">
+              <DemoVideoPlaceholder />
+              <div className="flex justify-center mt-4">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/30 backdrop-blur-xl border border-white/50 shadow-[0_4px_16px_rgba(0,0,0,0.04)] ring-1 ring-black/5 transition-all hover:scale-[1.02]">
+                  <div className="flex items-center justify-center w-6 h-6 rounded-full bg-[#1877F2] shadow-sm shadow-blue-500/20 flex-shrink-0">
+                    <svg viewBox="0 0 256 292" className="w-3 h-3" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M223.774 57.34c-.201-1.46-1.48-2.268-2.537-2.357-1.055-.088-23.383-1.743-23.383-1.743s-15.507-15.395-17.209-17.099c-1.703-1.703-5.029-1.185-6.32-.805-.183.053-3.388 1.046-8.678 2.68-5.18-14.906-14.322-28.604-30.405-28.604-.444 0-.901.018-1.358.044C129.31 3.407 123.94.779 119.373.779c-37.446 0-55.365 46.835-60.976 70.635-14.558 4.511-24.891 7.718-26.209 8.133-8.13 2.549-8.39 2.805-9.452 10.462C21.904 96.492 0 264.148 0 264.148l177.032 30.518 76.968-19.1S223.974 58.8 223.774 57.34zM156.3 40.848l-11.78 3.648c-.004-2.482-.2-6.086-.672-10.28 7.166 1.327 11.268 5.453 12.452 6.632zm-20.322 6.29l-25.417 7.874c2.455-9.458 7.098-18.894 12.803-25.088 2.138-2.323 5.147-4.882 8.623-6.37 3.36 7.023 4.06 16.965 3.991 23.584zm-16.944-36.29c2.813 0 5.15.799 7.15 2.382-3.265 1.633-6.388 4.265-9.214 7.708-7.473 8.976-13.197 22.937-15.54 36.364l-20.86 6.46C86.57 40.16 101.022 10.847 119.034 10.847z" fill="white" />
+                      <path d="M221.237 54.983c-1.055-.088-23.383-1.743-23.383-1.743s-15.507-15.395-17.209-17.099c-.637-.634-1.496-.96-2.394-1.1l-1.22 248.627 76.968-19.1S223.974 58.8 223.774 57.34c-.201-1.46-1.48-2.268-2.537-2.357z" fill="rgba(255,255,255,0.5)" />
+                      <path d="M135.136 104.953l-11.07 32.926s-9.698-5.176-21.586-5.176c-17.428 0-18.305 10.938-18.305 13.693 0 15.038 39.2 20.8 39.2 56.024 0 27.713-17.577 45.558-41.277 45.558-28.44 0-42.984-17.7-42.984-17.7l7.615-25.16s14.95 12.835 27.565 12.835c8.243 0 11.596-6.49 11.596-11.232 0-19.616-32.16-20.491-32.16-52.724 0-27.129 19.472-53.382 58.778-53.382 15.145 0 22.628 4.338 22.628 4.338z" fill="white" />
+                    </svg>
+                  </div>
+                  <p className="text-xs text-gray-800 font-medium tracking-tight">
+                    Built by <span className="text-[#1877F2] font-extrabold">Dropshippers</span>, for <span className="text-[#1877F2] font-extrabold">Dropshippers</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-20 flex justify-center relative z-10">
+            <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full glass-card hover:bg-white/60 transition-colors shadow-lg" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.1)" }}>
+              <i className="fab fa-meta text-[#1877F2] text-xl" />
+              <span className="font-medium text-gray-700">Official Meta marketing partner</span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* FEATURES */}
+      <section className="py-24 relative z-10 overflow-visible" id="features">
+        <div className="absolute inset-0 bg-white/20 backdrop-blur-3xl -z-10" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-3xl mx-auto mb-20">
+            <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
+              Powerful Features
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4 drop-shadow-sm">
+              Fast lane for <span className="text-[#1877F2]">Meta Ads</span>
+            </h2>
+            <p className="text-lg text-gray-500">
+              No more slow Meta UI. Auto-ads supercharges your workflow via Google Drive integration.
+            </p>
+          </div>
+
+          <div className="relative flex justify-center items-center py-20 px-4">
+            <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20 hidden lg:block" fill="none" viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg">
+              <path d="M600 300 L300 100" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
+              <path d="M600 300 L900 100" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
+              <path d="M600 300 L250 300" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
+              <path d="M600 300 L950 300" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
+              <path d="M600 300 L400 500" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
+              <path d="M600 300 L800 500" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
+            </svg>
+
+            <div className="grid grid-cols-1 lg:grid-cols-7 lg:grid-rows-3 gap-8 items-center justify-items-center w-full max-w-6xl">
+              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-1 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-0">
+                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
+                  <i className="fab fa-google-drive" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Drive Integration</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">Connect your creative folders directly. Changes in Drive reflect instantly in your dashboard.</p>
+              </div>
+
+              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-1 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-1">
+                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
+                  <i className="fas fa-clock" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Save hours every week</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">Eliminate tedious manual uploading and reclaim your time for higher ROI tasks.</p>
+              </div>
+
+              <div className="lg:col-start-3 lg:col-span-3 lg:row-start-2 flex items-center justify-center">
+                <div className="w-48 h-48 bg-white/40 backdrop-blur-3xl rounded-full border-2 border-blue-200/50 shadow-2xl flex items-center justify-center relative p-8 group">
+                  <div className="absolute inset-0 bg-[#1877F2]/5 rounded-full scale-110" />
+                  <div className="bg-[#1877F2] text-white w-full h-full rounded-full flex items-center justify-center text-5xl shadow-lg ring-8 ring-white/30">
+                    <i className="fas fa-bolt" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-2 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-2">
+                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
+                  <i className="fas fa-ban" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Auto-disable enhancements</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">Stop Meta from ruining your ads with unwanted 'advantage+' enhancements.</p>
+              </div>
+
+              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-2 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-3">
+                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
+                  <i className="fas fa-layer-group" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Multi-account support</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">Map different Drive folders to different Meta ad accounts from one dashboard.</p>
+              </div>
+
+              <div className="lg:col-start-2 lg:col-span-2 lg:row-start-3 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-4">
+                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
+                  <i className="fas fa-tag" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Auto-naming conventions</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">Automatically name your ads based on Google Drive file names to stay organized.</p>
+              </div>
+
+              <div className="lg:col-start-5 lg:col-span-2 lg:row-start-3 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-5">
+                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
+                  <i className="fas fa-chart-line" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Performance insights</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">Track creative performance and get actionable insights to improve ROAS.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* BENEFITS */}
+      <section className="py-24 relative z-10 overflow-hidden" id="benefits">
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-50/30 to-transparent" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
+          <div className="text-center mb-16">
+            <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm shadow-sm">
+              Why advertisers choose us
+            </div>
+            <h2 className="text-4xl sm:text-5xl font-extrabold text-gray-900 mb-6 drop-shadow-sm">
+              Save precious hours with <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#1877F2] to-blue-500">Drive Sync</span>
+            </h2>
+            <p className="text-lg text-gray-500 max-w-2xl mx-auto">
+              Uploading ads manually from your computer is losing you money. Switch to automated cloud syncing and reclaim your workflow.
+            </p>
+          </div>
+
+          <div className="relative glass-heavy rounded-3xl border border-white/60 p-2 shadow-2xl backdrop-blur-3xl overflow-hidden max-w-6xl mx-auto">
+            <div className="absolute inset-0 bg-gradient-to-r from-red-50/40 via-transparent to-blue-50/40 pointer-events-none" />
+            <div className="grid md:grid-cols-2 relative bg-white/30 rounded-2xl overflow-hidden">
+              {/* OLD WORKFLOW */}
+              <div className="relative p-8 md:p-12 border-b md:border-b-0 md:border-r border-white/30 group">
+                <div className="absolute inset-0 bg-red-50/20 backdrop-blur-[2px] z-0" />
+                <div className="relative z-10 flex flex-col h-full">
+                  <div className="flex items-center gap-3 mb-10">
+                    <div className="w-10 h-10 rounded-xl bg-red-100/80 flex items-center justify-center text-red-500 shadow-inner border border-red-200">
+                      <i className="fas fa-history text-lg" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-800">Old Workflow</h3>
+                      <p className="text-xs text-red-500 font-medium uppercase tracking-wide">Manual & Slow</p>
+                    </div>
+                  </div>
+                  <div className="relative flex-1 min-h-[300px] flex items-center justify-center">
+                    <div className="absolute top-0 right-10 rotate-12 p-4 bg-white/60 border border-red-200 rounded-xl shadow-lg w-48 backdrop-blur-sm transform transition-transform group-hover:rotate-6 group-hover:scale-105 duration-500">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="bg-red-100 p-1.5 rounded-md text-red-500"><i className="fas fa-download text-xs" /></div>
+                        <span className="text-xs font-bold text-gray-700">Download.zip</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-red-400 w-2/3" />
+                      </div>
+                      <p className="text-[10px] text-red-500 mt-1 font-medium">Slow download...</p>
+                    </div>
+                    <div className="absolute bottom-10 left-4 -rotate-6 p-4 bg-white/60 border border-red-200 rounded-xl shadow-lg w-52 backdrop-blur-sm transform transition-transform group-hover:-rotate-3 group-hover:scale-105 duration-500">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-red-100 p-1.5 rounded-md text-red-500"><i className="fas fa-exclamation-triangle text-xs" /></div>
+                        <div>
+                          <span className="text-xs font-bold text-gray-700">Meta Error #401</span>
+                          <p className="text-[10px] text-gray-500">Upload failed. Try again.</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
+                      <div className="bg-red-500/10 border border-red-200 rounded-full p-6 backdrop-blur-md">
+                        <i className="fas fa-spinner fa-spin text-3xl text-red-500 opacity-70" />
+                      </div>
+                    </div>
+                    <div className="absolute top-20 left-10 -rotate-12 opacity-60">
+                      <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-[10px] text-red-600 font-mono">IMG_2024.jpg</div>
+                    </div>
+                    <div className="absolute bottom-20 right-8 rotate-6 opacity-60">
+                      <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-[10px] text-red-600 font-mono">Final_v2_REAL.mp4</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ARROW DIVIDER */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 hidden md:flex flex-col items-center justify-center">
+                <div className="bg-white p-2 rounded-full shadow-xl ring-4 ring-white/50" style={{ boxShadow: "0 4px 20px rgba(24,119,242,0.2)" }}>
+                  <i className="fas fa-arrow-right text-[#1877F2] text-xl" />
+                </div>
+              </div>
+
+              {/* NEW WORKFLOW */}
+              <div className="relative p-8 md:p-12 bg-gradient-to-br from-blue-50/40 to-white/40 group">
+                <div className="absolute inset-0 bg-blue-500/5 backdrop-blur-[1px] z-0" />
+                <div className="absolute -right-20 -top-20 w-64 h-64 bg-blue-400/20 rounded-full blur-3xl pointer-events-none" />
+                <div className="relative z-10 flex flex-col h-full">
+                  <div className="flex items-center gap-3 mb-10">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#1877F2] to-blue-500 text-white flex items-center justify-center shadow-lg" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.3)" }}>
+                      <i className="fas fa-bolt text-lg" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-800">Auto-ads Workflow</h3>
+                      <p className="text-xs text-[#1877F2] font-medium uppercase tracking-wide">Automated & Instant</p>
+                    </div>
+                  </div>
+                  <div className="relative flex-1 flex flex-col justify-center gap-4">
+                    {[
+                      { icon: "fab fa-google-drive", title: "Direct Drive Sync", desc: "Zero upload time. Files appear instantly." },
+                      { icon: "fas fa-shield-alt", title: "Auto-disable Protection", desc: "Blocks unwanted enhancements automatically." },
+                      { icon: "fas fa-list-ol", title: "Smart Organization", desc: "Filenames become ad names. 100% clarity." },
+                    ].map((item, idx) => (
+                      <div key={idx}>
+                        <div className="flex items-center gap-4 p-4 rounded-xl bg-white/70 border border-blue-100 shadow-lg backdrop-blur-md transform transition-all hover:scale-[1.02] hover:bg-white/90 cursor-default group/item" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.05)" }}>
+                          <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-blue-50 text-[#1877F2] flex items-center justify-center shadow-inner group-hover/item:scale-110 transition-transform">
+                            <i className={`${item.icon} text-xl`} />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-bold text-gray-900 text-sm">{item.title}</h4>
+                            <p className="text-xs text-gray-500 mt-0.5">{item.desc}</p>
+                          </div>
+                          <div className="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
+                            <i className="fas fa-check text-[10px]" />
+                          </div>
+                        </div>
+                        {idx < 2 && <div className="h-6 w-0.5 border-l-2 border-dashed border-blue-200 ml-10 opacity-50" />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* STATS CARD */}
+          <div className="mt-12 max-w-5xl mx-auto glass-heavy rounded-3xl p-8 shadow-2xl border border-white/40" style={{ boxShadow: "0 10px 40px rgba(24,119,242,0.1)" }}>
+            <div className="flex flex-col md:flex-row justify-between items-center gap-8">
+              <div className="text-center md:text-left">
+                <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                  Reduce your workflow from <br />
+                  <span className="text-red-500 line-through decoration-2 opacity-75">hours</span> to <span className="text-[#1877F2]">minutes</span>
+                </h3>
+                <p className="text-sm text-gray-500 mb-6">
+                  Join <span className="text-[#1877F2] font-bold">1,200+ advertisers</span> who've saved their precious time for higher ROI tasks.
+                </p>
+                <Link href="/login">
+                  <span className="bg-[#1877F2] hover:bg-[#1461c7] text-white px-6 py-3 rounded-full text-sm font-semibold transition-all inline-flex items-center gap-2 shadow-lg cursor-pointer transform hover:scale-105" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.25)" }} data-testid="button-get-started-benefits">
+                    Get Started <i className="fas fa-arrow-right" />
+                  </span>
+                </Link>
+                <p className="text-xs text-gray-400 mt-2"><i className="fas fa-check-circle text-green-500 mr-1" /> No credit card required</p>
+              </div>
+              <div className="grid grid-cols-2 gap-x-12 gap-y-8">
+                <div className="text-center md:text-left">
+                  <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="far fa-clock" /></div>
+                  <div className="text-3xl font-extrabold text-gray-900">13 <span className="text-lg font-medium text-gray-500">min</span></div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Avg time saved</div>
+                  <div className="text-[10px] text-gray-400">per ad launch</div>
+                </div>
+                <div className="text-center md:text-left">
+                  <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="fas fa-chart-line" /></div>
+                  <div className="text-3xl font-extrabold text-gray-900">88.2 <span className="text-lg font-medium text-gray-500">%</span></div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Time saved</div>
+                  <div className="text-[10px] text-gray-400">on average</div>
+                </div>
+                <div className="text-center md:text-left">
+                  <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="fas fa-users" /></div>
+                  <div className="text-3xl font-extrabold text-gray-900">1,200+</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Happy users</div>
+                  <div className="text-[10px] text-gray-400">and growing daily</div>
+                </div>
+                <div className="text-center md:text-left">
+                  <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="fas fa-star" /></div>
+                  <div className="text-3xl font-extrabold text-gray-900">4.8</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Out of 5 stars</div>
+                  <div className="text-[10px] text-gray-400">on average</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section className="py-24 relative z-10" id="how-it-works">
+        <div className="absolute inset-0 bg-white/30 backdrop-blur-3xl -z-10" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-20">
+            <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
+              Simple process
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4">
+              How <span className="text-[#1877F2]">Auto-ads</span> works
+            </h2>
+            <p className="text-lg text-gray-500">
+              Three simple steps to save you 100's of hours every month.
+            </p>
+          </div>
+          <div className="relative max-w-5xl mx-auto">
+            <div className="hidden md:block absolute top-[3.5rem] left-[15%] right-[15%] h-[2px] z-0" style={{ background: "repeating-linear-gradient(90deg, #1877F2 0, #1877F2 8px, transparent 8px, transparent 16px)" }} />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-12 relative z-10">
+              {[
+                { icon: "fab fa-google-drive", title: "Get Started", desc: "Authorize your Google Drive account safely with one click.", step: 1 },
+                { icon: "far fa-folder-open", title: "Select your folder", desc: "Choose the folder containing your ad creatives. We detect new files automatically.", step: 2 },
+                { icon: "fas fa-rocket", title: "Auto-launch to Meta", desc: "Hit publish and watch your Drive files turn into live Meta Ads instantly.", step: 3 },
+              ].map((item, index) => (
+                <div key={index} className="text-center group flex flex-col items-center" data-testid={`card-how-it-works-${index}`}>
+                  <div className="relative mb-10">
+                    <div className="w-28 h-28 bg-white rounded-full flex items-center justify-center text-[#1877F2] text-4xl shadow-xl ring-[12px] ring-blue-50/80 group-hover:scale-110 transition-transform duration-300 relative z-20">
+                      <i className={item.icon} />
+                    </div>
+                    <div className="absolute -top-3 -right-3 w-10 h-10 bg-[#1877F2] rounded-full border-4 border-white flex items-center justify-center text-lg font-bold shadow-lg text-white z-30">
+                      {item.step}
+                    </div>
+                    {index < 2 && (
+                      <div className="hidden md:flex absolute top-1/2 -right-8 transform -translate-y-1/2 z-10">
+                        <i className="fas fa-chevron-right text-[#1877F2] opacity-30 text-xl" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="glass-card p-6 rounded-2xl w-full max-w-[280px]">
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">{item.title}</h3>
+                    <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* PRICING */}
+      <section className="py-24 relative z-10" id="pricing">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
+              Pricing Plans
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4">
+              Plans & <span className="text-[#1877F2]">pricing</span>
+            </h2>
+            <p className="text-lg text-gray-500 mb-8">
+              Choose the plan that fits your needs. No hidden fees, no commitments.
+            </p>
+            <div className="flex justify-center items-center gap-4 mb-8">
+              <span className="text-sm font-semibold text-gray-900">Monthly</span>
+              <button className="w-12 h-6 bg-[#1877F2] rounded-full relative focus:outline-none shadow-md">
+                <span className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform shadow-sm" />
+              </button>
+              <span className="text-sm font-medium text-gray-500">Yearly <span className="text-[#1877F2] text-xs ml-1 font-bold">(-20%)</span></span>
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+            {/* FREE */}
+            <div className="glass-card rounded-3xl p-8 border-t-4 border-t-gray-200 hover:border-t-[#1877F2]/50 transition-colors" data-testid="card-pricing-free">
+              <h3 className="text-xl font-bold text-gray-900">Free plan</h3>
+              <p className="text-sm text-gray-500 mt-2 mb-6">Try Auto-ads risk-free</p>
+              <div className="flex items-baseline mb-6">
+                <span className="text-4xl font-extrabold text-gray-900">$0</span>
+                <span className="text-gray-500 ml-2">/forever</span>
+              </div>
+              <p className="text-xs text-gray-500 mb-6">No credit card required</p>
+              <Link href="/login">
+                <span className="block w-full py-3 px-4 bg-white/50 border border-[#1877F2]/20 text-[#1877F2] font-bold text-center rounded-xl hover:bg-[#1877F2] hover:text-white transition-all mb-8 shadow-sm backdrop-blur-sm cursor-pointer" data-testid="button-try-free-pricing">
+                  Try it now for free
+                </span>
+              </Link>
+              <ul className="space-y-4 text-sm">
+                {freePlanFeatures.map((feature, index) => (
+                  <li key={index} className="flex items-center text-gray-700">
+                    <i className="fas fa-check text-[#1877F2] mr-3 text-xs" /> {feature}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {/* PAID */}
+            <div className="glass-heavy rounded-3xl p-8 border-2 border-[#1877F2] relative shadow-2xl transform hover:-translate-y-2 transition-transform duration-300" style={{ boxShadow: "0 10px 40px rgba(24,119,242,0.2)" }} data-testid="card-pricing-paid">
+              <div className="absolute top-0 right-0 bg-[#1877F2] text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-xl shadow-lg">Most popular</div>
+              <h3 className="text-xl font-bold text-gray-900">Rapid launch</h3>
+              <p className="text-sm text-gray-500 mt-2 mb-6">Perfect for scaling agencies</p>
+              <div className="flex items-baseline mb-6">
+                <span className="text-4xl font-extrabold text-gray-900">$39</span>
+                <span className="text-gray-500 ml-2">/month</span>
+              </div>
+              <p className="text-xs text-[#1877F2] mb-6 font-semibold">Unlimited Drive syncing + ad accounts</p>
+              <Link href="/login">
+                <span className="block w-full py-3 px-4 bg-gradient-to-r from-[#1877F2] to-blue-600 text-white font-bold text-center rounded-xl hover:shadow-lg transition-all mb-8 shadow-md cursor-pointer" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.4)" }} data-testid="button-get-started-pricing">
+                  Get Started
+                </span>
+              </Link>
+              <ul className="space-y-4 text-sm">
+                {paidPlanFeatures.map((feature, index) => (
+                  <li key={index} className="flex items-center text-gray-700">
+                    <i className="fas fa-check text-[#1877F2] mr-3 text-xs" /> {feature}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <p className="text-center text-xs text-gray-400 mt-8">All plans include 24/7 support and a 14-day money-back guarantee</p>
+        </div>
+      </section>
+
+      {/* TESTIMONIALS */}
+      <section className="py-24 relative z-10 overflow-hidden" id="testimonials">
+        <div className="absolute inset-0 bg-white/30 backdrop-blur-[48px] -z-10" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50">
+              Wall of love
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4">
+              Loved by <span className="text-[#1877F2]">media buyers</span>
+            </h2>
+            <p className="text-lg text-gray-500">
+              Don't just take our word for it. See what advertisers have to say about Auto-ads.
+            </p>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative overflow-hidden pb-4">
+          <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-white via-white/90 to-transparent z-10 pointer-events-none" />
+          <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-white via-white/90 to-transparent z-10 pointer-events-none" />
+          <div className="flex animate-slide-testimonials hover:[animation-play-state:paused]" data-testid="testimonials-slider">
+            {[...testimonials, ...testimonials].map((t, idx) => (
+              <div key={idx} className="flex-shrink-0 w-[340px] mx-3" data-testid={`card-testimonial-${idx % testimonials.length}`}>
+                <div className="glass-card p-6 rounded-2xl h-full">
+                  <div className="flex text-yellow-400 text-xs mb-3 space-x-0.5">
+                    <i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" />
+                  </div>
+                  <p className="text-sm text-gray-700 mb-4 leading-relaxed font-medium">
+                    "{t.quote}"
+                  </p>
+                  <div className="flex items-center gap-3 pt-4 border-t border-gray-100/50">
+                    <img alt={t.author} className="w-10 h-10 rounded-full ring-2 ring-white object-cover" src={t.img} />
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900">{t.author}</h4>
+                      <p className="text-xs text-gray-500">{t.role}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="py-24 relative z-10" id="faq">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50">
+              Questions Answered
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4">
+              <span className="text-[#1877F2]">Frequently</span> asked questions
+            </h2>
+            <p className="text-lg text-gray-500">
+              Everything you need to know about Auto-ads. Can't find what you're looking for? Reach out to our support team.
+            </p>
+          </div>
+          <div className="space-y-4">
+            {faqItems.map((faq, index) => (
+              <details key={index} className="group glass-card rounded-xl" data-testid={`faq-item-${index}`}>
+                <summary className="flex justify-between items-center font-medium cursor-pointer list-none p-5 text-gray-900 hover:bg-white/30 transition-colors">
+                  <span>{faq.q}</span>
+                  <span className="transition group-open:rotate-180">
+                    <i className="fas fa-chevron-down text-gray-400 text-sm" />
+                  </span>
+                </summary>
+                <div className="text-gray-500 mt-0 px-5 pb-5 text-sm leading-relaxed border-t border-gray-100/50 pt-4">
+                  {faq.a}
+                </div>
+              </details>
+            ))}
+          </div>
+          <div className="mt-12 glass-heavy rounded-2xl p-8 text-center shadow-lg border border-white/40">
+            <h4 className="font-bold text-gray-900 mb-2">Still have questions?</h4>
+            <p className="text-sm text-gray-500 mb-6">Our support team is here to help, send us an email. We typically respond within 2 hours.</p>
+            <div className="flex justify-center flex-wrap gap-4">
+              <a href="mailto:info@flowgens.com" className="bg-[#1877F2] hover:bg-[#1461c7] text-white px-5 py-2.5 rounded-full text-sm font-medium transition-all shadow-lg" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.3)" }} data-testid="link-contact-support">
+                Contact Support
+              </a>
+              <a href="#how-it-works" onClick={(e) => handleSmoothScroll(e, "how-it-works")} className="text-gray-700 hover:text-[#1877F2] px-5 py-2.5 rounded-full text-sm font-medium transition-colors border border-gray-300 bg-white/50 hover:bg-white/80" data-testid="button-watch-demo-faq">
+                Watch demo <i className="fas fa-play text-xs ml-1" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* FINAL CTA */}
+      <section className="py-24 relative z-10 border-t border-white/10 overflow-hidden">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+          <h2 className="text-4xl sm:text-5xl font-extrabold text-gray-900 mb-6 drop-shadow-sm">
+            Join the advertising <span className="text-[#1877F2]">revolution</span>
+          </h2>
+          <p className="text-lg text-gray-500 mb-10 max-w-2xl mx-auto">
+            Stop <span className="text-red-500 font-medium line-through">wasting precious hours</span> on manual uploads. Sync your Google Drive and save time.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link href="/login">
+              <span className="bg-gradient-to-r from-[#1877F2] to-blue-600 hover:to-blue-700 text-white px-8 py-4 rounded-full text-base font-semibold transition-all shadow-xl hover:scale-105 cursor-pointer inline-block" style={{ boxShadow: "0 10px 25px rgba(37,99,235,0.3)" }} data-testid="button-try-free-cta">
+                Get Started
+              </span>
+            </Link>
+            <a href="#pricing" onClick={(e) => handleSmoothScroll(e, "pricing")} className="glass-heavy hover:bg-white/90 text-gray-900 px-8 py-4 rounded-full text-base font-semibold transition-all shadow-md hover:scale-105 inline-block" data-testid="button-view-pricing">
+              View pricing
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="glass-heavy pt-16 pb-8 border-t border-white/20 relative z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+            <div className="col-span-2 md:col-span-1">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="bg-gradient-to-br from-[#1877F2] to-blue-600 text-white p-1 rounded shadow-md" style={{ border: "1px solid rgba(255,255,255,0.2)" }}>
+                  <i className="fas fa-sync-alt text-sm" />
+                </div>
+                <span className="font-bold text-lg text-gray-900">Auto-ads</span>
+              </div>
+              <p className="text-sm text-gray-500 mb-4 leading-relaxed">
+                The fastest way to upload ad creatives to Meta. Transform your advertising workflow in minutes, not hours.
+              </p>
+              <a href="mailto:info@flowgens.com" className="text-sm text-gray-500 hover:text-[#1877F2] transition-colors flex items-center gap-2" data-testid="link-footer-email">
+                <i className="far fa-envelope" /> info@flowgens.com
+              </a>
+            </div>
+            <div>
+              <h4 className="font-bold text-gray-900 mb-4">Navigation</h4>
+              <ul className="space-y-2 text-sm text-gray-500">
+                {["Features", "Benefits", "How It Works", "Pricing", "Testimonials", "FAQ"].map((item) => (
+                  <li key={item}>
+                    <a
+                      href={`#${item.toLowerCase().replace(/\s+/g, "-")}`}
+                      onClick={(e) => handleSmoothScroll(e, item.toLowerCase().replace(/\s+/g, "-"))}
+                      className="hover:text-[#1877F2] transition-colors"
+                    >
+                      {item}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-bold text-gray-900 mb-4">Legal</h4>
+              <ul className="space-y-2 text-sm text-gray-500">
+                <li><Link href="/terms" className="hover:text-[#1877F2] transition-colors">Terms of Service</Link></li>
+                <li><Link href="/privacy-policy" className="hover:text-[#1877F2] transition-colors">Privacy Policy</Link></li>
+                <li><Link href="/data-deletion" className="hover:text-[#1877F2] transition-colors">Data Deletion</Link></li>
+              </ul>
+            </div>
+            <div />
+          </div>
+          <div className="border-t border-gray-200/50 pt-8 flex flex-col md:flex-row justify-between items-center text-xs text-gray-400">
+            <p>2025 Auto-ads. All rights reserved.</p>
+            <a href="#" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="mt-2 md:mt-0 hover:text-[#1877F2] transition-colors cursor-pointer">
+              Back to top <i className="fas fa-arrow-up ml-1" />
+            </a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}

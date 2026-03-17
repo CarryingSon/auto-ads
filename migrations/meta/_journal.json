@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1767712833216,
+      "tag": "0000_abandoned_thunderbolts",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1770666571526,
+      "tag": "0001_melted_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773756900000,
+      "tag": "0002_vercel_queue",
+      "breakpoints": true
+    }
+  ]
+}
