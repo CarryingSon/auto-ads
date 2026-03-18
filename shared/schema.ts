@@ -877,4 +877,4 @@ export type InsertBillingPayment = z.infer<typeof insertBillingPaymentSchema>;
 export type BillingPayment = typeof billingPayments.$inferSelect;
 
 // Re-export chat models
-export * from "./models/chat";
+export * from "./models/chat.js";
