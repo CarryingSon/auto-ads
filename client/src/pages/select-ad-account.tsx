@@ -2,7 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Loader2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 interface AdAccount {
   id: string;
@@ -14,7 +14,7 @@ export default function SelectAdAccount() {
   const [, setLocation] = useLocation();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const { data: pendingAccounts, isLoading } = useQuery<{
+  const { data: pendingAccounts, isLoading, isError } = useQuery<{
     accounts: AdAccount[];
   }>({
     queryKey: ["/api/meta/pending-ad-accounts"],
@@ -71,21 +71,75 @@ export default function SelectAdAccount() {
     return { text: "UNKNOWN", classes: "bg-slate-100 text-slate-500 border border-slate-200/60" };
   };
 
-  useEffect(() => {
-    if (!isLoading && accounts.length === 0) {
-      window.location.href = "/auth/meta/start";
-    }
-  }, [isLoading, accounts.length]);
-
-  if (isLoading || accounts.length === 0) {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={{ background: "linear-gradient(160deg, #e8f0fe 0%, #f5f8ff 25%, #ffffff 60%, #ffffff 100%)" }}>
         <div className="absolute top-[-15%] left-[-10%] w-[50vw] h-[50vw] rounded-full" style={{ background: "radial-gradient(circle, rgba(24,119,242,0.08) 0%, transparent 70%)", filter: "blur(80px)" }} />
         <div className="absolute bottom-[-20%] right-[-10%] w-[40vw] h-[40vw] rounded-full" style={{ background: "radial-gradient(circle, rgba(147,197,253,0.1) 0%, transparent 70%)", filter: "blur(80px)" }} />
         <div className="text-center space-y-4 relative z-10">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-[#1877F2]" />
-          <p className="text-slate-500 font-medium">{isLoading ? "Loading ad accounts..." : "Reconnecting to Meta..."}</p>
+          <p className="text-slate-500 font-medium">Loading ad accounts...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden" style={{ background: "linear-gradient(160deg, #e8f0fe 0%, #f5f8ff 25%, #ffffff 60%, #ffffff 100%)" }}>
+        <main className="w-full max-w-lg relative z-10">
+          <div className="rounded-3xl p-8 flex flex-col gap-4 text-center" style={{ background: "rgba(255,255,255,0.65)", backdropFilter: "blur(24px) saturate(180%)", WebkitBackdropFilter: "blur(24px) saturate(180%)", border: "1px solid rgba(255,255,255,0.8)", boxShadow: "0 8px 32px rgba(24,119,242,0.06)" }}>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Meta reconnect failed</h1>
+            <p className="text-slate-500 text-sm leading-relaxed">
+              Authentication finished, but we could not load your pending ad accounts. This is usually a session/redirect mismatch.
+            </p>
+            <button
+              onClick={() => { window.location.href = "/auth/meta/start"; }}
+              className="w-full py-3 rounded-2xl text-white font-bold"
+              style={{ background: "#1877F2", boxShadow: "0 4px 20px rgba(24,119,242,0.35)" }}
+              data-testid="button-reconnect-meta-from-select"
+            >
+              Reconnect Meta
+            </button>
+            <button
+              onClick={() => setLocation("/connections")}
+              className="w-full py-3 rounded-2xl font-semibold border border-slate-200 text-slate-700 bg-white/80"
+              data-testid="button-back-connections-from-select"
+            >
+              Back to Connections
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden" style={{ background: "linear-gradient(160deg, #e8f0fe 0%, #f5f8ff 25%, #ffffff 60%, #ffffff 100%)" }}>
+        <main className="w-full max-w-lg relative z-10">
+          <div className="rounded-3xl p-8 flex flex-col gap-4 text-center" style={{ background: "rgba(255,255,255,0.65)", backdropFilter: "blur(24px) saturate(180%)", WebkitBackdropFilter: "blur(24px) saturate(180%)", border: "1px solid rgba(255,255,255,0.8)", boxShadow: "0 8px 32px rgba(24,119,242,0.06)" }}>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">No ad accounts found</h1>
+            <p className="text-slate-500 text-sm leading-relaxed">
+              Meta did not return any ad accounts for this reconnect. You can try reconnecting or go back to Connections.
+            </p>
+            <button
+              onClick={() => { window.location.href = "/auth/meta/start"; }}
+              className="w-full py-3 rounded-2xl text-white font-bold"
+              style={{ background: "#1877F2", boxShadow: "0 4px 20px rgba(24,119,242,0.35)" }}
+              data-testid="button-reconnect-meta-empty-select"
+            >
+              Reconnect Meta
+            </button>
+            <button
+              onClick={() => setLocation("/connections")}
+              className="w-full py-3 rounded-2xl font-semibold border border-slate-200 text-slate-700 bg-white/80"
+              data-testid="button-back-connections-empty-select"
+            >
+              Back to Connections
+            </button>
+          </div>
+        </main>
       </div>
     );
   }

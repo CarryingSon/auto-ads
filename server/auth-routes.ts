@@ -463,8 +463,8 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         return res.send(popupResponse("oauth-success", null, "/select-ad-account"));
       }
       
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      res.redirect(`${baseUrl}/select-ad-account`);
+      // Keep redirect relative so we stay on the same origin even behind proxies/CDNs.
+      res.redirect("/select-ad-account");
     });
     
   } catch (err) {
