@@ -86,7 +86,7 @@ const META_APP_SECRET = process.env.META_APP_SECRET || "";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 
-const DEFAULT_APP_BASE_URL = "https://auto-ads.vercel.app";
+const DEFAULT_APP_BASE_URL = "https://auto-ads-ebon.vercel.app";
 const APP_BASE_URL_RAW = process.env.APP_BASE_URL || DEFAULT_APP_BASE_URL;
 const APP_BASE_URL = APP_BASE_URL_RAW.replace(/\/+$/, "");
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
