@@ -21,6 +21,14 @@ const VALID_CTAS = new Set([
   "DOWNLOAD", "GET_OFFER", "BOOK_NOW", "WATCH_MORE", "APPLY_NOW"
 ]);
 
+function formatOpenAIError(error: any): string {
+  const status = error?.status ?? "n/a";
+  const code = error?.code ?? "n/a";
+  const type = error?.type ?? "n/a";
+  const message = error?.message ?? String(error);
+  return `OpenAI error [status=${status} code=${code} type=${type}]: ${message}`;
+}
+
 function decodeXmlEntities(text: string): string {
   return text
     .replace(/&amp;/g, "&")
@@ -216,8 +224,13 @@ export async function parseDocxDeterministic(buffer: Buffer): Promise<{
 }
 
 export async function parseDocxWithAI(rawText: string): Promise<ExtractedAdData[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is missing in server runtime");
+  }
+
   const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey,
   });
 
   const systemPrompt = `You are a document parser that extracts ad copy from DOCX text content. 
@@ -263,19 +276,28 @@ ${rawText}`;
       ],
     });
   } catch (modelError: any) {
-    if (modelError?.status === 404 || modelError?.status === 401 || 
-        modelError?.message?.includes("model") || modelError?.code === "model_not_found") {
+    const message = String(modelError?.message || "");
+    const modelUnavailable =
+      modelError?.status === 404 ||
+      modelError?.code === "model_not_found" ||
+      /model/i.test(message);
+
+    if (modelUnavailable) {
       console.log("[DOCX Parser] Model gpt-5-mini ni na voljo, uporabljam gpt-4o-mini");
-      response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        max_tokens: 4096,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-      });
+      try {
+        response = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          max_tokens: 4096,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+        });
+      } catch (fallbackError: any) {
+        throw new Error(`Fallback model failed. ${formatOpenAIError(fallbackError)}`);
+      }
     } else {
-      throw modelError;
+      throw new Error(formatOpenAIError(modelError));
     }
   }
 
@@ -309,6 +331,7 @@ export async function parseDocx(buffer: Buffer): Promise<{
   rawText: string;
   ads: ExtractedAdData[];
   method: "deterministic" | "ai";
+  aiError?: string;
 }> {
   const deterministicResult = await parseDocxDeterministic(buffer);
 
@@ -341,6 +364,7 @@ export async function parseDocx(buffer: Buffer): Promise<{
         rawText: deterministicResult.rawText,
         ads: fallbackAds,
         method: "deterministic",
+        aiError: undefined,
       };
     } else {
       console.log(`[DOCX Parser] DCT fallback: ${dctBlocks.length} blokov najdenih, ${validBlocks.length} z obema obveznima poljema (primary + headline)`);
@@ -356,14 +380,17 @@ export async function parseDocx(buffer: Buffer): Promise<{
       rawText: deterministicResult.rawText,
       ads: aiAds,
       method: "ai",
+      aiError: undefined,
     };
   } catch (error) {
-    console.error("[DOCX Parser] ChatGPT parsanje ni uspelo:", error);
+    const aiError = formatOpenAIError(error);
+    console.error("[DOCX Parser] ChatGPT parsanje ni uspelo:", aiError);
     console.log(`[DOCX Parser] Vračam prazen rezultat — noben parser ni uspel`);
     return {
       rawText: deterministicResult.rawText,
       ads: deterministicResult.ads,
       method: "deterministic",
+      aiError,
     };
   }
 }

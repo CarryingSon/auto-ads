@@ -2964,7 +2964,14 @@ export async function registerRoutes(
         if (ad.description) descriptions.push(ad.description);
       }
 
-      res.json({ primaryTexts, headlines, descriptions, adCount: result.ads.length, method: result.method });
+      res.json({
+        primaryTexts,
+        headlines,
+        descriptions,
+        adCount: result.ads.length,
+        method: result.method,
+        aiError: result.aiError ?? null,
+      });
     } catch (error) {
       console.error("Error parsing DOCX:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to parse DOCX" });
