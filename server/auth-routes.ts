@@ -86,42 +86,13 @@ const META_APP_SECRET = process.env.META_APP_SECRET || "";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 
-const APP_BASE_URL_RAW = process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || "";
-const APP_BASE_URL = APP_BASE_URL_RAW ? APP_BASE_URL_RAW.replace(/\/+$/, "") : "";
+const DEFAULT_APP_BASE_URL = "https://auto-ads.vercel.app";
+const APP_BASE_URL_RAW = process.env.APP_BASE_URL || DEFAULT_APP_BASE_URL;
+const APP_BASE_URL = APP_BASE_URL_RAW.replace(/\/+$/, "");
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
-function getBaseUrl(req: Request): string {
-  const protocol = req.headers["x-forwarded-proto"] || "https";
-  const host = req.headers.host || "localhost:5000";
-  return `${protocol}://${host}`;
-}
-
-function getOAuthBaseUrl(req: Request): string {
-  const requestBaseUrl = getBaseUrl(req);
-  if (!APP_BASE_URL) {
-    return requestBaseUrl;
-  }
-
-  try {
-    const requestHost = (req.headers.host || "").toLowerCase();
-    const configuredHost = new URL(APP_BASE_URL).host.toLowerCase();
-    if (requestHost && configuredHost !== requestHost) {
-      console.warn(
-        `[OAuth] APP_BASE_URL host (${configuredHost}) does not match request host (${requestHost}); using request host.`,
-      );
-      return requestBaseUrl;
-    }
-  } catch (err) {
-    console.warn("[OAuth] Invalid APP_BASE_URL, falling back to request host:", err);
-    return requestBaseUrl;
-  }
-
-  return APP_BASE_URL;
-}
-
-function getMetaRedirectUri(req: Request): string {
-  const baseUrl = getOAuthBaseUrl(req);
-  return `${baseUrl}/auth/meta/callback`;
+function getMetaRedirectUri(): string {
+  return `${APP_BASE_URL}/auth/meta/callback`;
 }
 
 // ============ META OAUTH ============
@@ -161,8 +132,8 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     // Clean up expired states
     await db.delete(oauthStates).where(lt(oauthStates.expiresAt, new Date()));
     
-    // Use dynamic redirect URI based on current domain
-    const redirectUri = getMetaRedirectUri(req);
+    // Always use canonical app domain for OAuth redirect URI
+    const redirectUri = getMetaRedirectUri();
     
     // Build scope from FIXED ARRAY - never copy from text/UI
     // Required scopes for Meta Ads with Instagram placement:
@@ -261,7 +232,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       return res.redirect("/connections?meta=error&message=No+code+received");
     }
 
-    const redirectUri = getMetaRedirectUri(req);
+    const redirectUri = getMetaRedirectUri();
     
     const tokenUrl = new URL(`https://graph.facebook.com/${META_API_VERSION}/oauth/access_token`);
     tokenUrl.searchParams.set("client_id", META_APP_ID);
@@ -623,7 +594,7 @@ router.get("/google/start", (req: Request, res: Response) => {
   const state = crypto.randomBytes(32).toString('hex');
   (req.session as any).googleOauthState = state;
   
-  const baseUrl = getOAuthBaseUrl(req);
+  const baseUrl = APP_BASE_URL;
   const redirectUri = `${baseUrl}/auth/google/callback`;
   
   const scopes = [
@@ -665,7 +636,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
   }
   
   try {
-    const baseUrl = getOAuthBaseUrl(req);
+    const baseUrl = APP_BASE_URL;
     const redirectUri = `${baseUrl}/auth/google/callback`;
     
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
