@@ -4313,6 +4313,11 @@ export async function registerRoutes(
     try {
       const userId = (req.session as any)?.userId;
       if (!userId) {
+        console.warn("[MetaOAuth][pending-ad-accounts] Not authenticated", {
+          sessionId: req.sessionID?.substring(0, 8) || null,
+          host: req.get("host") || null,
+          referer: req.get("referer") || null,
+        });
         return res.status(401).json({ error: "Not authenticated" });
       }
 
@@ -4322,13 +4327,22 @@ export async function registerRoutes(
         .limit(1);
 
       if (assets.length === 0) {
+        console.log("[MetaOAuth][pending-ad-accounts] No meta_assets row", { userId });
         return res.json({ accounts: [] });
       }
 
       const pendingAccounts = (assets[0] as any).pendingAdAccountsJson || [];
+      console.log("[MetaOAuth][pending-ad-accounts] Returning pending accounts", {
+        userId,
+        count: pendingAccounts.length,
+        selectedAdAccountId: assets[0].selectedAdAccountId || null,
+      });
       res.json({ accounts: pendingAccounts });
     } catch (error: any) {
-      console.error("Error fetching pending ad accounts:", error);
+      console.error("[MetaOAuth][pending-ad-accounts] Failed", {
+        error: error?.message || String(error),
+        stack: error?.stack || null,
+      });
       res.status(500).json({ error: error.message || "Failed to fetch pending ad accounts" });
     }
   });
@@ -4338,12 +4352,21 @@ export async function registerRoutes(
     try {
       const userId = (req.session as any)?.userId;
       if (!userId) {
+        console.warn("[MetaOAuth][confirm-ad-account] Not authenticated", {
+          sessionId: req.sessionID?.substring(0, 8) || null,
+          host: req.get("host") || null,
+          referer: req.get("referer") || null,
+        });
         return res.status(401).json({ error: "Not authenticated" });
       }
 
       // Support both single adAccountId and array of adAccountIds
       const { adAccountId, adAccountIds } = req.body;
       const idsToSelect = adAccountIds || (adAccountId ? [adAccountId] : []);
+      console.log("[MetaOAuth][confirm-ad-account] Request received", {
+        userId,
+        requestedCount: idsToSelect?.length || 0,
+      });
       
       if (!idsToSelect || idsToSelect.length === 0) {
         return res.status(400).json({ error: "At least one adAccountId is required" });
@@ -4362,6 +4385,11 @@ export async function registerRoutes(
       const selectedAccounts = pendingAccounts.filter((acc: any) => idsToSelect.includes(acc.id));
 
       if (selectedAccounts.length === 0) {
+        console.warn("[MetaOAuth][confirm-ad-account] No requested IDs matched pending list", {
+          userId,
+          requestedCount: idsToSelect.length,
+          pendingCount: pendingAccounts.length,
+        });
         return res.status(400).json({ error: "No valid accounts found in pending list" });
       }
 
@@ -4376,9 +4404,17 @@ export async function registerRoutes(
         })
         .where(eq(metaAssets.userId, userId));
 
+      console.log("[MetaOAuth][confirm-ad-account] Selection saved", {
+        userId,
+        savedCount: selectedAccounts.length,
+        selectedAdAccountId: primarySelectedId,
+      });
       res.json({ success: true, selectedAdAccountId: primarySelectedId, adAccounts: selectedAccounts, savedCount: selectedAccounts.length });
     } catch (error: any) {
-      console.error("Error confirming ad account:", error);
+      console.error("[MetaOAuth][confirm-ad-account] Failed", {
+        error: error?.message || String(error),
+        stack: error?.stack || null,
+      });
       res.status(500).json({ error: error.message || "Failed to confirm ad account" });
     }
   });

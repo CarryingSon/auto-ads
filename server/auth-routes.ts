@@ -97,28 +97,76 @@ function getMetaRedirectUri(): string {
 
 // ============ META OAUTH ============
 
-function popupResponse(type: string, error?: string | null, redirect?: string): string {
+function popupResponse(type: string, error?: string | null, redirect?: string, traceId?: string): string {
   const msg: Record<string, string> = { type };
   if (error) msg.error = error;
   if (redirect) msg.redirect = redirect;
+  if (traceId) msg.traceId = traceId;
   return `<!DOCTYPE html><html><body><script>
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage(${JSON.stringify(msg)}, window.location.origin);
     }
     window.close();
-  </script><p>Login complete. You can close this window.</p></body></html>`;
+  </script><p>${type === "oauth-error" ? "Connection failed." : "Login complete."}${traceId ? ` Trace: ${traceId}` : ""} You can close this window.</p></body></html>`;
 }
 
 const META_API_VERSION = process.env.META_API_VERSION || "v20.0";
 
+function createMetaTraceId(seed?: string | null): string {
+  const sanitized = (seed || "").replace(/[^a-zA-Z0-9]/g, "");
+  if (sanitized.length >= 8) return sanitized.substring(0, 8);
+  return crypto.randomBytes(4).toString("hex");
+}
+
+function maskValue(value?: string | null, keepStart = 12): string {
+  if (!value) return "none";
+  if (value.length <= keepStart) return value;
+  return `${value.substring(0, keepStart)}...`;
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+function metaLog(traceId: string, message: string, details?: Record<string, unknown>) {
+  if (details) {
+    console.log(`[MetaOAuth][${traceId}] ${message}`, details);
+    return;
+  }
+  console.log(`[MetaOAuth][${traceId}] ${message}`);
+}
+
+function metaErrorRedirect(message: string, traceId: string): string {
+  return `/connections?meta=error&trace=${encodeURIComponent(traceId)}&message=${encodeURIComponent(message)}`;
+}
+
+function sendMetaOauthError(res: Response, isPopup: boolean, message: string, traceId: string) {
+  if (isPopup) {
+    return res.send(popupResponse("oauth-error", message, undefined, traceId));
+  }
+  return res.redirect(metaErrorRedirect(message, traceId));
+}
+
 router.get("/meta/start", async (req: Request, res: Response) => {
+  let traceId = createMetaTraceId();
   try {
     const state = crypto.randomBytes(32).toString('hex');
+    traceId = createMetaTraceId(state);
     // For Meta login, we don't have a userId yet - we'll get it from the callback
     // Store a placeholder that will be replaced with the real Meta user ID after login
     const pendingUserId = "pending_" + crypto.randomBytes(16).toString('hex');
     
     const isPopup = req.query.popup === "1";
+    metaLog(traceId, "START request received", {
+      isPopup,
+      host: req.get("host") || null,
+      xForwardedProto: req.get("x-forwarded-proto") || null,
+      origin: req.get("origin") || null,
+      referer: req.get("referer") || null,
+      appBaseUrl: APP_BASE_URL,
+      apiVersion: META_API_VERSION,
+    });
     
     // Store state in DATABASE instead of session (fixes cross-domain issue)
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -131,6 +179,12 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     
     // Clean up expired states
     await db.delete(oauthStates).where(lt(oauthStates.expiresAt, new Date()));
+    metaLog(traceId, "State stored in oauth_states", {
+      statePrefix: maskValue(state),
+      popupStatePrefix: isPopup ? maskValue(`popup:${state}`) : null,
+      expiresAt: expiresAt.toISOString(),
+      pendingUserId,
+    });
     
     // Always use canonical app domain for OAuth redirect URI
     const redirectUri = getMetaRedirectUri();
@@ -146,12 +200,6 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     const scopeArray = ["public_profile", "pages_show_list", "pages_read_engagement", "pages_manage_metadata", "instagram_basic", "ads_management", "ads_read"];
     const scopeRaw = scopeArray.join(",");
     
-    console.log("=== META OAUTH START ===");
-    console.log("State saved to DB:", state.substring(0, 16) + "...");
-    console.log("pendingUserId:", pendingUserId);
-    console.log("redirect_uri:", redirectUri);
-    console.log("scope:", scopeRaw);
-    
     // Build OAuth URL
     const oauthUrl = new URL(`https://www.facebook.com/${META_API_VERSION}/dialog/oauth`);
     oauthUrl.searchParams.set("client_id", META_APP_ID);
@@ -160,99 +208,155 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     oauthUrl.searchParams.set("scope", scopeRaw);
     oauthUrl.searchParams.set("response_type", "code");
     
-    console.log("Redirecting to:", oauthUrl.toString());
-    console.log("========================");
+    metaLog(traceId, "Redirecting to Facebook OAuth dialog", {
+      redirectUri,
+      scope: scopeRaw,
+      hasClientId: Boolean(META_APP_ID),
+      isPopup,
+      reminder: "If Facebook shows redirect_uri error, verify this exact redirectUri in Valid OAuth Redirect URIs.",
+    });
     
     res.redirect(oauthUrl.toString());
   } catch (err) {
-    console.error("Meta OAuth start error:", err);
-    res.redirect("/connections?meta=error&message=Failed+to+start+OAuth");
+    metaLog(traceId, "START failed", {
+      error: getErrorMessage(err),
+      stack: err instanceof Error ? err.stack || null : null,
+    });
+    res.redirect(metaErrorRedirect("Failed to start OAuth", traceId));
   }
 });
 
 router.get("/meta/callback", async (req: Request, res: Response) => {
-  const { code, state, error, error_description } = req.query;
+  const rawCode = Array.isArray(req.query.code) ? req.query.code[0] : req.query.code;
+  const rawState = Array.isArray(req.query.state) ? req.query.state[0] : req.query.state;
+  const rawError = Array.isArray(req.query.error) ? req.query.error[0] : req.query.error;
+  const rawErrorDescription = Array.isArray(req.query.error_description) ? req.query.error_description[0] : req.query.error_description;
+
+  const code = rawCode ? String(rawCode) : null;
+  const state = rawState ? String(rawState) : null;
+  const error = rawError ? String(rawError) : null;
+  const errorDescription = rawErrorDescription ? String(rawErrorDescription) : null;
   let isPopup = false;
+  const traceId = createMetaTraceId(state);
   
-  console.log("=== META OAUTH CALLBACK ===");
-  console.log("Received state:", state ? String(state).substring(0, 16) + "..." : "none");
-  console.log("Has code:", !!code);
-  console.log("Error:", error || "none");
+  metaLog(traceId, "CALLBACK request received", {
+    statePrefix: maskValue(state),
+    hasCode: Boolean(code),
+    error,
+    errorDescription,
+    host: req.get("host") || null,
+    xForwardedProto: req.get("x-forwarded-proto") || null,
+    origin: req.get("origin") || null,
+    referer: req.get("referer") || null,
+    userAgent: req.get("user-agent") || null,
+    appBaseUrl: APP_BASE_URL,
+  });
 
   try {
+    // Best effort lookup for popup mode and state validity (also useful when callback has error params)
+    let savedState: any | undefined;
+    if (state) {
+      const savedStates = await db.select()
+        .from(oauthStates)
+        .where(and(
+          eq(oauthStates.provider, "meta"),
+          or(
+            eq(oauthStates.state, state),
+            eq(oauthStates.state, `popup:${state}`)
+          )
+        ))
+        .limit(1);
+
+      savedState = savedStates[0];
+      isPopup = !!savedState?.state?.startsWith("popup:");
+      metaLog(traceId, "State lookup completed", {
+        stateFound: Boolean(savedState),
+        isPopup,
+        stateId: savedState?.id || null,
+        stateExpiresAt: savedState?.expiresAt ? new Date(savedState.expiresAt).toISOString() : null,
+      });
+    }
+
     if (error) {
-      console.error("Meta OAuth error:", error, error_description);
+      metaLog(traceId, "CALLBACK includes Meta error query params", {
+        error,
+        errorDescription,
+      });
       if (error === "access_denied") {
-        return res.redirect("/");
+        return sendMetaOauthError(res, isPopup, "Access denied by user", traceId);
       }
-      return res.redirect(`/connections?meta=error&message=${encodeURIComponent(String(error_description || error))}`);
+      return sendMetaOauthError(res, isPopup, errorDescription || error, traceId);
     }
 
     if (!state) {
-      console.error("No state parameter received");
-      return res.redirect("/connections?meta=error&message=No+state+received");
+      metaLog(traceId, "CALLBACK missing state parameter");
+      return sendMetaOauthError(res, isPopup, "No state received", traceId);
     }
-
-    // Verify state from DATABASE instead of session
-    const stateStr = String(state);
-    const savedStates = await db.select()
-      .from(oauthStates)
-      .where(and(
-        eq(oauthStates.provider, "meta"),
-        or(
-          eq(oauthStates.state, stateStr),
-          eq(oauthStates.state, `popup:${stateStr}`)
-        )
-      ))
-      .limit(1);
-
-    const savedState = savedStates[0];
 
     if (!savedState) {
-      console.error("State not found in database:", stateStr.substring(0, 16));
-      return res.redirect("/connections?meta=error&message=Invalid+or+expired+state");
+      metaLog(traceId, "CALLBACK state not found in database", {
+        statePrefix: maskValue(state),
+      });
+      return sendMetaOauthError(res, isPopup, "Invalid or expired state", traceId);
     }
-
-    isPopup = savedState.state.startsWith("popup:");
 
     // Check if state is expired
     if (new Date() > savedState.expiresAt) {
-      console.error("State expired:", savedState.state.substring(0, 16));
+      metaLog(traceId, "CALLBACK state expired", {
+        statePrefix: maskValue(savedState.state),
+        expiresAt: new Date(savedState.expiresAt).toISOString(),
+      });
       await db.delete(oauthStates).where(eq(oauthStates.id, savedState.id));
-      return res.redirect("/connections?meta=error&message=State+expired");
+      return sendMetaOauthError(res, isPopup, "State expired", traceId);
     }
 
     // Delete used state
     await db.delete(oauthStates).where(eq(oauthStates.id, savedState.id));
-
-    // State verified - userId will be set from Meta user data in the callback
-    console.log("State verified, proceeding with OAuth flow");
+    metaLog(traceId, "State verified and consumed", {
+      stateId: savedState.id,
+      statePrefix: maskValue(savedState.state),
+      isPopup,
+    });
 
     if (!code) {
-      return res.redirect("/connections?meta=error&message=No+code+received");
+      metaLog(traceId, "CALLBACK missing code parameter");
+      return sendMetaOauthError(res, isPopup, "No code received", traceId);
     }
 
     const redirectUri = getMetaRedirectUri();
+    metaLog(traceId, "Exchanging authorization code for access token", {
+      redirectUri,
+      codeLength: code.length,
+    });
     
     const tokenUrl = new URL(`https://graph.facebook.com/${META_API_VERSION}/oauth/access_token`);
     tokenUrl.searchParams.set("client_id", META_APP_ID);
     tokenUrl.searchParams.set("client_secret", META_APP_SECRET);
     tokenUrl.searchParams.set("redirect_uri", redirectUri);
-    tokenUrl.searchParams.set("code", String(code));
+    tokenUrl.searchParams.set("code", code);
     
     const tokenResponse = await fetch(tokenUrl.toString());
+    metaLog(traceId, "Short-lived token HTTP response", {
+      status: tokenResponse.status,
+      statusText: tokenResponse.statusText,
+      ok: tokenResponse.ok,
+    });
     const tokenData = await tokenResponse.json();
     
     if (tokenData.error) {
-      console.error("Meta token error:", tokenData.error);
-      return res.redirect(`/connections?meta=error&message=${encodeURIComponent(tokenData.error.message)}`);
+      metaLog(traceId, "Short-lived token error", {
+        status: tokenResponse.status,
+        metaError: tokenData.error,
+      });
+      return sendMetaOauthError(res, isPopup, tokenData.error.message || "Failed to exchange token", traceId);
     }
     
     const accessToken = tokenData.access_token;
     const expiresIn = tokenData.expires_in;
+    metaLog(traceId, "Short-lived token obtained", { expiresIn });
     
     // Exchange short-lived token for long-lived token (60 days)
-    console.log("Exchanging short-lived token for long-lived token (60 days)...");
+    metaLog(traceId, "Exchanging short-lived token for long-lived token");
     const longLivedUrl = new URL(`https://graph.facebook.com/${META_API_VERSION}/oauth/access_token`);
     longLivedUrl.searchParams.set("grant_type", "fb_exchange_token");
     longLivedUrl.searchParams.set("client_id", META_APP_ID);
@@ -260,53 +364,84 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     longLivedUrl.searchParams.set("fb_exchange_token", accessToken);
     
     const longLivedResponse = await fetch(longLivedUrl.toString());
+    metaLog(traceId, "Long-lived token HTTP response", {
+      status: longLivedResponse.status,
+      statusText: longLivedResponse.statusText,
+      ok: longLivedResponse.ok,
+    });
     const longLivedData = await longLivedResponse.json();
     
     let finalToken = accessToken;
     let finalExpires = expiresIn;
     
     if (longLivedData.error) {
-      console.error("Long-lived token exchange failed:", longLivedData.error);
-      console.log("Using short-lived token instead (will expire in ~1-2 hours)");
+      metaLog(traceId, "Long-lived token exchange failed; continuing with short-lived token", {
+        metaError: longLivedData.error,
+      });
     } else if (longLivedData.access_token) {
       finalToken = longLivedData.access_token;
       finalExpires = longLivedData.expires_in;
       const expiresInDays = Math.round((finalExpires || 0) / 86400);
-      console.log(`Long-lived token obtained successfully! Expires in ${expiresInDays} days (${finalExpires} seconds)`);
+      metaLog(traceId, "Long-lived token obtained", {
+        expiresInSeconds: finalExpires || null,
+        expiresInDays,
+      });
     } else {
-      console.warn("Long-lived token response missing access_token, using short-lived token");
+      metaLog(traceId, "Long-lived token response missing access_token; continuing with short-lived token");
     }
     
     // Note: email removed from fields since we don't request email scope anymore
     const meResponse = await fetch(`https://graph.facebook.com/${META_API_VERSION}/me?fields=id,name,picture.type(large)&access_token=${finalToken}`);
+    metaLog(traceId, "Meta /me HTTP response", {
+      status: meResponse.status,
+      statusText: meResponse.statusText,
+      ok: meResponse.ok,
+    });
     const meData = await meResponse.json();
     
     if (meData.error) {
-      console.error("Meta /me error:", meData.error);
-      return res.redirect(`/connections?meta=error&message=${encodeURIComponent(meData.error.message || "Failed to fetch user info")}`);
+      metaLog(traceId, "Meta /me error", { metaError: meData.error });
+      return sendMetaOauthError(res, isPopup, meData.error.message || "Failed to fetch user info", traceId);
     }
+    metaLog(traceId, "Meta /me success", {
+      metaUserId: meData.id,
+      accountName: meData.name,
+    });
     
-    console.log("Fetching ad accounts...");
+    metaLog(traceId, "Fetching ad accounts");
     const adAccountsResponse = await fetch(
       `https://graph.facebook.com/${META_API_VERSION}/me/adaccounts?fields=id,name,account_status&access_token=${finalToken}`
     );
+    metaLog(traceId, "Meta /adaccounts HTTP response", {
+      status: adAccountsResponse.status,
+      statusText: adAccountsResponse.statusText,
+      ok: adAccountsResponse.ok,
+    });
     const adAccountsData = await adAccountsResponse.json();
-    console.log("Ad accounts fetched:", adAccountsData.data?.length || 0, "accounts");
     
     if (adAccountsData.error) {
-      console.error("Meta /adaccounts error:", adAccountsData.error);
-      return res.redirect(`/connections?meta=error&message=${encodeURIComponent(adAccountsData.error.message || "Failed to fetch ad accounts")}`);
+      metaLog(traceId, "Meta /adaccounts error", { metaError: adAccountsData.error });
+      return sendMetaOauthError(res, isPopup, adAccountsData.error.message || "Failed to fetch ad accounts", traceId);
     }
+    metaLog(traceId, "Ad accounts fetched", {
+      count: adAccountsData.data?.length || 0,
+    });
     
     const pagesResponse = await fetch(
       `https://graph.facebook.com/${META_API_VERSION}/me/accounts?fields=id,name,access_token&access_token=${finalToken}`
     );
+    metaLog(traceId, "Meta /accounts HTTP response", {
+      status: pagesResponse.status,
+      statusText: pagesResponse.statusText,
+      ok: pagesResponse.ok,
+    });
     const pagesData = await pagesResponse.json();
     
     if (pagesData.error) {
-      console.error("Meta /accounts error:", pagesData.error);
-      return res.redirect(`/connections?meta=error&message=${encodeURIComponent(pagesData.error.message || "Failed to fetch pages")}`);
+      metaLog(traceId, "Meta /accounts error", { metaError: pagesData.error });
+      return sendMetaOauthError(res, isPopup, pagesData.error.message || "Failed to fetch pages", traceId);
     }
+    metaLog(traceId, "Pages fetched", { count: pagesData.data?.length || 0 });
     
     // For each Page, fetch connected Instagram accounts using the Page Access Token
     // This way we have the IG IDs stored and don't need to re-fetch during launch
@@ -338,7 +473,9 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
             }
           }
         } catch (err) {
-          console.log(`Failed to fetch Instagram for page ${page.id}:`, err);
+          metaLog(traceId, `Failed to fetch Instagram for page ${page.id}`, {
+            error: getErrorMessage(err),
+          });
           page.instagram_accounts = [];
         }
       }
@@ -385,6 +522,10 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
           updatedAt: new Date(),
         })
         .where(eq(oauthConnections.id, existingConnection[0].id));
+      metaLog(traceId, "Updated existing oauth_connections row", {
+        userId,
+        connectionId: existingConnection[0].id,
+      });
     } else {
       await db.insert(oauthConnections).values({
         userId,
@@ -398,6 +539,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         scopes,
         connectedAt: new Date(),
       });
+      metaLog(traceId, "Inserted new oauth_connections row", { userId });
     }
     
     const existingAssets = await db.select()
@@ -409,8 +551,12 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     const pages = pagesData.data || [];
     
     // Always require ad account selection on each OAuth flow
-    console.log("Existing assets:", existingAssets.length > 0 ? "yes" : "no");
-    console.log("Requiring ad account selection for", adAccounts.length, "accounts");
+    metaLog(traceId, "Preparing meta_assets update", {
+      userId,
+      hasExistingAssets: existingAssets.length > 0,
+      adAccountsCount: adAccounts.length,
+      pagesCount: pages.length,
+    });
     
     if (existingAssets.length > 0) {
       // Update existing record - always require ad account selection
@@ -428,7 +574,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         })
         .where(eq(metaAssets.id, existingAssets[0].id));
     } else {
-      console.log("New user, creating meta assets entry...");
+      metaLog(traceId, "Creating new meta_assets row for user", { userId });
       await db.insert(metaAssets).values({
         userId,
         metaUserId: meData.id,
@@ -443,30 +589,37 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     }
     
     // Save session and redirect to ad account selection page
-    console.log("Saving session and redirecting to /select-ad-account...");
+    metaLog(traceId, "Saving session and finalizing OAuth", {
+      userId,
+      isPopup,
+      redirect: "/select-ad-account",
+    });
     req.session.save((err) => {
       if (err) {
-        console.error("Session save error:", err);
-        if (isPopup) {
-          return res.send(popupResponse("oauth-error", "Session save failed"));
-        }
-        return res.redirect("/login?error=Session+save+failed");
+        metaLog(traceId, "Session save failed", {
+          error: getErrorMessage(err),
+        });
+        return sendMetaOauthError(res, isPopup, "Session save failed", traceId);
       }
       
       if (isPopup) {
-        return res.send(popupResponse("oauth-success", null, "/select-ad-account"));
+        metaLog(traceId, "Popup OAuth success response sent", {
+          redirect: "/select-ad-account",
+        });
+        return res.send(popupResponse("oauth-success", null, "/select-ad-account", traceId));
       }
       
-      // Keep redirect relative so we stay on the same origin even behind proxies/CDNs.
+      metaLog(traceId, "OAuth success redirect sent", { redirect: "/select-ad-account" });
       res.redirect("/select-ad-account");
     });
     
   } catch (err) {
-    console.error("Meta OAuth error:", err);
-    if (isPopup) {
-      return res.send(popupResponse("oauth-error", "Connection failed"));
-    }
-    res.redirect("/login?error=Connection+failed");
+    metaLog(traceId, "CALLBACK failed with exception", {
+      error: getErrorMessage(err),
+      stack: err instanceof Error ? err.stack || null : null,
+      isPopup,
+    });
+    return sendMetaOauthError(res, isPopup, "Connection failed", traceId);
   }
 });
 
