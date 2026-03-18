@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express";
+import "../server/load-env";
 import { createApp } from "../server/app";
 
 let cachedAppPromise: ReturnType<typeof createApp> | null = null;
