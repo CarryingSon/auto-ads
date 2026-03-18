@@ -96,8 +96,31 @@ function getBaseUrl(req: Request): string {
   return `${protocol}://${host}`;
 }
 
+function getOAuthBaseUrl(req: Request): string {
+  const requestBaseUrl = getBaseUrl(req);
+  if (!APP_BASE_URL) {
+    return requestBaseUrl;
+  }
+
+  try {
+    const requestHost = (req.headers.host || "").toLowerCase();
+    const configuredHost = new URL(APP_BASE_URL).host.toLowerCase();
+    if (requestHost && configuredHost !== requestHost) {
+      console.warn(
+        `[OAuth] APP_BASE_URL host (${configuredHost}) does not match request host (${requestHost}); using request host.`,
+      );
+      return requestBaseUrl;
+    }
+  } catch (err) {
+    console.warn("[OAuth] Invalid APP_BASE_URL, falling back to request host:", err);
+    return requestBaseUrl;
+  }
+
+  return APP_BASE_URL;
+}
+
 function getMetaRedirectUri(req: Request): string {
-  const baseUrl = APP_BASE_URL || getBaseUrl(req);
+  const baseUrl = getOAuthBaseUrl(req);
   return `${baseUrl}/auth/meta/callback`;
 }
 
@@ -600,7 +623,7 @@ router.get("/google/start", (req: Request, res: Response) => {
   const state = crypto.randomBytes(32).toString('hex');
   (req.session as any).googleOauthState = state;
   
-  const baseUrl = APP_BASE_URL || getBaseUrl(req);
+  const baseUrl = getOAuthBaseUrl(req);
   const redirectUri = `${baseUrl}/auth/google/callback`;
   
   const scopes = [
@@ -642,7 +665,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
   }
   
   try {
-    const baseUrl = APP_BASE_URL || getBaseUrl(req);
+    const baseUrl = getOAuthBaseUrl(req);
     const redirectUri = `${baseUrl}/auth/google/callback`;
     
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
