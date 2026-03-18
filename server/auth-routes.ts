@@ -102,11 +102,24 @@ function popupResponse(type: string, error?: string | null, redirect?: string, t
   if (error) msg.error = error;
   if (redirect) msg.redirect = redirect;
   if (traceId) msg.traceId = traceId;
+  const redirectPath = redirect || null;
   return `<!DOCTYPE html><html><body><script>
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage(${JSON.stringify(msg)}, window.location.origin);
-    }
-    window.close();
+    (() => {
+      const msg = ${JSON.stringify(msg)};
+      const canonicalOrigin = window.location.origin;
+      const redirectPath = ${JSON.stringify(redirectPath)};
+      const redirectUrl = redirectPath ? canonicalOrigin + redirectPath : null;
+
+      if (window.opener && !window.opener.closed) {
+        try { window.opener.postMessage(msg, canonicalOrigin); } catch {}
+        try { window.opener.postMessage(msg, "*"); } catch {}
+        if (redirectUrl) {
+          // Cross-origin-safe fallback: force opener to canonical origin.
+          try { window.opener.location.href = redirectUrl; } catch {}
+        }
+      }
+      window.close();
+    })();
   </script><p>${type === "oauth-error" ? "Connection failed." : "Login complete."}${traceId ? ` Trace: ${traceId}` : ""} You can close this window.</p></body></html>`;
 }
 
@@ -142,10 +155,11 @@ function metaErrorRedirect(message: string, traceId: string): string {
 }
 
 function sendMetaOauthError(res: Response, isPopup: boolean, message: string, traceId: string) {
+  const redirectPath = metaErrorRedirect(message, traceId);
   if (isPopup) {
-    return res.send(popupResponse("oauth-error", message, undefined, traceId));
+    return res.send(popupResponse("oauth-error", message, redirectPath, traceId));
   }
-  return res.redirect(metaErrorRedirect(message, traceId));
+  return res.redirect(redirectPath);
 }
 
 router.get("/meta/start", async (req: Request, res: Response) => {
@@ -167,6 +181,14 @@ router.get("/meta/start", async (req: Request, res: Response) => {
       appBaseUrl: APP_BASE_URL,
       apiVersion: META_API_VERSION,
     });
+    const requestHost = (req.get("host") || "").toLowerCase();
+    const appHost = new URL(APP_BASE_URL).host.toLowerCase();
+    if (requestHost && requestHost !== appHost) {
+      metaLog(traceId, "Host mismatch: request host differs from canonical APP_BASE_URL host", {
+        requestHost,
+        canonicalHost: appHost,
+      });
+    }
     
     // Store state in DATABASE instead of session (fixes cross-domain issue)
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -251,6 +273,14 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     userAgent: req.get("user-agent") || null,
     appBaseUrl: APP_BASE_URL,
   });
+  const callbackRequestHost = (req.get("host") || "").toLowerCase();
+  const callbackAppHost = new URL(APP_BASE_URL).host.toLowerCase();
+  if (callbackRequestHost && callbackRequestHost !== callbackAppHost) {
+    metaLog(traceId, "Host mismatch on callback", {
+      callbackRequestHost,
+      canonicalHost: callbackAppHost,
+    });
+  }
 
   try {
     // Best effort lookup for popup mode and state validity (also useful when callback has error params)
