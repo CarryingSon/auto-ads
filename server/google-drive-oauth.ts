@@ -1,8 +1,8 @@
 import { google } from 'googleapis';
-import { db } from './db';
-import { oauthConnections } from '@shared/schema';
+import { db } from './db.js';
+import { oauthConnections } from '../shared/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { decrypt } from './auth-routes';
+import { decrypt } from './auth-routes.js';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -41,7 +41,7 @@ async function getGoogleTokenForUser(userId: string): Promise<{ accessToken: str
       const tokenData = await tokenResponse.json();
 
       if (tokenData.access_token) {
-        const { encrypt } = await import('./auth-routes');
+        const { encrypt } = await import('./auth-routes.js');
         const newExpiresAt = tokenData.expires_in
           ? new Date(Date.now() + tokenData.expires_in * 1000)
           : null;

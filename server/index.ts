@@ -1,5 +1,5 @@
 import "./load-env";
-import { createApp, log } from "./app";
+import { createApp, log } from "./app.js";
 
 const port = parseInt(process.env.PORT || "5000", 10);
 

@@ -3,11 +3,11 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { createServer } from "http";
 
-import { pool } from "./db";
-import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
-import authRoutes from "./auth-routes";
-import { getSessionCookieOptions } from "./session-config";
+import { pool } from "./db.js";
+import { registerRoutes } from "./routes.js";
+import { serveStatic } from "./static.js";
+import authRoutes from "./auth-routes.js";
+import { getSessionCookieOptions } from "./session-config.js";
 
 export interface CreateAppOptions {
   serveFrontend?: boolean;
@@ -116,7 +116,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     if (isProduction) {
       serveStatic(app);
     } else if (enableDevVite) {
-      const { setupVite } = await import("./vite");
+      const { setupVite } = await import("./vite.js");
       await setupVite(httpServer, app);
     }
   }

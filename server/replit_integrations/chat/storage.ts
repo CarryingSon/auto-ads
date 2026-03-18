@@ -1,5 +1,5 @@
-import { db } from "../../db";
-import { conversations, messages } from "@shared/schema";
+import { db } from "../../db.js";
+import { conversations, messages } from "../../../shared/schema.js";
 import { eq, desc } from "drizzle-orm";
 
 export interface IChatStorage {

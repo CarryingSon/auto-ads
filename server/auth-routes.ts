@@ -9,9 +9,9 @@ declare module "express-session" {
     googleOauthState?: string;
   }
 }
-import { db } from "./db";
-import { storage } from "./storage";
-import { getClearSessionCookieOptions } from "./session-config";
+import { db } from "./db.js";
+import { storage } from "./storage.js";
+import { getClearSessionCookieOptions } from "./session-config.js";
 import { 
   oauthConnections, 
   metaAssets, 
@@ -27,7 +27,7 @@ import {
   connections,
   users,
   adsets
-} from "@shared/schema";
+} from "../shared/schema.js";
 import { inArray } from "drizzle-orm";
 import { eq, and, lt, or, sql } from "drizzle-orm";
 
@@ -184,60 +184,60 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
   console.log("Received state:", state ? String(state).substring(0, 16) + "..." : "none");
   console.log("Has code:", !!code);
   console.log("Error:", error || "none");
-  
-  if (error) {
-    console.error("Meta OAuth error:", error, error_description);
-    if (error === "access_denied") {
-      return res.redirect("/");
-    }
-    return res.redirect(`/connections?meta=error&message=${encodeURIComponent(String(error_description || error))}`);
-  }
-  
-  if (!state) {
-    console.error("No state parameter received");
-    return res.redirect("/connections?meta=error&message=No+state+received");
-  }
-  
-  // Verify state from DATABASE instead of session
-  const stateStr = String(state);
-  const savedStates = await db.select()
-    .from(oauthStates)
-    .where(and(
-      eq(oauthStates.provider, "meta"),
-      or(
-        eq(oauthStates.state, stateStr),
-        eq(oauthStates.state, `popup:${stateStr}`)
-      )
-    ))
-    .limit(1);
-  
-  const savedState = savedStates[0];
-  
-  if (!savedState) {
-    console.error("State not found in database:", stateStr.substring(0, 16));
-    return res.redirect("/connections?meta=error&message=Invalid+or+expired+state");
-  }
-  
-  isPopup = savedState.state.startsWith("popup:");
-  
-  // Check if state is expired
-  if (new Date() > savedState.expiresAt) {
-    console.error("State expired:", savedState.state.substring(0, 16));
-    await db.delete(oauthStates).where(eq(oauthStates.id, savedState.id));
-    return res.redirect("/connections?meta=error&message=State+expired");
-  }
-  
-  // Delete used state
-  await db.delete(oauthStates).where(eq(oauthStates.id, savedState.id));
-  
-  // State verified - userId will be set from Meta user data in the callback
-  console.log("State verified, proceeding with OAuth flow");
-  
-  if (!code) {
-    return res.redirect("/connections?meta=error&message=No+code+received");
-  }
-  
+
   try {
+    if (error) {
+      console.error("Meta OAuth error:", error, error_description);
+      if (error === "access_denied") {
+        return res.redirect("/");
+      }
+      return res.redirect(`/connections?meta=error&message=${encodeURIComponent(String(error_description || error))}`);
+    }
+
+    if (!state) {
+      console.error("No state parameter received");
+      return res.redirect("/connections?meta=error&message=No+state+received");
+    }
+
+    // Verify state from DATABASE instead of session
+    const stateStr = String(state);
+    const savedStates = await db.select()
+      .from(oauthStates)
+      .where(and(
+        eq(oauthStates.provider, "meta"),
+        or(
+          eq(oauthStates.state, stateStr),
+          eq(oauthStates.state, `popup:${stateStr}`)
+        )
+      ))
+      .limit(1);
+
+    const savedState = savedStates[0];
+
+    if (!savedState) {
+      console.error("State not found in database:", stateStr.substring(0, 16));
+      return res.redirect("/connections?meta=error&message=Invalid+or+expired+state");
+    }
+
+    isPopup = savedState.state.startsWith("popup:");
+
+    // Check if state is expired
+    if (new Date() > savedState.expiresAt) {
+      console.error("State expired:", savedState.state.substring(0, 16));
+      await db.delete(oauthStates).where(eq(oauthStates.id, savedState.id));
+      return res.redirect("/connections?meta=error&message=State+expired");
+    }
+
+    // Delete used state
+    await db.delete(oauthStates).where(eq(oauthStates.id, savedState.id));
+
+    // State verified - userId will be set from Meta user data in the callback
+    console.log("State verified, proceeding with OAuth flow");
+
+    if (!code) {
+      return res.redirect("/connections?meta=error&message=No+code+received");
+    }
+
     const redirectUri = getMetaRedirectUri(req);
     
     const tokenUrl = new URL(`https://graph.facebook.com/${META_API_VERSION}/oauth/access_token`);

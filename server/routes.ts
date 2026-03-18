@@ -2,15 +2,15 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import multer from "multer";
 import { z } from "zod";
-import { storage } from "./storage";
+import { storage } from "./storage.js";
 // Google Drive functions imported dynamically where needed
-import { parseDocx, validateAds } from "./docx-parser";
-import type { ExtractedAdData } from "@shared/schema";
-import { MetaAdsApi, createSyncLog, updateSyncLog } from "./meta-ads-api";
-import { validateMetaLaunchData, validateAdSetBeforeCreation } from "./meta-ads-validation";
-import { decrypt } from "./auth-routes";
-import { db } from "./db";
-import { metaCampaigns, metaAdsets, metaAds, metaInsights, syncLogs, oauthConnections, metaAssets, globalSettings, metaAccountCache } from "@shared/schema";
+import { parseDocx, validateAds } from "./docx-parser.js";
+import type { ExtractedAdData } from "../shared/schema.js";
+import { MetaAdsApi, createSyncLog, updateSyncLog } from "./meta-ads-api.js";
+import { validateMetaLaunchData, validateAdSetBeforeCreation } from "./meta-ads-validation.js";
+import { decrypt } from "./auth-routes.js";
+import { db } from "./db.js";
+import { metaCampaigns, metaAdsets, metaAds, metaInsights, syncLogs, oauthConnections, metaAssets, globalSettings, metaAccountCache } from "../shared/schema.js";
 import { eq, desc, and, sql } from "drizzle-orm";
 import {
   enqueueLaunchJob,
@@ -21,7 +21,7 @@ import {
   clearQueueForJob,
   markQueueFailed,
   type LaunchQueuePayload,
-} from "./job-queue";
+} from "./job-queue.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
@@ -198,7 +198,7 @@ export async function registerRoutes(
   
   app.get("/api/drive/connected-email", async (_req: Request, res: Response) => {
     try {
-      const { getServiceAccountEmail, isServiceAccountConfigured } = await import("./google-drive-service-account");
+      const { getServiceAccountEmail, isServiceAccountConfigured } = await import("./google-drive-service-account.js");
       if (isServiceAccountConfigured()) {
         const email = getServiceAccountEmail();
         return res.json({ email, connected: true, mode: "service-account" });
@@ -223,7 +223,7 @@ export async function registerRoutes(
       const googleDrive = connections.find(c => c.provider === "google_drive");
       if (!googleDrive) {
         try {
-          const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account");
+          const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
           if (isServiceAccountConfigured()) {
             const email = getServiceAccountEmail();
             await storage.upsertConnection({
@@ -278,7 +278,7 @@ export async function registerRoutes(
       
       if (provider === "google_drive") {
         try {
-          const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account");
+          const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
           if (isServiceAccountConfigured()) {
             const email = getServiceAccountEmail();
             const connection = await storage.upsertConnection({
@@ -334,7 +334,7 @@ export async function registerRoutes(
       
       if (provider === "google_drive") {
         try {
-          const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account");
+          const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
           if (isServiceAccountConfigured()) {
             const email = getServiceAccountEmail();
             await storage.upsertConnection({
@@ -1653,8 +1653,8 @@ export async function registerRoutes(
         // Instagram account ID was already fetched before createAdSet (see above)
         // Use the already-determined instagramAccountId variable
 
-        const { getPublicDownloadUrl, downloadPublicFile } = await import("./public-drive");
-        const saModule = await import("./google-drive-service-account");
+        const { getPublicDownloadUrl, downloadPublicFile } = await import("./public-drive.js");
+        const saModule = await import("./google-drive-service-account.js");
         
         const downloadDriveBuffer = async (driveFileId: string, filename: string): Promise<Buffer> => {
           try {
@@ -2169,7 +2169,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Folder URL is required" });
       }
 
-      const { extractFolderIdFromUrl, getFolderMetadata, listSubfolders, listAdSetFiles, parseAdSetFolderName } = await import("./google-drive");
+      const { extractFolderIdFromUrl, getFolderMetadata, listSubfolders, listAdSetFiles, parseAdSetFolderName } = await import("./google-drive.js");
       
       // Extract folder ID from URL
       const folderId = extractFolderIdFromUrl(folderUrl);
@@ -2291,7 +2291,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Job has no Drive folder associated" });
       }
 
-      const { listSubfolders, listAdSetFiles, parseAdSetFolderName } = await import("./google-drive");
+      const { listSubfolders, listAdSetFiles, parseAdSetFolderName } = await import("./google-drive.js");
       
       // Re-scan subfolders
       const subfolders = await listSubfolders(job.driveRootFolderId);
@@ -2383,7 +2383,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Folder URL is required" });
       }
 
-      const { extractFolderIdFromUrl, getFolderMetadata } = await import("./google-drive");
+      const { extractFolderIdFromUrl, getFolderMetadata } = await import("./google-drive.js");
       
       const folderId = extractFolderIdFromUrl(folderUrl);
       if (!folderId) {
@@ -2427,9 +2427,9 @@ export async function registerRoutes(
         exportGoogleDocAsPlainText,
         parseDCTCopyFromText,
         normalizeDCTName,
-      } = await import("./google-drive");
-      const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser");
-      const { parseDocx } = await import("./docx-parser");
+      } = await import("./google-drive.js");
+      const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser.js");
+      const { parseDocx } = await import("./docx-parser.js");
       
       const folderId = extractFolderIdFromUrl(driveUrl);
       if (!folderId) {
@@ -2453,7 +2453,7 @@ export async function registerRoutes(
       }
 
       // Pre-sync validation: check if media files are actually downloadable
-      const { checkPublicFileReadable } = await import("./public-drive");
+      const { checkPublicFileReadable } = await import("./public-drive.js");
       const firstDctCreatives = await listDCTCreatives(dctFolders[0].id!);
       const firstMediaFile = firstDctCreatives.creatives[0];
       if (firstMediaFile) {
@@ -2951,7 +2951,7 @@ export async function registerRoutes(
       if (!isDocxExtension && !validMimeTypes.includes(req.file.mimetype)) {
         return res.status(400).json({ error: "Only .docx files are supported" });
       }
-      const { parseDocx } = await import("./docx-parser");
+      const { parseDocx } = await import("./docx-parser.js");
       const result = await parseDocx(req.file.buffer);
 
       const primaryTexts: string[] = [];
@@ -2997,8 +2997,8 @@ export async function registerRoutes(
         downloadPublicFile,
         parseDCTName,
         getFileType,
-      } = await import("./public-drive");
-      const { parseDocx } = await import("./docx-parser");
+      } = await import("./public-drive.js");
+      const { parseDocx } = await import("./docx-parser.js");
       
       const folderId = extractFolderIdFromUrl(driveUrl);
       if (!folderId) {
@@ -3161,7 +3161,7 @@ export async function registerRoutes(
 
   app.get("/api/drive/debug", async (req: Request, res: Response) => {
     try {
-      const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account");
+      const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
       if (!isServiceAccountConfigured()) {
         return res.json({ error: "Service account not configured", connected: false });
       }
@@ -3186,13 +3186,13 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Not authenticated" });
       }
 
-      const { browseFolders } = await import("./google-drive-service-account");
+      const { browseFolders } = await import("./google-drive-service-account.js");
 
       const folderId = (req.query.folderId as string) || "root";
       const sharedWithMe = req.query.sharedWithMe === "true";
       const driveId = req.query.driveId as string | undefined;
 
-      const { getFolderName } = await import("./google-drive-service-account");
+      const { getFolderName } = await import("./google-drive-service-account.js");
 
       const folders = await browseFolders(folderId === "root" && sharedWithMe ? "root" : folderId);
 
@@ -3248,7 +3248,7 @@ export async function registerRoutes(
         return res.json({ folders: [] });
       }
 
-      const { searchFolders } = await import("./google-drive-service-account");
+      const { searchFolders } = await import("./google-drive-service-account.js");
       console.log("[Drive Search] Searching for:", query);
       const folders = await searchFolders(query);
       console.log("[Drive Search] Found", folders.length, "folders");
@@ -3289,10 +3289,10 @@ export async function registerRoutes(
         downloadFile,
         getFileType,
         getServiceAccountEmail,
-      } = await import("./google-drive-service-account");
-      const { parseDocx } = await import("./docx-parser");
-      const { parseDCTCopyFromText, normalizeDCTName } = await import("./google-drive");
-      const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser");
+      } = await import("./google-drive-service-account.js");
+      const { parseDocx } = await import("./docx-parser.js");
+      const { parseDCTCopyFromText, normalizeDCTName } = await import("./google-drive.js");
+      const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser.js");
       
       const folderId = extractFolderIdFromUrl(driveUrl);
       if (!folderId) {
@@ -3322,7 +3322,7 @@ export async function registerRoutes(
         return type === "video" || type === "image";
       });
       if (firstMediaFile) {
-        const { checkFileReadable } = await import("./google-drive-service-account");
+        const { checkFileReadable } = await import("./google-drive-service-account.js");
         const isReadable = await checkFileReadable(firstMediaFile.id);
         if (!isReadable) {
           const saEmail = getServiceAccountEmail();
@@ -3657,8 +3657,8 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      const { db } = await import("./db");
-      const { billingPayments } = await import("@shared/schema");
+      const { db } = await import("./db.js");
+      const { billingPayments } = await import("../shared/schema.js");
       const { eq, desc } = await import("drizzle-orm");
       const payments = await db.select().from(billingPayments).where(eq(billingPayments.userId, userId)).orderBy(desc(billingPayments.periodStart));
       res.json(payments);
@@ -4460,7 +4460,7 @@ export async function registerRoutes(
       let driveEmail: string | null = null;
       let driveConnected = false;
       try {
-        const { getServiceAccountEmail, isServiceAccountConfigured } = await import("./google-drive-service-account");
+        const { getServiceAccountEmail, isServiceAccountConfigured } = await import("./google-drive-service-account.js");
         if (isServiceAccountConfigured()) {
           driveEmail = getServiceAccountEmail();
           driveConnected = true;

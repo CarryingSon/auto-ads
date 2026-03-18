@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { isServiceAccountConfigured } from './google-drive-service-account';
+import { isServiceAccountConfigured } from './google-drive-service-account.js';
 
 let cachedClient: ReturnType<typeof google.drive> | null = null;
 

@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import * as fs from "fs";
 import FormData from "form-data";
-import { db } from "./db";
+import { db } from "./db.js";
 import { 
   oauthConnections, 
   metaAssets, 
@@ -10,19 +10,19 @@ import {
   metaAdsets,
   metaAds,
   metaInsights
-} from "@shared/schema";
+} from "../shared/schema.js";
 import { eq, and } from "drizzle-orm";
-import { encrypt, decrypt } from "./auth-routes";
+import { encrypt, decrypt } from "./auth-routes.js";
 import { 
   prepareVideoForMeta, 
   downloadToTemp, 
   cleanupTempFile,
   TranscodeResult 
-} from "./video-transcoder";
+} from "./video-transcoder.js";
 import {
   uploadBufferToSupabaseStorage,
   createSignedSupabaseDownloadUrl,
-} from "./supabase-storage";
+} from "./supabase-storage.js";
 
 const META_APP_ID = process.env.META_APP_ID || "";
 const META_APP_SECRET = process.env.META_APP_SECRET || "";

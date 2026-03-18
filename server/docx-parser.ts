@@ -1,7 +1,7 @@
 import AdmZip from "adm-zip";
 import OpenAI from "openai";
-import type { ExtractedAdData, AiExtractionResponse } from "@shared/schema";
-import { aiExtractionResponseSchema } from "@shared/schema";
+import type { ExtractedAdData, AiExtractionResponse } from "../shared/schema.js";
+import { aiExtractionResponseSchema } from "../shared/schema.js";
 
 const FIELD_NAMES = ["Primary text", "Headline", "Description", "CTA", "URL", "UTM"] as const;
 const FIELD_BOUNDARY = `(?:Primary text|Headline|Description|CTA|URL|UTM|Ad\\s+\\d|DCT\\s*\\d)`;
@@ -346,7 +346,7 @@ export async function parseDocx(buffer: Buffer): Promise<{
 
   console.log(`[DOCX Parser] Regex parser ni uspel — poskušam DCT fallback parser...`);
   try {
-    const { parseDCTCopyFromText } = await import("./google-drive");
+    const { parseDCTCopyFromText } = await import("./google-drive.js");
     const dctBlocks = parseDCTCopyFromText(deterministicResult.rawText);
     const validBlocks = dctBlocks.filter(b => b.primaryTexts.length > 0 && b.headlines.length > 0);
     if (validBlocks.length > 0) {

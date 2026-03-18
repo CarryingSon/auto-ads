@@ -8,7 +8,7 @@ import pRetry from "p-retry";
  *
  * USAGE:
  * ```typescript
- * import { batchProcess } from "./replit_integrations/batch";
+ * import { batchProcess } from "./replit_integrations/batch.js";
  * import Anthropic from "@anthropic-ai/sdk";
  *
  * const anthropic = new Anthropic({

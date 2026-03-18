@@ -3,20 +3,20 @@ export {
   ObjectNotFoundError,
   objectStorageClient,
   signObjectURL,
-} from "./objectStorage";
+} from "./objectStorage.js";
 
 export type {
   ObjectAclPolicy,
   ObjectAccessGroup,
   ObjectAccessGroupType,
   ObjectAclRule,
-} from "./objectAcl";
+} from "./objectAcl.js";
 
 export {
   canAccessObject,
   getObjectAclPolicy,
   setObjectAclPolicy,
-} from "./objectAcl";
+} from "./objectAcl.js";
 
-export { registerObjectStorageRoutes } from "./routes";
+export { registerObjectStorageRoutes } from "./routes.js";
 

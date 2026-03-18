@@ -1,11 +1,11 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { db } from "./db";
+import { db } from "./db.js";
 import {
   jobQueue,
   jobQueueAttempts,
   type JobQueue,
-} from "@shared/schema";
+} from "../shared/schema.js";
 
 export type QueueStatus = "queued" | "processing" | "retrying" | "completed" | "failed";
 
