@@ -97,7 +97,15 @@ function getBaseUrl(req: Request): string {
 }
 
 function getMetaRedirectUri(req: Request): string {
-  const baseUrl = APP_BASE_URL || getBaseUrl(req);
+  // Always prefer the current request host so OAuth callback returns to the same deployment/domain.
+  // This avoids hard-to-debug 404s when APP_BASE_URL points to a different Vercel domain/project.
+  const requestBaseUrl = getBaseUrl(req).replace(/\/+$/, "");
+  if (APP_BASE_URL && APP_BASE_URL !== requestBaseUrl) {
+    console.warn(
+      `[Auth] APP_BASE_URL (${APP_BASE_URL}) differs from request host (${requestBaseUrl}); using request host for Meta callback.`,
+    );
+  }
+  const baseUrl = requestBaseUrl;
   return `${baseUrl}/auth/meta/callback`;
 }
 
@@ -600,7 +608,7 @@ router.get("/google/start", (req: Request, res: Response) => {
   const state = crypto.randomBytes(32).toString('hex');
   (req.session as any).googleOauthState = state;
   
-  const baseUrl = APP_BASE_URL || getBaseUrl(req);
+  const baseUrl = getBaseUrl(req);
   const redirectUri = `${baseUrl}/auth/google/callback`;
   
   const scopes = [
@@ -642,7 +650,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
   }
   
   try {
-    const baseUrl = APP_BASE_URL || getBaseUrl(req);
+    const baseUrl = getBaseUrl(req);
     const redirectUri = `${baseUrl}/auth/google/callback`;
     
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
