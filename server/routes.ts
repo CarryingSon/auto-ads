@@ -1035,17 +1035,24 @@ export async function registerRoutes(
   app.post("/api/workers/launch", async (req: Request, res: Response) => {
     try {
       const cronSecret = process.env.CRON_SECRET;
-      if (!cronSecret) {
-        return res.status(500).json({ error: "CRON_SECRET is not configured" });
-      }
+      const vercelCron = req.headers["x-vercel-cron"];
+      const isVercelCronTrigger = typeof vercelCron === "string" && vercelCron.length > 0;
 
-      const authHeader = req.headers.authorization || "";
-      const bearerToken = authHeader.startsWith("Bearer ")
-        ? authHeader.slice("Bearer ".length).trim()
-        : "";
-      const providedSecret = (req.headers["x-cron-secret"] as string | undefined) || bearerToken;
-      if (providedSecret !== cronSecret) {
-        return res.status(401).json({ error: "Unauthorized worker trigger" });
+      if (!isVercelCronTrigger) {
+        if (!cronSecret) {
+          return res.status(500).json({ error: "CRON_SECRET is not configured" });
+        }
+
+        const authHeader = req.headers.authorization || "";
+        const bearerToken = authHeader.startsWith("Bearer ")
+          ? authHeader.slice("Bearer ".length).trim()
+          : "";
+        const providedSecret = (req.headers["x-cron-secret"] as string | undefined) || bearerToken;
+        if (providedSecret !== cronSecret) {
+          return res.status(401).json({ error: "Unauthorized worker trigger" });
+        }
+      } else {
+        console.log(`[Worker] Triggered by Vercel Cron schedule: ${vercelCron}`);
       }
 
       const requestedLimit = Number(req.query.limit || 1);
