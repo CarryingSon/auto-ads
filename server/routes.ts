@@ -1004,6 +1004,33 @@ export async function registerRoutes(
         payload: queuePayload,
       });
 
+      // Hobby Vercel plans do not support minute-level Cron jobs. Trigger worker
+      // immediately after enqueue so processing starts without waiting for cron.
+      const cronSecret = process.env.CRON_SECRET;
+      const host = req.get("host");
+      const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+      const protocol = forwardedProto || (req.secure ? "https" : "http");
+
+      if (cronSecret && host) {
+        const workerUrl = `${protocol}://${host}/api/workers/launch?limit=1`;
+        void fetch(workerUrl, {
+          method: "POST",
+          headers: {
+            "x-cron-secret": cronSecret,
+          },
+        })
+          .then((workerResponse) => {
+            console.log(`[Launch] Immediate worker trigger for job ${jobId}: ${workerResponse.status}`);
+          })
+          .catch((triggerError) => {
+            console.error(`[Launch] Failed to trigger worker for job ${jobId}:`, triggerError);
+          });
+      } else {
+        console.warn(
+          `[Launch] Skipping immediate worker trigger for job ${jobId} (${!cronSecret ? "CRON_SECRET missing" : "host missing"})`,
+        );
+      }
+
       res.json({
         success: true,
         jobId,

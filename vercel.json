@@ -33,11 +33,5 @@
       "src": "/(.*)",
       "dest": "/index.html"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/workers/launch",
-      "schedule": "* * * * *"
-    }
   ]
 }
