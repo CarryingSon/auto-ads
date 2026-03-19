@@ -49,7 +49,10 @@ export async function createApp(options: CreateAppOptions = {}) {
       store: new PgSession({
         pool,
         tableName: "session",
-        createTableIfMissing: true,
+        // In production serverless we avoid session-table bootstrap checks
+        // on hot paths because the table already exists and the extra
+        // query can amplify connection pressure.
+        createTableIfMissing: !isProduction,
       }),
       secret: process.env.SESSION_SECRET || "development-secret-key",
       resave: false,
