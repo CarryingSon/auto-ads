@@ -5,6 +5,8 @@ import * as schema from "../shared/schema.js";
 const { Pool } = pg;
 
 const connectionString = process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL;
+const isProduction = process.env.NODE_ENV === "production";
+const isVercel = Boolean(process.env.VERCEL);
 
 if (!connectionString) {
   throw new Error(
@@ -12,8 +14,27 @@ if (!connectionString) {
   );
 }
 
-export const pool = new Pool({ connectionString, max: 10 });
+function parsePositiveInt(input: string | undefined): number | null {
+  if (!input) return null;
+  const parsed = Number.parseInt(input, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+const defaultPoolMax = isProduction ? (isVercel ? 1 : 5) : 10;
+const poolMax = parsePositiveInt(process.env.PG_POOL_MAX) ?? defaultPoolMax;
+
+export const pool = new Pool({
+  connectionString,
+  max: poolMax,
+  // Keep connection waits bounded and close idle clients promptly in serverless.
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 30_000,
+  allowExitOnIdle: true,
+});
 export const db = drizzle(pool, { schema });
+
+console.log(`[DB] Pool configured (max=${poolMax}, production=${isProduction}, vercel=${isVercel})`);
 
 (async () => {
   try {
