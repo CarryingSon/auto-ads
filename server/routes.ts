@@ -30,6 +30,35 @@ const cancelledJobs = new Set<string>();
 const metaApiCache = new Map<string, { data: any; expiry: number }>();
 const META_CACHE_TTL = 30 * 60 * 1000;
 
+function normalizeAdAccountId(adAccountId: string): string {
+  return String(adAccountId || "").startsWith("act_")
+    ? String(adAccountId).slice(4)
+    : String(adAccountId || "");
+}
+
+function getAdAccountIdVariants(adAccountId: string): string[] {
+  const raw = String(adAccountId || "");
+  if (!raw) return [];
+  const normalized = normalizeAdAccountId(raw);
+  const variants = [raw];
+  const withPrefix = `act_${normalized}`;
+  if (!variants.includes(withPrefix)) variants.push(withPrefix);
+  if (!variants.includes(normalized)) variants.push(normalized);
+  return variants;
+}
+
+function pickValidSelectedPageId(
+  pages: Array<{ id?: string }> | undefined | null,
+  preferredPageId?: string | null,
+): string | null {
+  if (!Array.isArray(pages) || pages.length === 0) return null;
+  if (preferredPageId && pages.some((p) => p?.id === preferredPageId)) {
+    return preferredPageId;
+  }
+  const first = pages.find((p) => typeof p?.id === "string" && p.id.length > 0);
+  return first?.id || null;
+}
+
 async function upsertAccountCache(userId: string, adAccountId: string, field: string, data: any) {
   try {
     await db.insert(metaAccountCache)
@@ -45,10 +74,13 @@ async function upsertAccountCache(userId: string, adAccountId: string, field: st
 
 async function getAccountCache(userId: string, adAccountId: string): Promise<any | null> {
   try {
-    const rows = await db.select().from(metaAccountCache)
-      .where(and(eq(metaAccountCache.userId, userId), eq(metaAccountCache.adAccountId, adAccountId)))
-      .limit(1);
-    return rows[0] || null;
+    for (const candidateId of getAdAccountIdVariants(adAccountId)) {
+      const rows = await db.select().from(metaAccountCache)
+        .where(and(eq(metaAccountCache.userId, userId), eq(metaAccountCache.adAccountId, candidateId)))
+        .limit(1);
+      if (rows[0]) return rows[0];
+    }
+    return null;
   } catch {
     return null;
   }
@@ -910,12 +942,44 @@ export async function registerRoutes(
       const assets = await storage.getAssetsByJob(jobId);
       const extractedAds = await storage.getExtractedAdsByJob(jobId);
 
-      // Get Facebook Page ID from metaAssets (already fetched during validation above)
+      // Resolve Facebook Page for current ad account (avoid cross-account page mismatch)
       let pageId: string | undefined;
       let pageName: string | undefined;
-      if (metaAssetRecord.length > 0) {
+      const assetRow = metaAssetRecord[0];
+      const accountCache = await getAccountCache(userId, adAccountId);
+      const accountPages = Array.isArray(accountCache?.pagesJson) ? accountCache.pagesJson : [];
+
+      if (accountPages.length > 0) {
+        const preferredPageId = accountCache?.pagesSelectedPageId || assetRow?.selectedPageId || null;
+        const resolvedPageId = pickValidSelectedPageId(accountPages, preferredPageId);
+        const resolvedPage = accountPages.find((p: any) => p?.id === resolvedPageId);
+
+        if (resolvedPageId) {
+          pageId = resolvedPageId;
+          pageName = resolvedPage?.name;
+
+          if (preferredPageId && preferredPageId !== resolvedPageId) {
+            console.warn(
+              `[Launch] Selected page ${preferredPageId} is not valid for ad account ${adAccountId}. Using ${resolvedPageId} instead.`,
+            );
+          }
+
+          if (assetRow?.selectedPageId !== resolvedPageId) {
+            await db.update(metaAssets)
+              .set({ selectedPageId: resolvedPageId, updatedAt: new Date() })
+              .where(eq(metaAssets.userId, userId));
+          }
+
+          if (accountCache?.pagesSelectedPageId !== resolvedPageId) {
+            await upsertAccountCache(userId, adAccountId, "pagesSelectedPageId", resolvedPageId);
+          }
+        }
+      }
+
+      // Legacy fallback if account-scoped cache is missing
+      if (!pageId && metaAssetRecord.length > 0) {
         pageId = metaAssetRecord[0].selectedPageId || undefined;
-        
+
         if (pageId) {
           const pages = metaAssetRecord[0].pagesJson || [];
           const businessOwnedPages = metaAssetRecord[0].businessOwnedPagesJson || [];
@@ -3886,13 +3950,25 @@ export async function registerRoutes(
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
         if (cached?.pagesJson && cached.pagesJson.length > 0) {
-          const selectedPageId = cached.pagesSelectedPageId || assets[0].selectedPageId;
+          const preferredPageId = cached.pagesSelectedPageId || assets[0].selectedPageId || null;
+          const selectedPageId = pickValidSelectedPageId(cached.pagesJson, preferredPageId);
+          const autoSelected = cached.pagesJson.length === 1 || (!!selectedPageId && selectedPageId !== preferredPageId);
+
+          if (selectedPageId && selectedPageId !== preferredPageId) {
+            if (assets[0].selectedPageId !== selectedPageId) {
+              await db.update(metaAssets)
+                .set({ selectedPageId, updatedAt: new Date() })
+                .where(eq(metaAssets.userId, userId));
+            }
+            await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);
+          }
+
           console.log(`[Pages] Serving ${cached.pagesJson.length} pages from DB cache for ad account ${selectedAdAccountId}`);
           return res.json({
             data: cached.pagesJson,
             selectedPageId,
             filteredByAdAccount: true,
-            autoSelected: cached.pagesJson.length === 1,
+            autoSelected,
             source: "cache",
           });
         }
@@ -4101,9 +4177,36 @@ export async function registerRoutes(
         return res.status(400).json({ error: "pageId is required" });
       }
 
+      const [assetsRow] = await db.select()
+        .from(metaAssets)
+        .where(eq(metaAssets.userId, userId))
+        .limit(1);
+
+      if (!assetsRow) {
+        return res.status(404).json({ error: "No Meta assets found" });
+      }
+
+      const selectedAdAccountId = assetsRow.selectedAdAccountId;
+      if (selectedAdAccountId) {
+        const cached = await getAccountCache(userId, selectedAdAccountId);
+        const accountPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : [];
+        if (accountPages.length > 0) {
+          const pageInScope = accountPages.some((p: any) => p?.id === pageId);
+          if (!pageInScope) {
+            return res.status(400).json({
+              error: "Selected page does not belong to current ad account",
+            });
+          }
+        }
+      }
+
       await db.update(metaAssets)
         .set({ selectedPageId: pageId, updatedAt: new Date() })
-        .where(eq(metaAssets.userId, userId));
+        .where(eq(metaAssets.id, assetsRow.id));
+
+      if (selectedAdAccountId) {
+        await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", pageId);
+      }
 
       res.json({ success: true, selectedPageId: pageId });
     } catch (error: any) {
@@ -4500,9 +4603,18 @@ export async function registerRoutes(
         const cached = await getAccountCache(userId, selectedAdAccountId);
         if (cached?.pagesJson && cached.pagesJson.length > 0) {
           pages = cached.pagesJson;
-          selectedPageId = cached.pagesSelectedPageId || selectedPageId;
+          const preferredPageId = cached.pagesSelectedPageId || selectedPageId || null;
+          selectedPageId = pickValidSelectedPageId(pages, preferredPageId);
+          if (selectedPageId && selectedPageId !== preferredPageId) {
+            await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);
+            if (assets.length > 0 && assets[0].selectedPageId !== selectedPageId) {
+              await db.update(metaAssets)
+                .set({ selectedPageId, updatedAt: new Date() })
+                .where(eq(metaAssets.userId, userId));
+            }
+          }
           filteredByAdAccount = true;
-          autoSelected = pages.length === 1;
+          autoSelected = pages.length === 1 || (!!selectedPageId && selectedPageId !== preferredPageId);
         }
       }
 
@@ -4633,7 +4745,6 @@ export async function registerRoutes(
         return res.status(404).json({ error: "No Meta assets found" });
       }
 
-      const normalizeAdAccountId = (id: string) => id.startsWith("act_") ? id.slice(4) : id;
       const requestedId = String(adAccountId);
       const allowedAccounts = (assetsRow.adAccountsJson || []) as Array<{ id: string }>;
       const matchedAccount = allowedAccounts.find((account) =>
@@ -4645,18 +4756,33 @@ export async function registerRoutes(
       }
 
       const selectedId = String(matchedAccount.id);
+      const cacheForSelectedAccount = await getAccountCache(userId, selectedId);
+      const cachedPages = Array.isArray(cacheForSelectedAccount?.pagesJson) ? cacheForSelectedAccount.pagesJson : [];
+      const preferredPageId = cacheForSelectedAccount?.pagesSelectedPageId || assetsRow.selectedPageId || null;
+      const resolvedPageId = pickValidSelectedPageId(cachedPages, preferredPageId);
+      const selectedPageId = resolvedPageId || assetsRow.selectedPageId || null;
+
+      if (selectedPageId && cacheForSelectedAccount?.pagesSelectedPageId !== selectedPageId) {
+        await upsertAccountCache(userId, selectedId, "pagesSelectedPageId", selectedPageId);
+      }
+
       const [updated] = await db.update(metaAssets)
-        .set({ selectedAdAccountId: selectedId, updatedAt: new Date() })
+        .set({ selectedAdAccountId: selectedId, selectedPageId, updatedAt: new Date() })
         .where(eq(metaAssets.id, assetsRow.id))
         .returning({
           selectedAdAccountId: metaAssets.selectedAdAccountId,
+          selectedPageId: metaAssets.selectedPageId,
         });
 
       if (!updated) {
         return res.status(500).json({ error: "Failed to persist selected ad account" });
       }
 
-      res.json({ success: true, selectedAdAccountId: updated.selectedAdAccountId });
+      res.json({
+        success: true,
+        selectedAdAccountId: updated.selectedAdAccountId,
+        selectedPageId: updated.selectedPageId,
+      });
     } catch (error: any) {
       console.error("Error updating selected ad account:", error);
       res.status(500).json({ error: error.message || "Failed to update selected ad account" });
