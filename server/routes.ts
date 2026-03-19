@@ -499,6 +499,15 @@ export async function registerRoutes(
   // Lightweight progress endpoint for polling in serverless environments
   app.get("/api/jobs/:jobId/progress", async (req: Request, res: Response) => {
     try {
+      // Progress/log polling must never be HTTP-cached, otherwise clients can
+      // receive 304 responses and miss real-time log updates.
+      res.set({
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+        "Surrogate-Control": "no-store",
+      });
+
       const { jobId } = req.params;
       const job = await storage.getJob(jobId);
       if (!job) {

@@ -994,6 +994,20 @@ export default function BulkAds() {
     lastError?: string | null;
   }>({
     queryKey: [`/api/jobs/${jobId}/progress`],
+    queryFn: async () => {
+      const res = await fetch(`/api/jobs/${jobId}/progress`, {
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      });
+      if (!res.ok) {
+        throw new Error((await res.text()) || `Failed to fetch progress (${res.status})`);
+      }
+      return res.json();
+    },
     enabled: !!jobId && isPolling,
     refetchInterval: isPolling ? 2000 : false,
   });
