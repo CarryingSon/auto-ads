@@ -106,10 +106,14 @@ export function AppSidebar() {
     queryKey: ["/api/sidebar-data"],
   });
 
-  // Fallback: if pages are empty (no DB cache yet), trigger /api/meta/pages to populate cache
+  // Fallback: if account-scoped pages are missing/unresolved, fetch /api/meta/pages to refresh cache
   const needsPagesFetch = !isSidebarFetching &&
     !!sidebarData?.selectedAdAccountId &&
-    (sidebarData?.pages?.length ?? 0) === 0;
+    (
+      !sidebarData?.filteredByAdAccount ||
+      !sidebarData?.selectedPageId ||
+      (sidebarData?.pages?.length ?? 0) === 0
+    );
 
   const { data: fallbackPagesData } = useQuery<{ data: MetaPage[]; selectedPageId: string | null }>({
     queryKey: ["/api/meta/pages"],

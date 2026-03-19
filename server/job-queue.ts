@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { db } from "./db.js";
+import { db, pool } from "./db.js";
 import {
   jobQueue,
   jobQueueAttempts,
@@ -36,6 +36,52 @@ export interface LaunchQueuePayload {
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const LOCK_WINDOW_MINUTES = 15;
+let ensureQueueTablesPromise: Promise<void> | null = null;
+
+async function ensureQueueTables(): Promise<void> {
+  if (!ensureQueueTablesPromise) {
+    ensureQueueTablesPromise = (async () => {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS job_queue (
+          id varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+          job_id varchar NOT NULL,
+          user_id varchar,
+          queue_type text DEFAULT 'launch' NOT NULL,
+          status text DEFAULT 'queued' NOT NULL,
+          attempts integer DEFAULT 0 NOT NULL,
+          max_attempts integer DEFAULT 3 NOT NULL,
+          next_run_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          locked_by text,
+          locked_until timestamp,
+          payload jsonb NOT NULL,
+          last_error text,
+          started_at timestamp,
+          completed_at timestamp,
+          created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          updated_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+        );
+      `);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS job_queue_attempts (
+          id varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+          queue_id varchar NOT NULL,
+          attempt_number integer NOT NULL,
+          status text NOT NULL,
+          error_message text,
+          created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+        );
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS job_queue_status_next_run_idx ON job_queue (status, next_run_at);`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS job_queue_job_id_idx ON job_queue (job_id);`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS job_queue_locked_until_idx ON job_queue (locked_until);`);
+    })().catch((error) => {
+      ensureQueueTablesPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureQueueTablesPromise;
+}
 
 export async function enqueueLaunchJob(params: {
   jobId: string;
@@ -43,6 +89,8 @@ export async function enqueueLaunchJob(params: {
   payload: LaunchQueuePayload;
   maxAttempts?: number;
 }) {
+  await ensureQueueTables();
+
   const [created] = await db
     .insert(jobQueue)
     .values({
@@ -61,6 +109,8 @@ export async function enqueueLaunchJob(params: {
 }
 
 export async function claimLaunchQueueItems(workerId: string, limit = 1): Promise<JobQueue[]> {
+  await ensureQueueTables();
+
   const rawResult = await db.execute<{ id: string }>(sql`
     WITH candidate AS (
       SELECT id
@@ -105,6 +155,8 @@ export async function claimLaunchQueueItems(workerId: string, limit = 1): Promis
 }
 
 export async function completeQueueItem(queueId: string): Promise<void> {
+  await ensureQueueTables();
+
   await db
     .update(jobQueue)
     .set({
@@ -128,6 +180,8 @@ export async function failOrRetryQueueItem(queueId: string, errorMessage: string
   attempts: number;
   nextRunAt: Date | null;
 }> {
+  await ensureQueueTables();
+
   const current = await getQueueItemById(queueId);
   if (!current) {
     throw new Error(`Queue item not found: ${queueId}`);
@@ -158,6 +212,8 @@ export async function failOrRetryQueueItem(queueId: string, errorMessage: string
 }
 
 export async function markQueueFailed(queueId: string, errorMessage: string): Promise<void> {
+  await ensureQueueTables();
+
   const current = await getQueueItemById(queueId);
   if (!current) return;
 
@@ -177,6 +233,8 @@ export async function markQueueFailed(queueId: string, errorMessage: string): Pr
 }
 
 export async function getLatestQueueForJob(jobId: string) {
+  await ensureQueueTables();
+
   const [row] = await db
     .select()
     .from(jobQueue)
@@ -187,6 +245,8 @@ export async function getLatestQueueForJob(jobId: string) {
 }
 
 export async function getQueueItemById(queueId: string) {
+  await ensureQueueTables();
+
   const [row] = await db
     .select()
     .from(jobQueue)
@@ -201,6 +261,8 @@ async function recordAttempt(
   status: "processing" | "completed" | "retrying" | "failed",
   errorMessage?: string,
 ) {
+  await ensureQueueTables();
+
   await db.insert(jobQueueAttempts).values({
     queueId,
     attemptNumber,
@@ -210,6 +272,8 @@ async function recordAttempt(
 }
 
 export async function clearQueueForJob(jobId: string): Promise<void> {
+  await ensureQueueTables();
+
   await db
     .delete(jobQueue)
     .where(and(eq(jobQueue.jobId, jobId), inArray(jobQueue.status, ["queued", "retrying"])));

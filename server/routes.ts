@@ -4581,11 +4581,39 @@ export async function registerRoutes(
         return res.status(400).json({ error: "adAccountId is required" });
       }
 
-      await db.update(metaAssets)
-        .set({ selectedAdAccountId: adAccountId, updatedAt: new Date() })
-        .where(eq(metaAssets.userId, userId));
+      const [assetsRow] = await db.select()
+        .from(metaAssets)
+        .where(eq(metaAssets.userId, userId))
+        .limit(1);
 
-      res.json({ success: true, selectedAdAccountId: adAccountId });
+      if (!assetsRow) {
+        return res.status(404).json({ error: "No Meta assets found" });
+      }
+
+      const normalizeAdAccountId = (id: string) => id.startsWith("act_") ? id.slice(4) : id;
+      const requestedId = String(adAccountId);
+      const allowedAccounts = (assetsRow.adAccountsJson || []) as Array<{ id: string }>;
+      const matchedAccount = allowedAccounts.find((account) =>
+        normalizeAdAccountId(String(account.id)) === normalizeAdAccountId(requestedId)
+      );
+
+      if (!matchedAccount) {
+        return res.status(400).json({ error: "Invalid adAccountId for this user" });
+      }
+
+      const selectedId = String(matchedAccount.id);
+      const [updated] = await db.update(metaAssets)
+        .set({ selectedAdAccountId: selectedId, updatedAt: new Date() })
+        .where(eq(metaAssets.id, assetsRow.id))
+        .returning({
+          selectedAdAccountId: metaAssets.selectedAdAccountId,
+        });
+
+      if (!updated) {
+        return res.status(500).json({ error: "Failed to persist selected ad account" });
+      }
+
+      res.json({ success: true, selectedAdAccountId: updated.selectedAdAccountId });
     } catch (error: any) {
       console.error("Error updating selected ad account:", error);
       res.status(500).json({ error: error.message || "Failed to update selected ad account" });
