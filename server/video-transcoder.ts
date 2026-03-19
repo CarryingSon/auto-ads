@@ -45,6 +45,15 @@ export interface TranscodeResult {
   };
 }
 
+export interface MetaVideoPreparationDecision {
+  ok: boolean;
+  shouldTranscode: boolean;
+  reasons: string[];
+  input: VideoAnalysis;
+  usedFallback: boolean;
+  error?: string;
+}
+
 const PROBLEMATIC_FILENAME_PATTERNS = [
   'auto_cropped',
   'edited',
@@ -149,6 +158,96 @@ export function needsTranscode(analysis: VideoAnalysis, originalFilename: string
   return { needed: reasons.length > 0, reasons };
 }
 
+function buildUnknownInputAnalysis(inputPath: string, originalFilename: string): VideoAnalysis {
+  return {
+    filename: originalFilename,
+    size: 0,
+    container: path.extname(inputPath),
+    duration: 0,
+    video: null,
+    audio: null,
+  };
+}
+
+function isMissingBinaryError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('command not found') ||
+    normalized.includes('enoent') ||
+    normalized.includes('spawn ffprobe')
+  );
+}
+
+export async function decideMetaVideoPreparation(
+  inputPath: string,
+  originalFilename: string,
+  minDuration: number = 1.0
+): Promise<MetaVideoPreparationDecision> {
+  let inputAnalysis: VideoAnalysis;
+
+  try {
+    inputAnalysis = await analyzeVideo(inputPath);
+    console.log('[VideoTranscoder] Input analysis:', JSON.stringify(inputAnalysis, null, 2));
+  } catch (error: any) {
+    const errorMessage = error?.message || 'Failed to analyze video';
+    const isFfprobeUnavailable = errorMessage.includes('ffprobe failed') && isMissingBinaryError(errorMessage);
+
+    if (isFfprobeUnavailable) {
+      console.warn('[VideoTranscoder] ffprobe not available in runtime, using direct-upload fallback');
+      return {
+        ok: true,
+        shouldTranscode: false,
+        reasons: ['ffprobe_unavailable'],
+        input: buildUnknownInputAnalysis(inputPath, originalFilename),
+        usedFallback: true,
+        error: errorMessage,
+      };
+    }
+
+    return {
+      ok: false,
+      shouldTranscode: false,
+      reasons: ['ffprobe_failed'],
+      input: buildUnknownInputAnalysis(inputPath, originalFilename),
+      usedFallback: false,
+      error: errorMessage,
+    };
+  }
+
+  if (!inputAnalysis.video) {
+    return {
+      ok: false,
+      shouldTranscode: false,
+      reasons: ['no_video_stream'],
+      input: inputAnalysis,
+      usedFallback: false,
+      error: 'No video stream found - file may be corrupt or invalid',
+    };
+  }
+
+  if (inputAnalysis.duration < minDuration) {
+    return {
+      ok: false,
+      shouldTranscode: false,
+      reasons: ['duration_too_short'],
+      input: inputAnalysis,
+      usedFallback: false,
+      error: `Duration ${inputAnalysis.duration}s is less than ${minDuration}s minimum`,
+    };
+  }
+
+  const { needed, reasons } = needsTranscode(inputAnalysis, originalFilename);
+  console.log('[VideoTranscoder] Transcode check:', { needed, reasons });
+
+  return {
+    ok: true,
+    shouldTranscode: needed,
+    reasons,
+    input: inputAnalysis,
+    usedFallback: false,
+  };
+}
+
 async function runFfmpeg(args: string[]): Promise<{ success: boolean; stderr: string }> {
   return new Promise((resolve) => {
     const ffmpeg = spawn('ffmpeg', args);
@@ -246,64 +345,41 @@ export async function prepareVideoForMeta(
   const startTime = Date.now();
   console.log('[VideoTranscoder] Preparing video for Meta:', { inputPath, originalFilename });
 
-  let inputAnalysis: VideoAnalysis;
-  try {
-    inputAnalysis = await analyzeVideo(inputPath);
-    console.log('[VideoTranscoder] Input analysis:', JSON.stringify(inputAnalysis, null, 2));
-  } catch (error: any) {
+  const decision = await decideMetaVideoPreparation(inputPath, originalFilename, minDuration);
+  if (!decision.ok) {
     return {
       ok: false,
       usedPath: inputPath,
       transcoded: false,
-      reasons: ['ffprobe_failed'],
+      reasons: decision.reasons,
       logs: {
-        input: {
-          filename: originalFilename,
-          size: 0,
-          container: path.extname(inputPath),
-          duration: 0,
-          video: null,
-          audio: null,
-        },
-        error: error.message,
+        input: decision.input,
+        error: decision.error,
       },
     };
   }
 
-  if (!inputAnalysis.video) {
-    return {
-      ok: false,
-      usedPath: inputPath,
-      transcoded: false,
-      reasons: ['no_video_stream'],
-      logs: { input: inputAnalysis, error: 'No video stream found - file may be corrupt or invalid' },
-    };
-  }
-
-  if (inputAnalysis.duration < minDuration) {
-    return {
-      ok: false,
-      usedPath: inputPath,
-      transcoded: false,
-      reasons: ['duration_too_short'],
-      logs: { input: inputAnalysis, error: `Duration ${inputAnalysis.duration}s is less than ${minDuration}s minimum` },
-    };
-  }
-
-  const { needed, reasons } = needsTranscode(inputAnalysis, originalFilename);
-  console.log('[VideoTranscoder] Transcode check:', { needed, reasons });
-
-  if (!needed) {
+  if (!decision.shouldTranscode) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`[VideoTranscoder] No transcode needed, completed in ${elapsed}s`);
+    if (decision.usedFallback) {
+      console.warn(`[VideoTranscoder] Direct upload fallback (transcode decision unavailable), completed in ${elapsed}s`);
+    } else {
+      console.log(`[VideoTranscoder] No transcode needed, completed in ${elapsed}s`);
+    }
     return {
       ok: true,
       usedPath: inputPath,
       transcoded: false,
-      reasons: [],
-      logs: { input: inputAnalysis },
+      reasons: decision.reasons,
+      logs: {
+        input: decision.input,
+        error: decision.usedFallback ? decision.error : undefined,
+      },
     };
   }
+
+  const inputAnalysis = decision.input;
+  const reasons = decision.reasons;
 
   try {
     const hasAudio = inputAnalysis.audio !== null;
