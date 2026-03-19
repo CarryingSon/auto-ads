@@ -30,6 +30,14 @@ const META_API_VERSION = "v24.0";
 const META_GRAPH_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 const META_VIDEO_URL = `https://graph-video.facebook.com/${META_API_VERSION}`;
 
+function hasSupabaseStorageConfig(): boolean {
+  return Boolean(
+    process.env.SUPABASE_URL &&
+    process.env.SUPABASE_SERVICE_ROLE_KEY &&
+    process.env.SUPABASE_STORAGE_BUCKET
+  );
+}
+
 // Rate limiting configuration
 const RATE_LIMIT_CONFIG = {
   minDelayMs: 500,           // Minimum delay between API calls (500ms)
@@ -1726,9 +1734,15 @@ export class MetaAdsApi {
 
       const uploadUrl = `${META_VIDEO_URL}/${adAccountFormatted}/advideos`;
       const maxRetries = 3;
+      const canUseSupabaseStorage = hasSupabaseStorageConfig();
       let video_id: string | undefined;
       
       if (transcodeResult.transcoded) {
+        if (!canUseSupabaseStorage) {
+          throw new Error(
+            "Video requires transcoding, but Supabase storage is not configured (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET)",
+          );
+        }
         console.log('[MetaAdsApi] Video was transcoded - uploading to Supabase Storage first');
         
         const videoBuffer = fs.readFileSync(uploadPath);
@@ -1789,7 +1803,7 @@ export class MetaAdsApi {
         
         if (downloadedPath) { await cleanupTempFile(downloadedPath); downloadedPath = null; }
         if (transcodedPath && transcodedPath !== downloadedPath) { await cleanupTempFile(transcodedPath); transcodedPath = null; }
-      } else if (options?.localPath) {
+      } else if (options?.localPath && canUseSupabaseStorage) {
         console.log('[MetaAdsApi] Video NOT transcoded (local path) - uploading via Supabase Storage');
         
         const videoBuffer = fs.readFileSync(uploadPath);
@@ -1839,6 +1853,11 @@ export class MetaAdsApi {
           }
         }
       } else {
+        if (options?.localPath && !canUseSupabaseStorage) {
+          console.warn(
+            "[MetaAdsApi] Local video available but Supabase storage is not configured; falling back to direct file_url upload",
+          );
+        }
         console.log('[MetaAdsApi] Video NOT transcoded - using file_url method');
         
         if (downloadedPath) { await cleanupTempFile(downloadedPath); downloadedPath = null; }
