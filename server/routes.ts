@@ -5663,7 +5663,72 @@ export async function registerRoutes(
         .orderBy(desc(metaAdsets.lastSyncedAt));
 
       const adsets = adsetRows.map(normalizeCachedAdSet);
-      res.json({ data: adsets, source: "cache" });
+      if (adsets.length > 0 || !selectedAdAccountId) {
+        return res.json({ data: adsets, source: "cache" });
+      }
+
+      // Cache miss for selected ad account:
+      // sync ad sets on-demand once, then serve from DB cache.
+      const campaignKeyPart = campaignId ? String(campaignId) : "all";
+      const cacheKey = `adsets:${userId}:${normalizeAdAccountId(selectedAdAccountId)}:${campaignKeyPart}`;
+      const memoryCached = metaApiCache.get(cacheKey);
+      if (memoryCached && Date.now() < memoryCached.expiry) {
+        return res.json({ data: memoryCached.data || [], source: "memory-cache" });
+      }
+
+      try {
+        const api = new MetaAdsApi(userId);
+        const initialized = await api.initialize();
+        if (initialized) {
+          api.setAdAccountId(selectedAdAccountId);
+          const syncResult = await api.syncAdSets();
+          if (syncResult.errors.length > 0) {
+            console.warn("[AdSets] Sync fallback completed with warnings", {
+              userId,
+              selectedAdAccountId,
+              campaignId: campaignId || null,
+              synced: syncResult.synced,
+              errors: syncResult.errors.slice(0, 3),
+            });
+          } else {
+            console.log("[AdSets] Sync fallback success", {
+              userId,
+              selectedAdAccountId,
+              campaignId: campaignId || null,
+              synced: syncResult.synced,
+            });
+          }
+        } else {
+          console.warn("[AdSets] Sync fallback skipped: Meta connection unavailable", {
+            userId,
+            selectedAdAccountId,
+            campaignId: campaignId || null,
+          });
+        }
+      } catch (fallbackError: any) {
+        console.warn("[AdSets] Sync fallback failed", {
+          userId,
+          selectedAdAccountId,
+          campaignId: campaignId || null,
+          error: fallbackError?.message || String(fallbackError),
+        });
+      }
+
+      const refreshedRows = await db.select()
+        .from(metaAdsets)
+        .where(and(...baseFilters))
+        .orderBy(desc(metaAdsets.lastSyncedAt));
+      const refreshedAdsets = refreshedRows.map(normalizeCachedAdSet);
+
+      metaApiCache.set(cacheKey, {
+        data: refreshedAdsets,
+        expiry: Date.now() + META_CACHE_TTL,
+      });
+
+      res.json({
+        data: refreshedAdsets,
+        source: refreshedAdsets.length > 0 ? "cache-refreshed" : "live-empty",
+      });
     } catch (error: any) {
       console.error("Error fetching adsets:", error);
       res.status(500).json({ error: error.message || "Failed to fetch adsets" });
