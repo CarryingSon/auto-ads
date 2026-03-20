@@ -5155,7 +5155,66 @@ export async function registerRoutes(
         .orderBy(desc(metaCampaigns.lastSyncedAt));
 
       const campaigns = campaignRows.map(normalizeCachedCampaign);
-      res.json({ data: campaigns, source: "cache" });
+      if (campaigns.length > 0 || !selectedAdAccountId) {
+        return res.json({ data: campaigns, source: "cache" });
+      }
+
+      // Cache miss for selected ad account:
+      // fetch-on-demand once, then serve from DB cache.
+      const cacheKey = `campaigns:${userId}:${normalizeAdAccountId(selectedAdAccountId)}`;
+      const memoryCached = metaApiCache.get(cacheKey);
+      if (memoryCached && Date.now() < memoryCached.expiry) {
+        return res.json({ data: memoryCached.data || [], source: "memory-cache" });
+      }
+
+      try {
+        const api = new MetaAdsApi(userId);
+        const initialized = await api.initialize();
+        if (initialized) {
+          api.setAdAccountId(selectedAdAccountId);
+          const syncResult = await api.syncCampaigns();
+          if (syncResult.errors.length > 0) {
+            console.warn("[Campaigns] Sync fallback completed with warnings", {
+              userId,
+              selectedAdAccountId,
+              synced: syncResult.synced,
+              errors: syncResult.errors.slice(0, 3),
+            });
+          } else {
+            console.log("[Campaigns] Sync fallback success", {
+              userId,
+              selectedAdAccountId,
+              synced: syncResult.synced,
+            });
+          }
+        } else {
+          console.warn("[Campaigns] Sync fallback skipped: Meta connection unavailable", {
+            userId,
+            selectedAdAccountId,
+          });
+        }
+      } catch (fallbackError: any) {
+        console.warn("[Campaigns] Sync fallback failed", {
+          userId,
+          selectedAdAccountId,
+          error: fallbackError?.message || String(fallbackError),
+        });
+      }
+
+      const refreshedRows = await db.select()
+        .from(metaCampaigns)
+        .where(whereClause)
+        .orderBy(desc(metaCampaigns.lastSyncedAt));
+      const refreshedCampaigns = refreshedRows.map(normalizeCachedCampaign);
+      metaApiCache.set(cacheKey, {
+        data: refreshedCampaigns,
+        expiry: Date.now() + META_CACHE_TTL,
+      });
+
+      res.json({
+        data: refreshedCampaigns,
+        source: refreshedCampaigns.length > 0 ? "cache-refreshed" : "live-empty",
+      });
     } catch (error: any) {
       console.error("Error fetching campaigns:", error);
       res.status(500).json({ error: error.message || "Failed to fetch campaigns" });
