@@ -144,6 +144,9 @@ export async function createApp(options: CreateAppOptions = {}) {
         // on hot paths because the table already exists and the extra
         // query can amplify connection pressure.
         createTableIfMissing: !isProduction,
+        // Avoid per-request session touch writes in production to reduce
+        // database pressure during parallel client fetch bursts.
+        disableTouch: isProduction,
       }),
       secret: sessionSecret || "development-secret-key",
       resave: false,

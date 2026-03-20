@@ -4369,8 +4369,10 @@ export async function registerRoutes(
               .where(eq(metaAssets.userId, userId));
             
             if (selectedAdAccountId) {
-              upsertAccountCache(userId, selectedAdAccountId, "pagesJson", filteredPages);
-              upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);
+              await Promise.all([
+                upsertAccountCache(userId, selectedAdAccountId, "pagesJson", filteredPages),
+                upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId),
+              ]);
             }
 
             return res.json({ 
@@ -4387,7 +4389,19 @@ export async function registerRoutes(
         }
       }
 
-      // Fallback: return all pages (when no ad account selected or API call fails)
+      // If ad account-scoped fetch fails, return empty instead of global pages
+      // to avoid cross-account page/Instagram mismatch in the sidebar.
+      if (selectedAdAccountId) {
+        return res.json({
+          data: [],
+          selectedPageId: null,
+          filteredByAdAccount: true,
+          autoSelected: false,
+          source: "fallback-empty",
+        });
+      }
+
+      // Fallback: return all pages only when no ad account is selected
       const pages = assets[0].pagesJson || [];
       const businessOwnedPages = assets[0].businessOwnedPagesJson || [];
       
@@ -4625,7 +4639,7 @@ export async function registerRoutes(
               .set({ pagesJson: updatedPagesJson, updatedAt: new Date() })
               .where(eq(metaAssets.userId, userId));
             if (selectedAdAccountId) {
-              upsertAccountCache(userId, selectedAdAccountId, "pagesJson", updatedPagesJson);
+              await upsertAccountCache(userId, selectedAdAccountId, "pagesJson", updatedPagesJson);
             }
             console.log(`[IG] Updated DB cache with ${accounts.length} IG account(s) for page ${pageId}`);
           } catch (cacheErr) {
@@ -4871,9 +4885,16 @@ export async function registerRoutes(
         }
       }
 
-      // Fallback to metaAssets.pagesJson if no cache yet
+      // Fallback to metaAssets.pagesJson only when no ad account is selected.
+      // If an ad account is selected but account-scoped cache is not ready yet,
+      // avoid showing cross-account pages/Instagram from the global pagesJson.
       if (pages.length === 0 && assets.length > 0) {
-        pages = assets[0].pagesJson || [];
+        if (selectedAdAccountId) {
+          pages = [];
+          selectedPageId = null;
+        } else {
+          pages = assets[0].pagesJson || [];
+        }
       }
 
       // --- Instagram accounts for selected page (embedded in pagesJson) ---
@@ -5013,7 +5034,8 @@ export async function registerRoutes(
       const cachedPages = Array.isArray(cacheForSelectedAccount?.pagesJson) ? cacheForSelectedAccount.pagesJson : [];
       const preferredPageId = cacheForSelectedAccount?.pagesSelectedPageId || assetsRow.selectedPageId || null;
       const resolvedPageId = pickValidSelectedPageId(cachedPages, preferredPageId);
-      const selectedPageId = resolvedPageId || assetsRow.selectedPageId || null;
+      // Never carry over selectedPageId from a previously selected ad account.
+      const selectedPageId = resolvedPageId || null;
 
       if (selectedPageId && cacheForSelectedAccount?.pagesSelectedPageId !== selectedPageId) {
         await upsertAccountCache(userId, selectedId, "pagesSelectedPageId", selectedPageId);

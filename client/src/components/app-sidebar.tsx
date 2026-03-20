@@ -254,13 +254,9 @@ export function AppSidebar() {
     },
     onSuccess: async () => {
       setIsAdAccountSwitching(false);
-      // Invalidate everything — sidebar-data will re-read from DB cache
+      // Keep this lightweight to avoid request bursts during account switch.
       await queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
       queryClient.invalidateQueries({ queryKey: ["/api/meta/ad-accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/meta/campaigns"], exact: false });
-      queryClient.invalidateQueries({ queryKey: ["/api/meta/insights"], exact: false });
-      queryClient.invalidateQueries({ queryKey: ["/api/meta/ad-statistics"], exact: false });
-      queryClient.invalidateQueries({ queryKey: ["/api/ad-account-settings"], exact: false });
     },
     onError: (_err, _adAccountId, context) => {
       if (context?.previousData) {
