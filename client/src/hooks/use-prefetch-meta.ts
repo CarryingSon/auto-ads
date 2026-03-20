@@ -58,7 +58,7 @@ export function usePrefetchMetaData() {
       campaign.effective_status === "ACTIVE" || campaign.status === "ACTIVE"
     );
 
-      const toPrefetch = activeCampaigns.filter((campaign) => {
+    const toPrefetch = activeCampaigns.filter((campaign) => {
       if (prefetchedRef.current.has(campaign.id)) return false;
       const queryKey = ["/api/meta/adsets", campaign.id];
       const existing = queryClient.getQueryState(queryKey);

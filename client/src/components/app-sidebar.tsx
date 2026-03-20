@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -61,6 +61,47 @@ interface SidebarData {
   drive: { email: string | null; connected: boolean };
 }
 
+const SIDEBAR_CACHE_PREFIX = "auto_ads_sidebar_cache_v1";
+const SIDEBAR_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+interface SidebarCacheEntry {
+  cachedAt: number;
+  data: SidebarData;
+}
+
+function readSidebarCache(userId?: string): SidebarData | undefined {
+  if (typeof window === "undefined" || !userId) return undefined;
+  try {
+    const raw = window.localStorage.getItem(`${SIDEBAR_CACHE_PREFIX}:${userId}`);
+    if (!raw) return undefined;
+
+    const parsed = JSON.parse(raw) as SidebarCacheEntry;
+    if (!parsed?.data || typeof parsed.cachedAt !== "number") return undefined;
+
+    if (Date.now() - parsed.cachedAt > SIDEBAR_CACHE_MAX_AGE_MS) {
+      window.localStorage.removeItem(`${SIDEBAR_CACHE_PREFIX}:${userId}`);
+      return undefined;
+    }
+
+    return parsed.data;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSidebarCache(userId: string, data: SidebarData): void {
+  if (typeof window === "undefined" || !userId) return;
+  try {
+    const payload: SidebarCacheEntry = {
+      cachedAt: Date.now(),
+      data,
+    };
+    window.localStorage.setItem(`${SIDEBAR_CACHE_PREFIX}:${userId}`, JSON.stringify(payload));
+  } catch {
+    // Ignore localStorage failures (quota/private mode).
+  }
+}
+
 const navigationItems = [
   {
     title: "Dashboard",
@@ -100,13 +141,23 @@ interface ActiveJob {
 export function AppSidebar() {
   const [location, setLocation] = useLocation();
   const { user } = useAuth();
+  const userId = user?.id;
 
   const [isAdAccountSwitching, setIsAdAccountSwitching] = useState(false);
+  const cachedSidebarData = useMemo(() => readSidebarCache(userId), [userId]);
 
-  // Single combined query — all sidebar data from DB cache, no Meta API calls
+  // Single combined query — render instantly from local cache, then refresh in background.
   const { data: sidebarData, isFetching: isSidebarFetching } = useQuery<SidebarData>({
     queryKey: ["/api/sidebar-data"],
+    placeholderData: cachedSidebarData,
+    staleTime: 30_000,
+    refetchOnMount: "always",
   });
+
+  useEffect(() => {
+    if (!userId || !sidebarData) return;
+    writeSidebarCache(userId, sidebarData);
+  }, [userId, sidebarData]);
   const selectedAdAccountId = sidebarData?.selectedAdAccountId || "";
 
   // Fallback: if account-scoped pages are missing/unresolved, fetch /api/meta/pages to refresh cache

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { queryClient } from "@/lib/queryClient";
 
 interface LoginGateProps {
   children: React.ReactNode;
@@ -15,6 +16,14 @@ export function LoginGate({ children }: LoginGateProps) {
       setLocation("/login");
     }
   }, [authLoading, isAuthenticated, location, setLocation]);
+
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+    void queryClient.prefetchQuery({
+      queryKey: ["/api/sidebar-data"],
+      staleTime: 30_000,
+    });
+  }, [authLoading, isAuthenticated]);
 
   if (authLoading) {
     return (
