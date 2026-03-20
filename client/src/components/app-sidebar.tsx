@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Lock } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { SiFacebook, SiInstagram } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -160,12 +160,6 @@ export function AppSidebar() {
   const selectedInstagram = instagramAccounts.find(a => a.id === savedInstagramId) ||
     (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
 
-  const isPagesLoading = !!selectedAdAccountId && (isSidebarFetching || (needsPagesFetch && isFallbackPagesFetching));
-  const isInstagramLoading = false;
-  const showAccountScopedSkeleton = !!selectedAdAccountId &&
-    (isAdAccountSwitching || (isPagesLoading && !isFallbackPagesFetched));
-  const areBothAccountsReady = !showAccountScopedSkeleton && !isInstagramLoading;
-
   // Redirect to ad account selection if pending
   useEffect(() => {
     if (!isSidebarFetching && hasPendingAccounts && adAccounts.length === 0 && !location.startsWith("/select-ad-account")) {
@@ -255,10 +249,13 @@ export function AppSidebar() {
       return { previousData };
     },
     onSuccess: async () => {
-      setIsAdAccountSwitching(false);
-      // Keep this lightweight to avoid request bursts during account switch.
-      await queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/meta/ad-accounts"] });
+      try {
+        // Keep this lightweight to avoid request bursts during account switch.
+        await queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/meta/ad-accounts"] });
+      } finally {
+        setIsAdAccountSwitching(false);
+      }
     },
     onError: (_err, _adAccountId, context) => {
       if (context?.previousData) {
@@ -345,6 +342,16 @@ export function AppSidebar() {
   const handleLogout = () => {
     window.location.href = "/auth/logout";
   };
+
+  const isPagesLoading = !!selectedAdAccountId && (isSidebarFetching || (needsPagesFetch && isFallbackPagesFetching));
+  const showAccountScopedSkeleton = !!selectedAdAccountId &&
+    (
+      isAdAccountSwitching ||
+      updateAdAccountMutation.isPending ||
+      isPagesLoading ||
+      (needsPagesFetch && !isFallbackPagesFetched)
+    );
+  const areBothAccountsReady = !showAccountScopedSkeleton;
 
   return (
     <Sidebar className="sidebar-pane border-r-0">
@@ -614,16 +621,16 @@ export function AppSidebar() {
             <div className="space-y-3">
               <div>
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Facebook Page</p>
-                <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-muted animate-pulse shrink-0" />
-                  <div className="h-3 w-20 bg-muted animate-pulse rounded" />
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                  <span>Loading page...</span>
                 </div>
               </div>
               <div>
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Instagram</p>
-                <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-muted animate-pulse shrink-0" />
-                  <div className="h-3 w-16 bg-muted animate-pulse rounded" />
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                  <span>Loading Instagram...</span>
                 </div>
               </div>
             </div>
