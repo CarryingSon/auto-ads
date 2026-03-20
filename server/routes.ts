@@ -400,6 +400,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Not authenticated" });
       }
       const connections = await storage.getAllConnections(userId);
+      let didMutateConnections = false;
       
       const googleDrive = connections.find(c => c.provider === "google_drive");
       if (!googleDrive) {
@@ -415,6 +416,7 @@ export async function registerRoutes(
               scopes: ["drive.readonly"],
               connectedAt: new Date(),
             });
+            didMutateConnections = true;
           }
         } catch {}
       }
@@ -440,12 +442,16 @@ export async function registerRoutes(
             scopes: metaOAuth[0].scopes || ["ads_management"],
             connectedAt: metaOAuth[0].connectedAt || new Date(),
           });
+          didMutateConnections = true;
         }
       }
       
-      // Refresh the list
-      const updatedConnections = await storage.getAllConnections(userId);
-      res.json(updatedConnections);
+      if (didMutateConnections) {
+        const updatedConnections = await storage.getAllConnections(userId);
+        return res.json(updatedConnections);
+      }
+
+      res.json(connections);
     } catch (error) {
       console.error("Error fetching connections:", error);
       res.status(500).json({ error: "Failed to fetch connections" });
@@ -4237,10 +4243,11 @@ export async function registerRoutes(
       // Always check DB cache first — pages/Instagram profiles rarely change
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
-        if (cached?.pagesJson && cached.pagesJson.length > 0) {
-          const preferredPageId = cached.pagesSelectedPageId || assets[0].selectedPageId || null;
-          const selectedPageId = pickValidSelectedPageId(cached.pagesJson, preferredPageId);
-          const autoSelected = cached.pagesJson.length === 1 || (!!selectedPageId && selectedPageId !== preferredPageId);
+        const cachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
+        if (cachedPages) {
+          const preferredPageId = cached?.pagesSelectedPageId || assets[0].selectedPageId || null;
+          const selectedPageId = pickValidSelectedPageId(cachedPages, preferredPageId);
+          const autoSelected = cachedPages.length === 1 || (!!selectedPageId && selectedPageId !== preferredPageId);
 
           if (selectedPageId && selectedPageId !== preferredPageId) {
             if (assets[0].selectedPageId !== selectedPageId) {
@@ -4251,9 +4258,9 @@ export async function registerRoutes(
             await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);
           }
 
-          console.log(`[Pages] Serving ${cached.pagesJson.length} pages from DB cache for ad account ${selectedAdAccountId}`);
+          console.log(`[Pages] Serving ${cachedPages.length} pages from DB cache for ad account ${selectedAdAccountId}`);
           return res.json({
-            data: sanitizePagesForClient(cached.pagesJson),
+            data: sanitizePagesForClient(cachedPages),
             selectedPageId,
             filteredByAdAccount: true,
             autoSelected,
@@ -4906,9 +4913,10 @@ export async function registerRoutes(
 
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
-        if (cached?.pagesJson && cached.pagesJson.length > 0) {
-          pages = cached.pagesJson;
-          const preferredPageId = cached.pagesSelectedPageId || selectedPageId || null;
+        const cachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
+        if (cachedPages) {
+          pages = cachedPages;
+          const preferredPageId = cached?.pagesSelectedPageId || selectedPageId || null;
           selectedPageId = pickValidSelectedPageId(pages, preferredPageId);
           if (selectedPageId && selectedPageId !== preferredPageId) {
             await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);

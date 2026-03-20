@@ -1,7 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { queryClient } from "@/lib/queryClient";
 
 interface LoginGateProps {
   children: React.ReactNode;
@@ -10,14 +9,6 @@ interface LoginGateProps {
 export function LoginGate({ children }: LoginGateProps) {
   const [location, setLocation] = useLocation();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const hasInvalidated = useRef(false);
-
-  useEffect(() => {
-    if (isAuthenticated && !hasInvalidated.current) {
-      hasInvalidated.current = true;
-      queryClient.invalidateQueries({ queryKey: ["/api"] });
-    }
-  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated && location !== "/login") {

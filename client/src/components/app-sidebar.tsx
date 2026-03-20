@@ -110,12 +110,15 @@ export function AppSidebar() {
   const selectedAdAccountId = sidebarData?.selectedAdAccountId || "";
 
   // Fallback: if account-scoped pages are missing/unresolved, fetch /api/meta/pages to refresh cache
+  const hasSelectedAdAccount = !!sidebarData?.selectedAdAccountId;
+  const isAccountScopeResolved = sidebarData?.filteredByAdAccount === true;
+  const sidebarPageCount = sidebarData?.pages?.length ?? 0;
+  const hasSelectedPage = !!sidebarData?.selectedPageId;
   const needsPagesFetch = !isSidebarFetching &&
-    !!sidebarData?.selectedAdAccountId &&
+    hasSelectedAdAccount &&
     (
-      !sidebarData?.filteredByAdAccount ||
-      !sidebarData?.selectedPageId ||
-      (sidebarData?.pages?.length ?? 0) === 0
+      !isAccountScopeResolved ||
+      (sidebarPageCount > 0 && !hasSelectedPage)
     );
 
   const {

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 
@@ -18,12 +18,19 @@ interface Campaign {
   lifetime_budget?: string;
 }
 
-const MAX_CONCURRENT_PREFETCH = 2;
-const DELAY_BETWEEN_BATCHES_MS = 3000;
+const MAX_CONCURRENT_PREFETCH = 1;
+const DELAY_BETWEEN_BATCHES_MS = 4000;
+const PREFETCH_START_DELAY_MS = 2500;
 
 export function usePrefetchMetaData() {
   const prefetchedRef = useRef<Set<string>>(new Set());
   const prefetchingRef = useRef(false);
+  const [prefetchReady, setPrefetchReady] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPrefetchReady(true), PREFETCH_START_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const { data: connections = [] } = useQuery<Connection[]>({
     queryKey: ["/api/connections"],
@@ -37,13 +44,8 @@ export function usePrefetchMetaData() {
     data: Campaign[];
     source: string;
   }>({
-    queryKey: ["/api/meta/campaigns", "live"],
-    queryFn: async () => {
-      const res = await fetch("/api/meta/campaigns?live=true");
-      if (!res.ok) throw new Error("Failed to fetch campaigns");
-      return res.json();
-    },
-    enabled: metaConnected,
+    queryKey: ["/api/meta/campaigns"],
+    enabled: metaConnected && prefetchReady,
     retry: 1,
   });
 
@@ -56,9 +58,9 @@ export function usePrefetchMetaData() {
       campaign.effective_status === "ACTIVE" || campaign.status === "ACTIVE"
     );
 
-    const toPrefetch = activeCampaigns.filter((campaign) => {
+      const toPrefetch = activeCampaigns.filter((campaign) => {
       if (prefetchedRef.current.has(campaign.id)) return false;
-      const queryKey = [`/api/meta/adsets?live=true&campaignId=${campaign.id}`];
+      const queryKey = ["/api/meta/adsets", campaign.id];
       const existing = queryClient.getQueryState(queryKey);
       return !existing?.data;
     });
@@ -73,8 +75,18 @@ export function usePrefetchMetaData() {
         await Promise.allSettled(
           batch.map((campaign) => {
             prefetchedRef.current.add(campaign.id);
-            const queryKey = [`/api/meta/adsets?live=true&campaignId=${campaign.id}`];
-            return queryClient.prefetchQuery({ queryKey, staleTime: Infinity });
+            const queryKey = ["/api/meta/adsets", campaign.id];
+            return queryClient.prefetchQuery({
+              queryKey,
+              queryFn: async () => {
+                const res = await fetch(`/api/meta/adsets?campaignId=${encodeURIComponent(campaign.id)}`, {
+                  credentials: "include",
+                });
+                if (!res.ok) throw new Error("Failed to prefetch ad sets");
+                return res.json();
+              },
+              staleTime: Infinity,
+            });
           })
         );
         if (i + MAX_CONCURRENT_PREFETCH < toPrefetch.length) {
@@ -83,5 +95,5 @@ export function usePrefetchMetaData() {
       }
       prefetchingRef.current = false;
     })();
-  }, [metaConnected, campaigns]);
+  }, [metaConnected, campaigns, prefetchReady]);
 }
