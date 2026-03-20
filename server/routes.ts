@@ -4345,16 +4345,19 @@ export async function registerRoutes(
               }
             });
             
-            // Auto-select first page if only one is available, or if current selection is not in filtered list
+            // Resolve selected page strictly from filtered pages for this ad account.
             let selectedPageId = assets[0].selectedPageId;
             const currentSelectionInList = filteredPages.some((p: any) => p.id === selectedPageId);
             
-            if (filteredPages.length === 1) {
-              // Only one page available - auto-select it
+            if (filteredPages.length === 0) {
+              // No promotable pages for this ad account: clear selected page.
+              selectedPageId = null;
+            } else if (filteredPages.length === 1) {
+              // Only one page available - auto-select it.
               selectedPageId = filteredPages[0].id;
               console.log(`[Pages] Auto-selecting the only available page: ${selectedPageId}`);
-            } else if (!currentSelectionInList && filteredPages.length > 0) {
-              // Current selection not in filtered list - select first
+            } else if (!currentSelectionInList) {
+              // Current selection not in filtered list - select first.
               selectedPageId = filteredPages[0].id;
               console.log(`[Pages] Current page not in ad account's pages, auto-selecting: ${selectedPageId}`);
             }
@@ -4379,7 +4382,7 @@ export async function registerRoutes(
               data: sanitizePagesForClient(filteredPages), 
               selectedPageId: selectedPageId,
               filteredByAdAccount: true,
-              autoSelected: filteredPages.length === 1 || !currentSelectionInList,
+              autoSelected: filteredPages.length === 1 || (filteredPages.length > 0 && !currentSelectionInList),
               source: "live",
             });
           }
