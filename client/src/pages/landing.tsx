@@ -179,9 +179,12 @@ export default function Landing() {
           <div className="px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16 gap-4">
               <div className="flex-shrink-0 flex items-center gap-2">
-                <div className="bg-gradient-to-br from-[#1877F2] to-blue-600 text-white p-1.5 rounded-lg shadow-lg" style={{ boxShadow: "0 4px 14px rgba(59,130,246,0.2)" }}>
-                  <i className="fas fa-sync-alt text-lg" />
-                </div>
+                <img
+                  src="/favicon.png"
+                  alt="Auto-ads logo"
+                  className="w-8 h-8 rounded-lg object-contain bg-white/70 p-0.5 shadow-lg"
+                  style={{ boxShadow: "0 4px 14px rgba(59,130,246,0.2)" }}
+                />
                 <span className="font-bold text-xl tracking-tight text-gray-900">Auto-ads</span>
               </div>
               <div className="hidden md:flex space-x-8">

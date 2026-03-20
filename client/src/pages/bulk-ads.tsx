@@ -919,7 +919,12 @@ export default function BulkAds() {
   const metaCampaigns = campaignsData?.data || [];
   
   // Fetch ad sets for import settings feature
-  const { data: importAdSetsData, isLoading: importAdSetsLoading } = useQuery<{
+  const {
+    data: importAdSetsData,
+    isLoading: importAdSetsLoading,
+    isFetching: importAdSetsFetching,
+    isError: importAdSetsError,
+  } = useQuery<{
     data: Array<{
       id: string;
       name: string;
@@ -935,6 +940,7 @@ export default function BulkAds() {
       dsa_beneficiary?: string;
       dsa_payor?: string;
     }>;
+    source?: string;
   }>({
     queryKey: ["/api/meta/adsets", selectedAdAccountId || "none", importCampaignId || "none"],
     queryFn: async () => {
@@ -945,8 +951,11 @@ export default function BulkAds() {
       return res.json();
     },
     enabled: !!importCampaignId && !!selectedAdAccountId,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const importAdSets = importAdSetsData?.data || [];
+  const isImportAdSetsPending = importAdSetsLoading || importAdSetsFetching;
 
   const { data: importCampaignDetailsData } = useQuery<{
     data: {
@@ -2960,19 +2969,30 @@ export default function BulkAds() {
               <Select
                 value={importAdSetId}
                 onValueChange={setImportAdSetId}
-                disabled={!importCampaignId || importAdSetsLoading}
+                disabled={!importCampaignId || isImportAdSetsPending}
               >
                 <SelectTrigger data-testid="select-configure-import-adset">
                   <SelectValue placeholder={
                     !importCampaignId 
                       ? "Select a campaign first" 
-                      : importAdSetsLoading 
+                      : isImportAdSetsPending 
                         ? "Loading ad sets..." 
                         : "Choose an ad set"
                   } />
                 </SelectTrigger>
                 <SelectContent>
-                  {importAdSets.length === 0 ? (
+                  {!importCampaignId ? (
+                    <SelectItem value="no-campaign" disabled>Select a campaign first</SelectItem>
+                  ) : isImportAdSetsPending ? (
+                    <SelectItem value="loading" disabled>
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Loading ad sets...</span>
+                      </div>
+                    </SelectItem>
+                  ) : importAdSetsError ? (
+                    <SelectItem value="load-error" disabled>Failed to load ad sets</SelectItem>
+                  ) : importAdSets.length === 0 ? (
                     <SelectItem value="none" disabled>No ad sets found</SelectItem>
                   ) : (
                     importAdSets.map((adSet, idx) => (
@@ -3008,10 +3028,10 @@ export default function BulkAds() {
           <div className="flex justify-end">
             <Button 
               onClick={() => saveImportedSettingsMutation.mutate()}
-              disabled={!importCampaignId || !importAdSetId || importAdSets.length === 0 || importAdSetsLoading}
+              disabled={!importCampaignId || !importAdSetId || importAdSets.length === 0 || isImportAdSetsPending}
               data-testid="button-configure-apply-import"
             >
-              {importAdSetsLoading || saveImportedSettingsMutation.isPending ? (
+              {isImportAdSetsPending || saveImportedSettingsMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : (
                 <Download className="h-4 w-4 mr-2" />
