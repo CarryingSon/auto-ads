@@ -351,7 +351,7 @@ export default function Landing() {
             </svg>
 
             <div className="grid grid-cols-1 lg:grid-cols-7 lg:grid-rows-3 gap-8 items-center justify-items-center w-full max-w-6xl">
-              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-1 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-0">
+              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-1 lg:translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-0">
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
                   <i className="fab fa-google-drive" />
                 </div>
@@ -359,7 +359,7 @@ export default function Landing() {
                 <p className="text-gray-500 text-xs leading-relaxed">Connect your creative folders directly. Changes in Drive reflect instantly in your dashboard.</p>
               </div>
 
-              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-1 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-1">
+              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-1 lg:-translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-1">
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
                   <i className="fas fa-clock" />
                 </div>
@@ -368,15 +368,15 @@ export default function Landing() {
               </div>
 
               <div className="lg:col-start-3 lg:col-span-3 lg:row-start-2 flex items-center justify-center">
-                <div className="w-48 h-48 bg-white/40 backdrop-blur-3xl rounded-full border-2 border-blue-200/50 shadow-2xl flex items-center justify-center relative p-8 group">
+                <div className="w-40 h-40 bg-white/40 backdrop-blur-3xl rounded-full border-2 border-blue-200/50 shadow-2xl flex items-center justify-center relative p-6 group">
                   <div className="absolute inset-0 bg-[#1877F2]/5 rounded-full scale-110" />
-                  <div className="bg-[#1877F2] text-white w-full h-full rounded-full flex items-center justify-center text-5xl shadow-lg ring-8 ring-white/30">
+                  <div className="bg-[#1877F2] text-white w-full h-full rounded-full flex items-center justify-center text-4xl shadow-lg ring-6 ring-white/30">
                     <i className="fas fa-bolt" />
                   </div>
                 </div>
               </div>
 
-              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-2 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-2">
+              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-2 lg:translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-2">
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
                   <i className="fas fa-ban" />
                 </div>
@@ -384,7 +384,7 @@ export default function Landing() {
                 <p className="text-gray-500 text-xs leading-relaxed">Stop Meta from ruining your ads with unwanted 'advantage+' enhancements.</p>
               </div>
 
-              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-2 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-3">
+              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-2 lg:-translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-3">
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
                   <i className="fas fa-layer-group" />
                 </div>
@@ -392,7 +392,7 @@ export default function Landing() {
                 <p className="text-gray-500 text-xs leading-relaxed">Map different Drive folders to different Meta ad accounts from one dashboard.</p>
               </div>
 
-              <div className="lg:col-start-2 lg:col-span-2 lg:row-start-3 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-4">
+              <div className="lg:col-start-2 lg:col-span-2 lg:row-start-3 lg:translate-x-8 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-4">
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
                   <i className="fas fa-tag" />
                 </div>
@@ -400,7 +400,7 @@ export default function Landing() {
                 <p className="text-gray-500 text-xs leading-relaxed">Automatically name your ads based on Google Drive file names to stay organized.</p>
               </div>
 
-              <div className="lg:col-start-5 lg:col-span-2 lg:row-start-3 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-5">
+              <div className="lg:col-start-5 lg:col-span-2 lg:row-start-3 lg:-translate-x-8 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-5">
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
                   <i className="fas fa-chart-line" />
                 </div>
