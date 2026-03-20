@@ -78,7 +78,7 @@ function DemoVideoPlaceholder() {
         </div>
         <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
           <div className={`relative transition-transform duration-500 ${isHovered ? "scale-110" : "scale-100"}`}>
-            <div className="absolute inset-0 bg-[#1877F2] rounded-full animate-ping opacity-20" />
+            <div className={`absolute inset-0 bg-[#1877F2] rounded-full opacity-20 ${isHovered ? "animate-ping" : ""}`} />
             <div className="relative w-20 h-20 md:w-24 md:h-24 bg-gradient-to-br from-[#1877F2] to-blue-600 rounded-full flex items-center justify-center shadow-[0_20px_40px_rgba(24,119,242,0.35)] border-4 border-white ring-1 ring-slate-100 group-hover:shadow-[0_25px_50px_rgba(24,119,242,0.5)] transition-all">
               <i className="fas fa-play text-white text-2xl md:text-3xl ml-1.5 drop-shadow-md" />
             </div>
@@ -117,7 +117,7 @@ export default function Landing() {
         .blob-bg {
           position: absolute;
           border-radius: 50%;
-          filter: blur(80px);
+          filter: blur(64px);
           z-index: 0;
           opacity: 0.5;
           pointer-events: none;
@@ -125,13 +125,13 @@ export default function Landing() {
         }
         .glass-card {
           background: rgba(255, 255, 255, 0.25);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
           border: 1px solid rgba(255, 255, 255, 0.3);
-          box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05);
           position: relative;
           overflow: hidden;
-          transition: all 0.3s ease;
+          transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
         }
         .glass-card::before {
           content: '';
@@ -159,13 +159,30 @@ export default function Landing() {
         }
         .glass-heavy {
           background: rgba(255, 255, 255, 0.6);
-          backdrop-filter: blur(24px);
-          -webkit-backdrop-filter: blur(24px);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
           border: 1px solid rgba(255, 255, 255, 0.5);
         }
         details summary::-webkit-details-marker { display: none; }
         details summary { list-style: none; }
         html { scroll-behavior: smooth; }
+        @media (max-width: 1024px) {
+          .blob-bg { display: none; }
+          .glass-card, .glass-heavy {
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+          }
+          .glass-card::before { display: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          html { scroll-behavior: auto; }
+          .glass-card, .glass-card::before, .glass-heavy {
+            transition: none !important;
+          }
+          .animate-slide-testimonials {
+            animation: none !important;
+          }
+        }
       `}</style>
 
       <div className="blob-bg" style={{ width: 600, height: 600, background: "#1877F2", top: -150, left: -150, mixBlendMode: "multiply" }} />
@@ -727,7 +744,7 @@ export default function Landing() {
                     "{t.quote}"
                   </p>
                   <div className="flex items-center gap-3 pt-4 border-t border-gray-100/50">
-                    <img alt={t.author} className="w-10 h-10 rounded-full ring-2 ring-white object-cover" src={t.img} />
+                    <img alt={t.author} className="w-10 h-10 rounded-full ring-2 ring-white object-cover" src={t.img} loading="lazy" decoding="async" />
                     <div>
                       <h4 className="text-sm font-bold text-gray-900">{t.author}</h4>
                       <p className="text-xs text-gray-500">{t.role}</p>

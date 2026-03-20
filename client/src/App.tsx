@@ -6,37 +6,50 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
 import { AppSidebar } from "@/components/app-sidebar";
 import { LoginGate } from "@/components/login-gate";
-import Dashboard from "@/pages/dashboard";
-import Connections from "@/pages/connections";
-import BulkAds from "@/pages/bulk-ads";
-import Statistics from "@/pages/statistics";
-import History from "@/pages/history";
-import Settings from "@/pages/settings";
-import Landing from "@/pages/landing";
-import Login from "@/pages/login";
-import Privacy from "@/pages/privacy";
-import Terms from "@/pages/terms";
-import DataDeletion from "@/pages/data-deletion";
-import SelectAdAccount from "@/pages/select-ad-account";
 import NotFound from "@/pages/not-found";
 import { usePrefetchMetaData } from "@/hooks/use-prefetch-meta";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const Connections = lazy(() => import("@/pages/connections"));
+const BulkAds = lazy(() => import("@/pages/bulk-ads"));
+const Statistics = lazy(() => import("@/pages/statistics"));
+const History = lazy(() => import("@/pages/history"));
+const Settings = lazy(() => import("@/pages/settings"));
+const Landing = lazy(() => import("@/pages/landing"));
+const Login = lazy(() => import("@/pages/login"));
+const Privacy = lazy(() => import("@/pages/privacy"));
+const Terms = lazy(() => import("@/pages/terms"));
+const DataDeletion = lazy(() => import("@/pages/data-deletion"));
+const SelectAdAccount = lazy(() => import("@/pages/select-ad-account"));
+
+function PageLoader({ label = "Loading..." }: { label?: string }) {
+  return (
+    <div className="flex items-center justify-center h-screen">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+        <p className="text-muted-foreground">{label}</p>
+      </div>
+    </div>
+  );
+}
 
 
 function DashboardRouter() {
   return (
-    <Switch>
-      <Route path="/dashboard" component={Dashboard} />
-      <Route path="/connections" component={Connections} />
-      <Route path="/bulk-ads" component={BulkAds} />
-      <Route path="/statistics" component={Statistics} />
-      <Route path="/history" component={History} />
-      <Route path="/settings" component={Settings} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<PageLoader label="Loading dashboard..." />}>
+      <Switch>
+        <Route path="/dashboard">{() => <Dashboard />}</Route>
+        <Route path="/connections">{() => <Connections />}</Route>
+        <Route path="/bulk-ads">{() => <BulkAds />}</Route>
+        <Route path="/statistics">{() => <Statistics />}</Route>
+        <Route path="/history">{() => <History />}</Route>
+        <Route path="/settings">{() => <Settings />}</Route>
+        <Route>{() => <NotFound />}</Route>
+      </Switch>
+    </Suspense>
   );
 }
 
@@ -109,14 +122,7 @@ function AppContent() {
   
   // Show loading while verifying token
   if (isVerifyingToken) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Signing in...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader label="Signing in..." />;
   }
   
   const isLandingRoute = location === "/" || location === "/landing";
@@ -140,7 +146,55 @@ function AppContent() {
     }
   }, [isDashboard]);
 
-  return isLandingRoute ? <Landing /> : isLoginRoute ? <Login /> : isPrivacyRoute ? <Privacy /> : isTermsRoute ? <Terms /> : isDataDeletionRoute ? <DataDeletion /> : isSelectAdAccountRoute ? <SelectAdAccount /> : <DashboardLayout />;
+  if (isLandingRoute) {
+    return (
+      <Suspense fallback={<PageLoader label="Loading page..." />}>
+        <Landing />
+      </Suspense>
+    );
+  }
+
+  if (isLoginRoute) {
+    return (
+      <Suspense fallback={<PageLoader label="Loading login..." />}>
+        <Login />
+      </Suspense>
+    );
+  }
+
+  if (isPrivacyRoute) {
+    return (
+      <Suspense fallback={<PageLoader label="Loading page..." />}>
+        <Privacy />
+      </Suspense>
+    );
+  }
+
+  if (isTermsRoute) {
+    return (
+      <Suspense fallback={<PageLoader label="Loading page..." />}>
+        <Terms />
+      </Suspense>
+    );
+  }
+
+  if (isDataDeletionRoute) {
+    return (
+      <Suspense fallback={<PageLoader label="Loading page..." />}>
+        <DataDeletion />
+      </Suspense>
+    );
+  }
+
+  if (isSelectAdAccountRoute) {
+    return (
+      <Suspense fallback={<PageLoader label="Loading accounts..." />}>
+        <SelectAdAccount />
+      </Suspense>
+    );
+  }
+
+  return <DashboardLayout />;
 }
 
 function App() {
