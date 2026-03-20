@@ -107,6 +107,7 @@ export function AppSidebar() {
   const { data: sidebarData, isFetching: isSidebarFetching } = useQuery<SidebarData>({
     queryKey: ["/api/sidebar-data"],
   });
+  const selectedAdAccountId = sidebarData?.selectedAdAccountId || "";
 
   // Fallback: if account-scoped pages are missing/unresolved, fetch /api/meta/pages to refresh cache
   const needsPagesFetch = !isSidebarFetching &&
@@ -122,7 +123,9 @@ export function AppSidebar() {
     isFetching: isFallbackPagesFetching,
     isFetched: isFallbackPagesFetched,
   } = useQuery<{ data: MetaPage[]; selectedPageId: string | null }>({
-    queryKey: ["/api/meta/pages"],
+    // Scope fallback pages cache to currently selected ad account so we never
+    // reuse pages from a different account.
+    queryKey: ["/api/meta/pages", "sidebar", selectedAdAccountId || "none"],
     enabled: needsPagesFetch,
   });
 
@@ -134,7 +137,6 @@ export function AppSidebar() {
   }, [fallbackPagesData]);
 
   const adAccounts = sidebarData?.adAccounts || [];
-  const selectedAdAccountId = sidebarData?.selectedAdAccountId || "";
   const hasPendingAccounts = sidebarData?.hasPendingAccounts || false;
   const fallbackPages = fallbackPagesData?.data || [];
   const usingFallbackPages = needsPagesFetch && fallbackPages.length > 0;
