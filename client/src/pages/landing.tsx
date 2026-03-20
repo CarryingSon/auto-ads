@@ -182,7 +182,7 @@ export default function Landing() {
                 <img
                   src="/favicon.png"
                   alt="Auto-ads logo"
-                  className="w-8 h-8 object-contain"
+                  className="w-10 h-10 object-contain"
                 />
                 <span className="font-bold text-xl tracking-tight text-gray-900">Auto-ads</span>
               </div>
