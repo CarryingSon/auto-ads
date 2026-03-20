@@ -182,8 +182,7 @@ export default function Landing() {
                 <img
                   src="/favicon.png"
                   alt="Auto-ads logo"
-                  className="w-8 h-8 rounded-lg object-contain bg-white/70 p-0.5 shadow-lg"
-                  style={{ boxShadow: "0 4px 14px rgba(59,130,246,0.2)" }}
+                  className="w-8 h-8 object-contain"
                 />
                 <span className="font-bold text-xl tracking-tight text-gray-900">Auto-ads</span>
               </div>
