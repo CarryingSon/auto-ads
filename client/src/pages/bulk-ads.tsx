@@ -1340,6 +1340,10 @@ export default function BulkAds() {
   };
 
   const startGlobalSync = ({ campaignId, driveUrl, mode }: { campaignId: string; driveUrl: string; mode: "private" | "public" }) => {
+    if (activeSyncStore.promise || (activeSyncStore.syncStep > 0 && activeSyncStore.syncStep < 5)) {
+      return;
+    }
+
     resetLaunchStore();
 
     setLaunchStatus("idle");

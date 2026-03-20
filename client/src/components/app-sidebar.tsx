@@ -208,7 +208,6 @@ export function AppSidebar() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/meta/pages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/meta/campaigns"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user/settings"] });
@@ -343,13 +342,14 @@ export function AppSidebar() {
     window.location.href = "/auth/logout";
   };
 
-  const isPagesLoading = !!selectedAdAccountId && (isSidebarFetching || (needsPagesFetch && isFallbackPagesFetching));
+  const isPagesLoading = !!selectedAdAccountId &&
+    needsPagesFetch &&
+    (!isFallbackPagesFetched || isFallbackPagesFetching);
   const showAccountScopedSkeleton = !!selectedAdAccountId &&
     (
       isAdAccountSwitching ||
       updateAdAccountMutation.isPending ||
-      isPagesLoading ||
-      (needsPagesFetch && !isFallbackPagesFetched)
+      isPagesLoading
     );
   const areBothAccountsReady = !showAccountScopedSkeleton;
 

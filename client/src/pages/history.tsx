@@ -12,6 +12,11 @@ type JobWithAssets = BulkUploadJob & {
   assetCount?: number;
   videoAssetCount?: number;
   imageAssetCount?: number;
+  queueId?: string | null;
+  queueStatus?: string | null;
+  queueAttempts?: number;
+  nextRunAt?: string | null;
+  queueError?: string | null;
 };
 
 interface UploadBatch {
@@ -126,7 +131,17 @@ export default function History() {
   });
 
   const completedJobs = jobs.filter(j => j.status === "done" || j.status === "completed");
-  const queueJobs = jobs.filter(j => IN_PROGRESS_STATUSES.includes(j.status) || j.status === "error" || j.status === "failed");
+  const queueJobs = jobs.filter((j) => {
+    if (j.queueStatus) {
+      return ["queued", "processing", "retrying", "failed"].includes(j.queueStatus);
+    }
+
+    if (j.status === "draft" || j.status === "pending") {
+      return false;
+    }
+
+    return IN_PROGRESS_STATUSES.includes(j.status) || j.status === "error" || j.status === "failed";
+  });
   
   const totalAdsLaunched = completedJobs.reduce((sum, j) => sum + (j.totalAds || 0), 0);
   const last30DaysJobs = completedJobs.filter(j => {

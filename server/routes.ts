@@ -342,10 +342,31 @@ function mapProgressStatus(jobStatus: string | null | undefined, queueStatus?: s
   if (queueStatus === "failed") return "failed";
   if (queueStatus === "completed") return "completed";
 
-  if (!jobStatus) return "queued";
-  if (jobStatus === "done" || jobStatus === "completed") return "completed";
-  if (jobStatus === "error" || jobStatus === "failed") return "failed";
-  return "processing";
+  if (!jobStatus) return "pending";
+
+  const normalized = String(jobStatus).toLowerCase();
+
+  if (normalized === "done" || normalized === "completed") return "completed";
+  if (normalized === "error" || normalized === "failed") return "failed";
+
+  if (
+    normalized === "draft" ||
+    normalized === "pending" ||
+    normalized === "queued" ||
+    normalized === "processing" ||
+    normalized === "retrying" ||
+    normalized === "validating" ||
+    normalized === "uploading" ||
+    normalized === "creating_campaign" ||
+    normalized === "creating_adsets" ||
+    normalized === "uploading_creatives" ||
+    normalized === "creating_ads" ||
+    normalized === "scheduled"
+  ) {
+    return normalized;
+  }
+
+  return normalized;
 }
 
 export async function registerRoutes(
@@ -1077,6 +1098,20 @@ export async function registerRoutes(
       const job = await storage.getJob(jobId);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
+      }
+
+      // Idempotency guard: do not enqueue the same job multiple times while
+      // it is already queued/processing/retrying.
+      const latestQueueForJob = await getLatestQueueForJob(jobId);
+      if (latestQueueForJob && ["queued", "processing", "retrying"].includes(latestQueueForJob.status)) {
+        return res.status(202).json({
+          success: true,
+          jobId,
+          queued: true,
+          queueId: latestQueueForJob.id,
+          workerTrigger: "waiting_for_worker",
+          alreadyQueued: true,
+        });
       }
 
       // Store scheduling info if scheduled
