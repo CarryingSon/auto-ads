@@ -4205,11 +4205,33 @@ export async function registerRoutes(
       const adAccountId = assets.selectedAdAccountId;
       const adAccounts = assets.adAccountsJson || [];
       const adAccount = adAccounts.find(a => a.id === adAccountId || `act_${a.id}` === adAccountId);
+
+      const existingSettings = await storage.getAdAccountSettings(userId, adAccountId);
+      const merged = {
+        ...(existingSettings || {}),
+        ...parseResult.data,
+      } as Record<string, any>;
+
+      const hasString = (value: unknown) =>
+        typeof value === "string" && value.trim().length > 0;
+      const hasPositiveNumber = (value: unknown) =>
+        typeof value === "number" && Number.isFinite(value) && value > 0;
+      const hasGeoTargeting =
+        Array.isArray(merged.geoTargeting) &&
+        merged.geoTargeting.some((entry: unknown) => typeof entry === "string" && entry.trim().length > 0);
+
+      const isConfigured =
+        hasString(merged.campaignObjective) &&
+        hasString(merged.budgetType) &&
+        hasPositiveNumber(merged.budgetAmount) &&
+        hasGeoTargeting &&
+        hasString(merged.defaultCta) &&
+        hasString(merged.defaultUrl);
       
       const settings = await storage.upsertAdAccountSettings(userId, adAccountId, {
         adAccountName: adAccount?.name,
         ...parseResult.data,
-        isConfigured: true,
+        isConfigured,
       });
       
       res.json({ success: true, settings });

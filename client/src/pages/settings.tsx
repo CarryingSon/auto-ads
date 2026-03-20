@@ -645,14 +645,17 @@ export default function Settings() {
     setIsApplyingImport(true);
     
     let ad: any = null;
+    let sampleAdFetchError: string | null = null;
     try {
       const res = await apiRequest("GET", `/api/meta/adsets/${selectedAdSet.id}/sample-ad`);
       const result = await res.json();
       ad = result.data;
     } catch (err: any) {
-      toast({ title: "Failed to load ad creative", description: err.message || "Could not fetch ad from this ad set. Try again.", variant: "destructive" });
-      setIsApplyingImport(false);
-      return;
+      sampleAdFetchError = err?.message || "Could not fetch ad from this ad set.";
+      console.warn("[Settings] Sample ad fetch failed during import; continuing with partial import", {
+        adSetId: selectedAdSet.id,
+        error: sampleAdFetchError,
+      });
     }
     
     // ===== STEP 1: Extract ALL values ONCE and store in local variables =====
@@ -735,17 +738,17 @@ export default function Settings() {
     const websiteUrlFromLinkData = ad?.creative?.object_story_spec?.link_data?.link;
     const websiteUrlFromVideoData = ad?.creative?.object_story_spec?.video_data?.call_to_action?.value?.link;
     const websiteUrlFromAssetFeed = assetFeedSpec?.link_urls?.[0]?.website_url;
-    const extractedWebsiteUrl = websiteUrlFromLinkData || websiteUrlFromVideoData || websiteUrlFromAssetFeed || "";
+    const extractedWebsiteUrl = websiteUrlFromLinkData || websiteUrlFromVideoData || websiteUrlFromAssetFeed || websiteUrl || "";
     
     // Default URL = display URL for link_data ads only (display_link is validated URL field)
     // For video ads and DCT ads, defaultUrl equals websiteUrl since no separate display URL exists
     const displayUrlFromLinkData = ad?.creative?.object_story_spec?.link_data?.display_link;
-    const extractedDefaultUrl = displayUrlFromLinkData || extractedWebsiteUrl;
+    const extractedDefaultUrl = displayUrlFromLinkData || defaultUrl || extractedWebsiteUrl;
     
     // Display Link - the visual URL shown on the ad (e.g., "www.example.com")
-    const extractedDisplayLink = displayUrlFromLinkData || "";
+    const extractedDisplayLink = displayUrlFromLinkData || displayLink || "";
     
-    const extractedCta = ctaFromLinkData || ctaFromVideoData || ctaFromCreative || ctaFromAssetFeed || "";
+    const extractedCta = ctaFromLinkData || ctaFromVideoData || ctaFromCreative || ctaFromAssetFeed || defaultCta || "";
     
     // ===== STEP 2: Apply ALL values to React state (overwrite existing settings) =====
     setCampaignObjective(extractedObjective);
@@ -773,49 +776,51 @@ export default function Settings() {
     if (!extractedCta) missingFields.push("CTA");
     if (!extractedWebsiteUrl) missingFields.push("Website URL");
     
-    if (missingFields.length > 0) {
-      // Some required fields are missing - show warning, don't auto-save
-      toast({ 
-        title: "Partial Import", 
-        description: `Some fields are missing from the imported campaign: ${missingFields.join(", ")}. Please fill in the missing fields and click "Save Settings".`,
-        variant: "destructive"
-      });
-    } else {
-      // ===== STEP 4: Save to database using the EXACT same extracted values =====
-      saveSettingsWithValues({
-        campaignObjective: extractedObjective,
-        budgetType: extractedBudgetType,
-        budgetAmount: extractedBudgetAmount,
-        pixelId: extractedPixelId,
-        audienceType: extractedAudienceType,
-        audienceId: extractedAudienceId,
-        geoTargeting: extractedGeoTargeting,
-        ageMin: extractedAgeMin,
-        ageMax: extractedAgeMax,
-        gender: extractedGender,
-        dailyMinSpendTarget: "",
-        dailySpendCap: extractedDailySpendCap,
-        lifetimeSpendCap: extractedLifetimeSpendCap,
-        websiteUrl: extractedWebsiteUrl,
-        defaultCta: extractedCta,
-        defaultUrl: extractedDefaultUrl,
-        displayLink: extractedDisplayLink,
-      }, {
-        onSuccess: () => {
-          toast({ 
-            title: "Settings Imported & Saved", 
-            description: `Settings from "${selectedAdSet.name}" have been saved to your ad account.` 
+    // ===== STEP 4: Save to database (also for partial imports) =====
+    saveSettingsWithValues({
+      campaignObjective: extractedObjective,
+      budgetType: extractedBudgetType,
+      budgetAmount: extractedBudgetAmount,
+      pixelId: extractedPixelId,
+      audienceType: extractedAudienceType,
+      audienceId: extractedAudienceId,
+      geoTargeting: extractedGeoTargeting,
+      ageMin: extractedAgeMin,
+      ageMax: extractedAgeMax,
+      gender: extractedGender,
+      dailyMinSpendTarget: dailyMinSpendTarget,
+      dailySpendCap: extractedDailySpendCap,
+      lifetimeSpendCap: extractedLifetimeSpendCap,
+      websiteUrl: extractedWebsiteUrl,
+      defaultCta: extractedCta,
+      defaultUrl: extractedDefaultUrl,
+      displayLink: extractedDisplayLink,
+    }, {
+      onSuccess: () => {
+        const warningParts: string[] = [];
+        if (sampleAdFetchError) warningParts.push("creative data was unavailable");
+        if (missingFields.length > 0) warningParts.push(`missing fields: ${missingFields.join(", ")}`);
+
+        if (warningParts.length > 0) {
+          toast({
+            title: "Settings Imported (Partial)",
+            description: `Saved with warnings: ${warningParts.join("; ")}.`,
           });
-        },
-        onError: (error: Error) => {
-          toast({ 
-            title: "Import Applied", 
-            description: `Settings applied to form but save failed: ${error.message}. Please click "Save Settings" manually.`,
-            variant: "destructive"
+        } else {
+          toast({
+            title: "Settings Imported & Saved",
+            description: `Settings from "${selectedAdSet.name}" have been saved to your ad account.`,
           });
         }
-      });
-    }
+      },
+      onError: (error: Error) => {
+        toast({
+          title: "Import Applied",
+          description: `Settings applied to form but save failed: ${error.message}. Please click "Save Settings" manually.`,
+          variant: "destructive"
+        });
+      }
+    });
     
     // Reset import selection
     setImportCampaignId("");

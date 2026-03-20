@@ -485,12 +485,17 @@ export class DatabaseStorage implements IStorage {
     settings: Partial<InsertAdAccountSettings>
   ): Promise<AdAccountSettings> {
     const existing = await this.getAdAccountSettings(userId, adAccountId);
+    const resolvedIsConfigured =
+      typeof settings.isConfigured === "boolean"
+        ? settings.isConfigured
+        : (existing?.isConfigured ?? false);
+
     if (existing) {
       const [updated] = await db
         .update(adAccountSettings)
         .set({ 
           ...settings, 
-          isConfigured: true,
+          isConfigured: resolvedIsConfigured,
           updatedAt: new Date() 
         })
         .where(and(
@@ -504,7 +509,7 @@ export class DatabaseStorage implements IStorage {
       userId,
       adAccountId,
       ...settings,
-      isConfigured: true,
+      isConfigured: resolvedIsConfigured,
     }).returning();
     return created;
   }
