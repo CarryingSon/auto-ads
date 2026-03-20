@@ -5386,7 +5386,8 @@ export async function registerRoutes(
       const assets = await db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1);
       const adAccountId = assets[0]?.selectedAdAccountId;
 
-      if (req.query.cached === "true" && adAccountId) {
+      const forceLive = req.query.live === "true" || req.query.refresh === "true";
+      if (adAccountId && !forceLive) {
         const cached = await getAccountCache(userId, adAccountId);
         if (cached?.pixelsJson && (cached.pixelsJson as any[]).length > 0) {
           return res.json({ data: cached.pixelsJson, source: "cache" });
@@ -5405,7 +5406,7 @@ export async function registerRoutes(
 
       const pixels = await api.getPixels();
       if (adAccountId) {
-        upsertAccountCache(userId, adAccountId, "pixelsJson", pixels);
+        await upsertAccountCache(userId, adAccountId, "pixelsJson", pixels);
       }
       res.json({ data: pixels, source: "live" });
     } catch (error: any) {
@@ -5425,7 +5426,8 @@ export async function registerRoutes(
       const assets = await db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1);
       const adAccountId = assets[0]?.selectedAdAccountId;
 
-      if (req.query.cached === "true" && adAccountId) {
+      const forceLive = req.query.live === "true" || req.query.refresh === "true";
+      if (adAccountId && !forceLive) {
         const cached = await getAccountCache(userId, adAccountId);
         if (cached?.customAudiencesJson && (cached.customAudiencesJson as any[]).length > 0) {
           return res.json({ data: cached.customAudiencesJson, source: "cache" });
@@ -5440,7 +5442,7 @@ export async function registerRoutes(
 
       const audiences = await api.getCustomAudiences();
       if (adAccountId) {
-        upsertAccountCache(userId, adAccountId, "customAudiencesJson", audiences);
+        await upsertAccountCache(userId, adAccountId, "customAudiencesJson", audiences);
       }
       res.json({ data: audiences, source: "live" });
     } catch (error: any) {
@@ -5460,7 +5462,8 @@ export async function registerRoutes(
       const assets = await db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1);
       const adAccountId = assets[0]?.selectedAdAccountId;
 
-      if (req.query.cached === "true" && adAccountId) {
+      const forceLive = req.query.live === "true" || req.query.refresh === "true";
+      if (adAccountId && !forceLive) {
         const cached = await getAccountCache(userId, adAccountId);
         if (cached?.savedAudiencesJson && (cached.savedAudiencesJson as any[]).length > 0) {
           return res.json({ data: cached.savedAudiencesJson, source: "cache" });
@@ -5475,7 +5478,7 @@ export async function registerRoutes(
 
       const audiences = await api.getSavedAudiences();
       if (adAccountId) {
-        upsertAccountCache(userId, adAccountId, "savedAudiencesJson", audiences);
+        await upsertAccountCache(userId, adAccountId, "savedAudiencesJson", audiences);
       }
       res.json({ data: audiences, source: "live" });
     } catch (error: any) {
