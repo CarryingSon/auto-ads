@@ -1,8 +1,7 @@
 import { Link, useLocation } from "wouter";
-import { useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import { SiFacebook, SiMeta } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
-import { queryClient } from "@/lib/queryClient";
 import avatarHero1 from "../assets/images/avatar-hero-1.png";
 import avatarHero2 from "../assets/images/avatar-hero-2.png";
 import avatarHero3 from "../assets/images/avatar-hero-3.png";
@@ -11,19 +10,6 @@ export default function LoginPage() {
   const [, setLocation] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
 
-  const handleOAuthMessage = useCallback((event: MessageEvent) => {
-    if (event.origin !== window.location.origin) return;
-    if (event.data?.type === "oauth-success") {
-      queryClient.invalidateQueries({ queryKey: ["/auth/me"] });
-      setLocation(event.data.redirect || "/select-ad-account");
-    }
-  }, [setLocation]);
-
-  useEffect(() => {
-    window.addEventListener("message", handleOAuthMessage);
-    return () => window.removeEventListener("message", handleOAuthMessage);
-  }, [handleOAuthMessage]);
-
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
       setLocation("/bulk-ads");
@@ -31,18 +17,7 @@ export default function LoginPage() {
   }, [isLoading, isAuthenticated, setLocation]);
 
   const handleFacebookLogin = () => {
-    const width = 600;
-    const height = 700;
-    const left = window.screenX + (window.outerWidth - width) / 2;
-    const top = window.screenY + (window.outerHeight - height) / 2;
-    const popup = window.open(
-      "/auth/meta/start?popup=1",
-      "meta-oauth",
-      `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,location=yes`
-    );
-    if (!popup) {
-      window.location.href = "/auth/meta/start";
-    }
+    window.location.href = "/auth/meta/start";
   };
 
   if (isLoading) {
