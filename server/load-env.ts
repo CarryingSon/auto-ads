@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 let loaded = false;
+const initialEnvKeys = new Set(Object.keys(process.env));
 
 function normalizeValue(value: string) {
   const trimmed = value.trim();
@@ -27,10 +28,49 @@ function parseAndAssign(contents: string) {
 
     const key = line.slice(0, separatorIndex).trim();
     if (!key) continue;
-    if (process.env[key]) continue;
+    if (initialEnvKeys.has(key)) continue;
 
     const rawValue = line.slice(separatorIndex + 1);
     process.env[key] = normalizeValue(rawValue);
+  }
+}
+
+function getCandidateEnvFiles() {
+  const env = (process.env.NODE_ENV || "development").trim();
+  if (env === "production") {
+    return [".env.local", ".env", ".env.production"];
+  }
+  if (env === "test") {
+    return [".env.local", ".env", ".env.test"];
+  }
+  return [".env.local", ".env", ".env.development"];
+}
+
+function validateRequiredEnv() {
+  const env = (process.env.NODE_ENV || "development").trim();
+  const missing: string[] = [];
+
+  const hasDatabaseUrl = !!(process.env.DATABASE_URL || process.env.SUPABASE_DATABASE_URL);
+  if (!hasDatabaseUrl) {
+    missing.push("DATABASE_URL or SUPABASE_DATABASE_URL");
+  }
+
+  if (env === "production") {
+    const requiredProdKeys = [
+      "SESSION_SECRET",
+      "TOKEN_ENC_KEY",
+      "CRON_SECRET",
+      "APP_BASE_URL",
+    ];
+    for (const key of requiredProdKeys) {
+      if (!process.env[key]) missing.push(key);
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `[env] Missing required environment variables for ${env}: ${missing.join(", ")}`,
+    );
   }
 }
 
@@ -38,7 +78,7 @@ export function loadEnvFromProjectFiles() {
   if (loaded) return;
   loaded = true;
 
-  const candidates = [".env.production", ".env.local", ".env"];
+  const candidates = getCandidateEnvFiles();
   for (const file of candidates) {
     const absolute = resolve(process.cwd(), file);
     if (!existsSync(absolute)) continue;
@@ -52,3 +92,4 @@ export function loadEnvFromProjectFiles() {
 }
 
 loadEnvFromProjectFiles();
+validateRequiredEnv();

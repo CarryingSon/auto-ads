@@ -24,6 +24,8 @@ interface MetaPage {
   id: string;
   name: string;
   source: string;
+  instagram_accounts?: Array<{ id: string; username?: string; name?: string; profile_picture_url?: string }>;
+  instagram_is_page_backed?: boolean;
 }
 
 interface AdAccount {
@@ -115,7 +117,11 @@ export function AppSidebar() {
       (sidebarData?.pages?.length ?? 0) === 0
     );
 
-  const { data: fallbackPagesData } = useQuery<{ data: MetaPage[]; selectedPageId: string | null }>({
+  const {
+    data: fallbackPagesData,
+    isFetching: isFallbackPagesFetching,
+    isFetched: isFallbackPagesFetched,
+  } = useQuery<{ data: MetaPage[]; selectedPageId: string | null }>({
     queryKey: ["/api/meta/pages"],
     enabled: needsPagesFetch,
   });
@@ -130,21 +136,33 @@ export function AppSidebar() {
   const adAccounts = sidebarData?.adAccounts || [];
   const selectedAdAccountId = sidebarData?.selectedAdAccountId || "";
   const hasPendingAccounts = sidebarData?.hasPendingAccounts || false;
-  const metaPages = sidebarData?.pages || [];
-  const selectedPageId = sidebarData?.selectedPageId || "";
+  const fallbackPages = fallbackPagesData?.data || [];
+  const usingFallbackPages = needsPagesFetch && fallbackPages.length > 0;
+  const metaPages = usingFallbackPages ? fallbackPages : (sidebarData?.pages || []);
+  const selectedPageId = (usingFallbackPages
+    ? (fallbackPagesData?.selectedPageId || sidebarData?.selectedPageId || "")
+    : (sidebarData?.selectedPageId || "")) || "";
   const isPageAutoSelected = sidebarData?.autoSelected || metaPages.length === 1;
-  const instagramAccounts = sidebarData?.instagramAccounts || [];
+  const selectedPageFromList = metaPages.find((p) => p.id === selectedPageId) as MetaPage | undefined;
+  const derivedInstagramAccounts = (selectedPageFromList?.instagram_accounts || []).map((a) => ({
+    id: a.id,
+    username: a.username || "",
+    name: a.name,
+    profile_picture_url: a.profile_picture_url,
+  }));
+  const instagramAccounts = (sidebarData?.instagramAccounts && sidebarData.instagramAccounts.length > 0)
+    ? sidebarData.instagramAccounts
+    : derivedInstagramAccounts;
   const settings = sidebarData?.settings;
   const savedInstagramId = settings?.instagramPageId || "";
   const selectedInstagram = instagramAccounts.find(a => a.id === savedInstagramId) ||
     (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
 
-  const isPagesLoading = needsPagesFetch;
+  const isPagesLoading = !!selectedAdAccountId && (isSidebarFetching || (needsPagesFetch && isFallbackPagesFetching));
   const isInstagramLoading = false;
-  const hasPageData = metaPages.length > 0 && selectedPageId;
-  const areBothAccountsReady = !isAdAccountSwitching &&
-    (hasPageData || (!isPagesLoading && selectedPageId)) &&
-    !isInstagramLoading;
+  const showAccountScopedSkeleton = !!selectedAdAccountId &&
+    (isAdAccountSwitching || (isPagesLoading && !isFallbackPagesFetched));
+  const areBothAccountsReady = !showAccountScopedSkeleton && !isInstagramLoading;
 
   // Redirect to ad account selection if pending
   useEffect(() => {
@@ -472,7 +490,11 @@ export function AppSidebar() {
             <div className="space-y-2">
               <div>
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Facebook Page</p>
-                {isPageAutoSelected ? (
+                {!selectedAdAccountId ? (
+                  <span className="text-[10px] text-muted-foreground">Select ad account first</span>
+                ) : metaPages.length === 0 ? (
+                  <span className="text-[10px] text-muted-foreground">No pages found for this ad account</span>
+                ) : isPageAutoSelected ? (
                   <div className="flex items-center gap-2">
                     <div className="w-5 h-5 rounded-full bg-[#1877F2] flex items-center justify-center text-white shrink-0">
                       <SiFacebook className="w-3 h-3" />
@@ -526,7 +548,11 @@ export function AppSidebar() {
 
               <div>
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Instagram</p>
-                {instagramAccounts.length > 1 ? (
+                {!selectedAdAccountId ? (
+                  <span className="text-[10px] text-muted-foreground">Select ad account first</span>
+                ) : metaPages.length === 0 ? (
+                  <span className="text-[10px] text-muted-foreground">Select a Facebook Page first</span>
+                ) : instagramAccounts.length > 1 ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div>

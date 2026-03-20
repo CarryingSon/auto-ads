@@ -207,9 +207,9 @@ export default function Settings() {
       lifetime_budget?: string;
     }>;
   }>({
-    queryKey: ["/api/meta/campaigns", "live"],
+    queryKey: ["/api/meta/campaigns", selectedAdAccountId || "none"],
     queryFn: async () => {
-      const res = await fetch("/api/meta/campaigns?live=true");
+      const res = await fetch("/api/meta/campaigns", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch campaigns");
       return res.json();
     },

@@ -7,21 +7,19 @@ function isProductionRuntime(): boolean {
 }
 
 export function getSessionCookieOptions() {
-  const isProd = isProductionRuntime();
   return {
-    secure: isProd,
+    secure: isProductionRuntime(),
     httpOnly: true,
     maxAge: SESSION_MAX_AGE_MS,
-    sameSite: isProd ? "none" : "lax",
+    sameSite: "lax",
   } as const;
 }
 
 export function getClearSessionCookieOptions(): CookieOptions {
-  const isProd = isProductionRuntime();
   return {
     path: "/",
-    secure: isProd,
+    secure: isProductionRuntime(),
     httpOnly: true,
-    sameSite: isProd ? "none" : "lax",
+    sameSite: "lax",
   };
 }

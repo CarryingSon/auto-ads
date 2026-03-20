@@ -142,6 +142,15 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
+function sanitizePagesForClient(pages: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(pages)) return [];
+  return pages.map((page) => {
+    if (!page || typeof page !== "object") return {};
+    const { access_token: _accessToken, ...safePage } = page as Record<string, unknown>;
+    return safePage;
+  });
+}
+
 function metaLog(traceId: string, message: string, details?: Record<string, unknown>) {
   if (details) {
     console.log(`[MetaOAuth][${traceId}] ${message}`, details);
@@ -901,7 +910,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
       await db.insert(googleDriveLinks).values({ userId });
     }
     
-    await storage.upsertConnection({
+    await storage.upsertConnection(userId, {
       provider: "google_drive",
       status: "connected",
       accountName: userInfo.name || "Google Drive",
@@ -1020,7 +1029,7 @@ router.get("/status", async (req: Request, res: Response) => {
         connectedAt: metaConnection.connectedAt,
         lastTestedAt: metaConnection.lastTestedAt,
         adAccounts: assets[0]?.adAccountsJson || [],
-        pages: assets[0]?.pagesJson || [],
+        pages: sanitizePagesForClient(assets[0]?.pagesJson || []),
         selectedAdAccountId: assets[0]?.selectedAdAccountId,
         selectedPageId: assets[0]?.selectedPageId,
       } : { status: "disconnected" },

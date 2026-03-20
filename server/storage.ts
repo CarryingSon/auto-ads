@@ -40,7 +40,7 @@ import {
   adAccountSettings,
 } from "../shared/schema.js";
 import { db } from "./db.js";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -49,10 +49,13 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   
   // Connections
-  getConnection(provider: string): Promise<Connection | undefined>;
-  getAllConnections(): Promise<Connection[]>;
-  upsertConnection(connection: InsertConnection): Promise<Connection>;
-  deleteConnection(provider: string): Promise<void>;
+  getConnection(userId: string, provider: string): Promise<Connection | undefined>;
+  getAllConnections(userId: string): Promise<Connection[]>;
+  upsertConnection(
+    userId: string,
+    connection: Omit<InsertConnection, "userId">,
+  ): Promise<Connection>;
+  deleteConnection(userId: string, provider: string): Promise<void>;
   
   // Bulk Upload Jobs
   createJob(job: InsertBulkUploadJob): Promise<BulkUploadJob>;
@@ -103,8 +106,8 @@ export interface IStorage {
   getJobLogsByAdset(adsetId: string): Promise<JobLog[]>;
   
   // Global Settings
-  getGlobalSettings(): Promise<GlobalSettings | undefined>;
-  upsertGlobalSettings(settings: Partial<InsertGlobalSettings>): Promise<GlobalSettings>;
+  getGlobalSettings(userId: string): Promise<GlobalSettings | undefined>;
+  upsertGlobalSettings(userId: string, settings: Partial<InsertGlobalSettings>): Promise<GlobalSettings>;
   
   // User Settings
   getUserSettings(userId: string): Promise<UserSettings | undefined>;
@@ -138,31 +141,40 @@ export class DatabaseStorage implements IStorage {
   }
   
   // Connections
-  async getConnection(provider: string): Promise<Connection | undefined> {
-    const [connection] = await db.select().from(connections).where(eq(connections.provider, provider));
+  async getConnection(userId: string, provider: string): Promise<Connection | undefined> {
+    const [connection] = await db
+      .select()
+      .from(connections)
+      .where(and(eq(connections.userId, userId), eq(connections.provider, provider)));
     return connection || undefined;
   }
 
-  async getAllConnections(): Promise<Connection[]> {
-    return db.select().from(connections);
+  async getAllConnections(userId: string): Promise<Connection[]> {
+    return db.select().from(connections).where(eq(connections.userId, userId));
   }
 
-  async upsertConnection(connection: InsertConnection): Promise<Connection> {
-    const existing = await this.getConnection(connection.provider);
+  async upsertConnection(
+    userId: string,
+    connection: Omit<InsertConnection, "userId">,
+  ): Promise<Connection> {
+    const existing = await this.getConnection(userId, connection.provider);
+    const values = { ...connection, userId };
     if (existing) {
       const [updated] = await db
         .update(connections)
-        .set(connection)
-        .where(eq(connections.provider, connection.provider))
+        .set(values)
+        .where(and(eq(connections.userId, userId), eq(connections.provider, connection.provider)))
         .returning();
       return updated;
     }
-    const [created] = await db.insert(connections).values(connection).returning();
+    const [created] = await db.insert(connections).values(values).returning();
     return created;
   }
 
-  async deleteConnection(provider: string): Promise<void> {
-    await db.delete(connections).where(eq(connections.provider, provider));
+  async deleteConnection(userId: string, provider: string): Promise<void> {
+    await db
+      .delete(connections)
+      .where(and(eq(connections.userId, userId), eq(connections.provider, provider)));
   }
   
   // Bulk Upload Jobs
@@ -356,22 +368,58 @@ export class DatabaseStorage implements IStorage {
   }
   
   // Global Settings
-  async getGlobalSettings(): Promise<GlobalSettings | undefined> {
-    const [settings] = await db.select().from(globalSettings);
-    return settings || undefined;
+  async getGlobalSettings(userId: string): Promise<GlobalSettings | undefined> {
+    const [settings] = await db
+      .select()
+      .from(globalSettings)
+      .where(eq(globalSettings.userId, userId));
+    if (settings) return settings;
+
+    // Compatibility backfill for legacy single-row setups where userId was null.
+    const [legacySettings] = await db
+      .select()
+      .from(globalSettings)
+      .where(isNull(globalSettings.userId))
+      .orderBy(desc(globalSettings.updatedAt))
+      .limit(1);
+
+    if (!legacySettings) return undefined;
+
+    const [created] = await db.insert(globalSettings).values({
+      userId,
+      facebookPageId: legacySettings.facebookPageId,
+      facebookPageName: legacySettings.facebookPageName,
+      instagramPageId: legacySettings.instagramPageId,
+      instagramPageName: legacySettings.instagramPageName,
+      useInstagramFromFacebook: legacySettings.useInstagramFromFacebook,
+      beneficiaryName: legacySettings.beneficiaryName,
+      payerName: legacySettings.payerName,
+      useDynamicCreative: legacySettings.useDynamicCreative,
+      primaryTextVariations: legacySettings.primaryTextVariations || [],
+      headlineVariations: legacySettings.headlineVariations || [],
+      descriptionVariations: legacySettings.descriptionVariations || [],
+      defaultCta: legacySettings.defaultCta,
+      defaultWebsiteUrl: legacySettings.defaultWebsiteUrl,
+      defaultUtmTemplate: legacySettings.defaultUtmTemplate,
+      planType: legacySettings.planType,
+      uploadsRemaining: legacySettings.uploadsRemaining,
+      updatedAt: new Date(),
+    }).returning();
+    return created;
   }
 
-  async upsertGlobalSettings(settings: Partial<InsertGlobalSettings>): Promise<GlobalSettings> {
-    const existing = await this.getGlobalSettings();
+  async upsertGlobalSettings(userId: string, settings: Partial<InsertGlobalSettings>): Promise<GlobalSettings> {
+    const existing = await this.getGlobalSettings(userId);
+    const values = { ...settings, userId };
     if (existing) {
       const [updated] = await db
         .update(globalSettings)
-        .set({ ...settings, updatedAt: new Date() })
-        .where(eq(globalSettings.id, existing.id))
+        .set({ ...values, updatedAt: new Date() })
+        .where(and(eq(globalSettings.id, existing.id), eq(globalSettings.userId, userId)))
         .returning();
       return updated;
     }
-    const [created] = await db.insert(globalSettings).values(settings).returning();
+    const [created] = await db.insert(globalSettings).values(values).returning();
     return created;
   }
   

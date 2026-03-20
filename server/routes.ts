@@ -10,8 +10,20 @@ import { MetaAdsApi, createSyncLog, updateSyncLog } from "./meta-ads-api.js";
 import { validateMetaLaunchData, validateAdSetBeforeCreation } from "./meta-ads-validation.js";
 import { decrypt } from "./auth-routes.js";
 import { db } from "./db.js";
-import { metaCampaigns, metaAdsets, metaAds, metaInsights, syncLogs, oauthConnections, metaAssets, globalSettings, metaAccountCache } from "../shared/schema.js";
-import { eq, desc, and, sql } from "drizzle-orm";
+import {
+  metaCampaigns,
+  metaAdsets,
+  metaAds,
+  metaInsights,
+  syncLogs,
+  oauthConnections,
+  metaAssets,
+  globalSettings,
+  metaAccountCache,
+  bulkUploadJobs,
+  adsets,
+} from "../shared/schema.js";
+import { eq, desc, and, or, sql } from "drizzle-orm";
 import {
   enqueueLaunchJob,
   claimLaunchQueueItems,
@@ -29,6 +41,7 @@ const cancelledJobs = new Set<string>();
 
 const metaApiCache = new Map<string, { data: any; expiry: number }>();
 const META_CACHE_TTL = 30 * 60 * 1000;
+const META_FETCH_TIMEOUT_MS = parseInt(process.env.META_FETCH_TIMEOUT_MS || "12000", 10);
 
 function normalizeAdAccountId(adAccountId: string): string {
   return String(adAccountId || "").startsWith("act_")
@@ -59,6 +72,63 @@ function pickValidSelectedPageId(
   return first?.id || null;
 }
 
+function normalizeCachedCampaign(campaignRow: any): any {
+  const raw = (campaignRow?.rawData && typeof campaignRow.rawData === "object")
+    ? campaignRow.rawData
+    : {};
+  return {
+    ...raw,
+    id: campaignRow.id,
+    name: campaignRow.name ?? raw.name,
+    status: campaignRow.status ?? raw.status,
+    objective: campaignRow.objective ?? raw.objective,
+    daily_budget: campaignRow.dailyBudget ?? raw.daily_budget ?? null,
+    lifetime_budget: campaignRow.lifetimeBudget ?? raw.lifetime_budget ?? null,
+    start_time: raw.start_time ?? (campaignRow.startTime ? new Date(campaignRow.startTime).toISOString() : undefined),
+    stop_time: raw.stop_time ?? (campaignRow.stopTime ? new Date(campaignRow.stopTime).toISOString() : undefined),
+    created_time: raw.created_time ?? (campaignRow.createdTime ? new Date(campaignRow.createdTime).toISOString() : undefined),
+    updated_time: raw.updated_time ?? (campaignRow.updatedTime ? new Date(campaignRow.updatedTime).toISOString() : undefined),
+    special_ad_categories: raw.special_ad_categories ?? [],
+    effective_status: raw.effective_status ?? campaignRow.status ?? null,
+  };
+}
+
+function normalizeCachedAdSet(adSetRow: any): any {
+  const raw = (adSetRow?.rawData && typeof adSetRow.rawData === "object")
+    ? adSetRow.rawData
+    : {};
+  return {
+    ...raw,
+    id: adSetRow.id,
+    campaign_id: adSetRow.campaignId ?? raw.campaign_id,
+    name: adSetRow.name ?? raw.name,
+    status: adSetRow.status ?? raw.status,
+    daily_budget: adSetRow.dailyBudget ?? raw.daily_budget ?? null,
+    lifetime_budget: adSetRow.lifetimeBudget ?? raw.lifetime_budget ?? null,
+    targeting: adSetRow.targetingJson ?? raw.targeting ?? null,
+    promoted_object: raw.promoted_object ?? null,
+    dsa_beneficiary: raw.dsa_beneficiary ?? null,
+    dsa_payor: raw.dsa_payor ?? null,
+    start_time: raw.start_time ?? (adSetRow.startTime ? new Date(adSetRow.startTime).toISOString() : undefined),
+    end_time: raw.end_time ?? (adSetRow.endTime ? new Date(adSetRow.endTime).toISOString() : undefined),
+  };
+}
+
+function normalizeCachedAd(adRow: any): any {
+  const raw = (adRow?.rawData && typeof adRow.rawData === "object")
+    ? adRow.rawData
+    : {};
+  return {
+    ...raw,
+    id: adRow.id,
+    name: adRow.name ?? raw.name,
+    status: adRow.status ?? raw.status,
+    campaign_id: adRow.campaignId ?? raw.campaign_id ?? null,
+    adset_id: adRow.adsetId ?? raw.adset_id ?? null,
+    creative: adRow.creativeJson ?? raw.creative ?? null,
+  };
+}
+
 async function upsertAccountCache(userId: string, adAccountId: string, field: string, data: any) {
   try {
     await db.insert(metaAccountCache)
@@ -86,14 +156,72 @@ async function getAccountCache(userId: string, adAccountId: string): Promise<any
   }
 }
 
+type PageLike = Record<string, unknown> & { id?: string; name?: string };
+
+function sanitizePageForClient(page: PageLike): PageLike {
+  const { access_token: _accessToken, ...safePage } = page as PageLike & { access_token?: string };
+  return safePage;
+}
+
+function sanitizePagesForClient(pages: unknown): PageLike[] {
+  if (!Array.isArray(pages)) return [];
+  return pages
+    .filter((page): page is PageLike => !!page && typeof page === "object")
+    .map((page) => sanitizePageForClient(page));
+}
+
+async function assertJobOwnership(userId: string, jobId: string) {
+  const [job] = await db
+    .select()
+    .from(bulkUploadJobs)
+    .where(and(eq(bulkUploadJobs.id, jobId), eq(bulkUploadJobs.userId, userId)))
+    .limit(1);
+  return job || null;
+}
+
+async function assertAdsetOwnership(userId: string, adsetId: string) {
+  const [adsetRow] = await db
+    .select({
+      adset: adsets,
+      job: bulkUploadJobs,
+    })
+    .from(adsets)
+    .innerJoin(bulkUploadJobs, eq(adsets.jobId, bulkUploadJobs.id))
+    .where(and(eq(adsets.id, adsetId), eq(bulkUploadJobs.userId, userId)))
+    .limit(1);
+  return adsetRow?.adset || null;
+}
+
 async function cachedMetaFetch(url: string, cacheKey?: string): Promise<any> {
   const key = cacheKey || url.replace(/access_token=[^&]+/, "access_token=REDACTED");
   const cached = metaApiCache.get(key);
   if (cached && Date.now() < cached.expiry) {
     return cached.data;
   }
-  const response = await fetch(url);
-  const data = await response.json();
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), META_FETCH_TIMEOUT_MS);
+  let response: globalThis.Response;
+  try {
+    response = await fetch(url, { signal: controller.signal });
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      return {
+        error: {
+          message: `Meta API request timeout after ${META_FETCH_TIMEOUT_MS}ms`,
+          code: "META_TIMEOUT",
+        },
+      };
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    data = { error: { message: "Invalid JSON response from Meta API", code: "META_BAD_JSON" } };
+  }
   if (!data.error) {
     metaApiCache.set(key, { data, expiry: Date.now() + META_CACHE_TTL });
   }
@@ -109,9 +237,6 @@ function emitJobLog(jobId: string, message: string, type: "info" | "success" | "
 // Authentication middleware for API routes
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (req.originalUrl.startsWith("/api/workers/launch")) {
-    return next();
-  }
-  if (req.originalUrl.startsWith("/api/meta/debug-creative/")) {
     return next();
   }
   let userId = (req.session as any)?.userId;
@@ -250,7 +375,10 @@ export async function registerRoutes(
   app.get("/api/connections", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;
-      const connections = await storage.getAllConnections();
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const connections = await storage.getAllConnections(userId);
       
       const googleDrive = connections.find(c => c.provider === "google_drive");
       if (!googleDrive) {
@@ -258,7 +386,7 @@ export async function registerRoutes(
           const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
           if (isServiceAccountConfigured()) {
             const email = getServiceAccountEmail();
-            await storage.upsertConnection({
+            await storage.upsertConnection(userId, {
               provider: "google_drive",
               status: "connected",
               accountName: email || "Google Drive (Service Account)",
@@ -283,7 +411,7 @@ export async function registerRoutes(
           .limit(1);
         
         if (metaOAuth.length > 0) {
-          await storage.upsertConnection({
+          await storage.upsertConnection(userId, {
             provider: "meta",
             status: "connected",
             accountName: metaOAuth[0].accountName || "Meta Ads",
@@ -295,7 +423,7 @@ export async function registerRoutes(
       }
       
       // Refresh the list
-      const updatedConnections = await storage.getAllConnections();
+      const updatedConnections = await storage.getAllConnections(userId);
       res.json(updatedConnections);
     } catch (error) {
       console.error("Error fetching connections:", error);
@@ -307,13 +435,17 @@ export async function registerRoutes(
   app.post("/api/connections/:provider/connect", async (req: Request, res: Response) => {
     try {
       const { provider } = req.params;
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       
       if (provider === "google_drive") {
         try {
           const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
           if (isServiceAccountConfigured()) {
             const email = getServiceAccountEmail();
-            const connection = await storage.upsertConnection({
+            const connection = await storage.upsertConnection(userId, {
               provider: "google_drive",
               status: "connected",
               accountName: email || "Google Drive (Service Account)",
@@ -329,7 +461,7 @@ export async function registerRoutes(
         });
       } else if (provider === "meta") {
         // Simulated Meta connection for MVP
-        const connection = await storage.upsertConnection({
+        const connection = await storage.upsertConnection(userId, {
           provider: "meta",
           status: "connected",
           accountName: "Demo Ad Account",
@@ -351,7 +483,11 @@ export async function registerRoutes(
   app.post("/api/connections/:provider/disconnect", async (req: Request, res: Response) => {
     try {
       const { provider } = req.params;
-      await storage.deleteConnection(provider);
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      await storage.deleteConnection(userId, provider);
       res.json({ success: true });
     } catch (error) {
       console.error("Error disconnecting:", error);
@@ -363,13 +499,17 @@ export async function registerRoutes(
   app.post("/api/connections/:provider/test", async (req: Request, res: Response) => {
     try {
       const { provider } = req.params;
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       
       if (provider === "google_drive") {
         try {
           const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
           if (isServiceAccountConfigured()) {
             const email = getServiceAccountEmail();
-            await storage.upsertConnection({
+            await storage.upsertConnection(userId, {
               provider: "google_drive",
               status: "connected",
               accountName: email || "Google Drive (Service Account)",
@@ -382,11 +522,15 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Google Drive service account not configured" });
       } else if (provider === "meta") {
         // Simulated test for Meta
-        const connection = await storage.getConnection("meta");
+        const connection = await storage.getConnection(userId, "meta");
         if (connection?.status === "connected") {
-          await storage.upsertConnection({
-            ...connection,
+          await storage.upsertConnection(userId, {
             provider: "meta",
+            status: connection.status,
+            accountName: connection.accountName,
+            accountEmail: connection.accountEmail,
+            scopes: connection.scopes || undefined,
+            connectedAt: connection.connectedAt || undefined,
             lastTestedAt: new Date(),
           });
           return res.json({ success: true });
@@ -407,8 +551,13 @@ export async function registerRoutes(
   app.get("/api/jobs", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;
-      const allJobs = await storage.getAllJobs();
-      const jobs = userId ? allJobs.filter(j => j.userId === userId) : [];
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const jobs = await db.select()
+        .from(bulkUploadJobs)
+        .where(eq(bulkUploadJobs.userId, userId))
+        .orderBy(desc(bulkUploadJobs.createdAt));
       
       const jobsWithAssetCounts = await Promise.all(
         jobs.map(async (job) => {
@@ -445,9 +594,15 @@ export async function registerRoutes(
   app.delete("/api/jobs/bulk/queue", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;
-      const allJobs = await storage.getAllJobs();
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const allJobs = await db.select()
+        .from(bulkUploadJobs)
+        .where(eq(bulkUploadJobs.userId, userId))
+        .orderBy(desc(bulkUploadJobs.createdAt));
       const queueStatuses = ["queued", "processing", "retrying", "validating", "uploading", "creating_campaign", "creating_adsets", "uploading_creatives", "creating_ads", "scheduled", "error", "failed"];
-      const queueJobs = allJobs.filter(j => queueStatuses.includes(j.status) && (!userId || j.userId === userId));
+      const queueJobs = allJobs.filter((j) => queueStatuses.includes(j.status));
       let deleted = 0;
       for (const job of queueJobs) {
         await clearQueueForJob(job.id);
@@ -463,7 +618,11 @@ export async function registerRoutes(
 
   app.delete("/api/jobs/:id", async (req: Request, res: Response) => {
     try {
-      const job = await storage.getJob(req.params.id);
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const job = await assertJobOwnership(userId, req.params.id);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -479,7 +638,11 @@ export async function registerRoutes(
   // Get single job with details
   app.get("/api/jobs/:id", async (req: Request, res: Response) => {
     try {
-      const job = await storage.getJob(req.params.id);
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const job = await assertJobOwnership(userId, req.params.id);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -541,7 +704,11 @@ export async function registerRoutes(
       });
 
       const { jobId } = req.params;
-      const job = await storage.getJob(jobId);
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const job = await assertJobOwnership(userId, jobId);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -734,7 +901,7 @@ export async function registerRoutes(
 
       // Get ad account settings - STRICT validation required before launch
       const adAccountSettingsRecord = await storage.getAdAccountSettings(userId, adAccountId);
-      const globalSettingsRecord = await storage.getGlobalSettings();
+      const globalSettingsRecord = await storage.getGlobalSettings(userId);
       
       // If existing campaign selected, fetch its settings FIRST (for validation decisions)
       let existingCampaignData: any = null;
@@ -1083,8 +1250,10 @@ export async function registerRoutes(
       const host = req.get("host");
       const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
       const protocol = forwardedProto || (req.secure ? "https" : "http");
+      let workerTrigger: "requested" | "waiting_for_worker" = "waiting_for_worker";
 
       if (cronSecret && host) {
+        workerTrigger = "requested";
         const workerUrl = `${protocol}://${host}/api/workers/launch?limit=1`;
         void fetch(workerUrl, {
           method: "POST",
@@ -1099,9 +1268,15 @@ export async function registerRoutes(
             console.error(`[Launch] Failed to trigger worker for job ${jobId}:`, triggerError);
           });
       } else {
+        const reason = !cronSecret ? "CRON_SECRET missing" : "host missing";
         console.warn(
-          `[Launch] Skipping immediate worker trigger for job ${jobId} (${!cronSecret ? "CRON_SECRET missing" : "host missing"})`,
+          `[Launch] Skipping immediate worker trigger for job ${jobId} (${reason})`,
         );
+        const waitingMessage = `Worker not auto-triggered (${reason}). Job is queued until /api/workers/launch runs.`;
+        const existingLogs = Array.isArray((job as any).logs) ? ([...(job as any).logs] as string[]) : [];
+        await storage.updateJob(jobId, {
+          logs: [...existingLogs, waitingMessage],
+        });
       }
 
       res.json({
@@ -1109,6 +1284,7 @@ export async function registerRoutes(
         jobId,
         queued: true,
         queueId: queueItem.id,
+        workerTrigger,
       });
 
     } catch (error) {
@@ -1139,16 +1315,17 @@ export async function registerRoutes(
       const isVercelCronTrigger = typeof vercelCron === "string" && vercelCron.length > 0;
 
       if (!isVercelCronTrigger) {
-        if (!cronSecret) {
-          return res.status(500).json({ error: "CRON_SECRET is not configured" });
-        }
-
         const authHeader = req.headers.authorization || "";
         const bearerToken = authHeader.startsWith("Bearer ")
           ? authHeader.slice("Bearer ".length).trim()
           : "";
         const providedSecret = (req.headers["x-cron-secret"] as string | undefined) || bearerToken;
-        if (providedSecret !== cronSecret) {
+        const hasValidSecret = !!cronSecret && providedSecret === cronSecret;
+
+        if (!hasValidSecret) {
+          if (!cronSecret) {
+            return res.status(500).json({ error: "CRON_SECRET is not configured" });
+          }
           return res.status(401).json({ error: "Unauthorized worker trigger" });
         }
       } else {
@@ -2087,8 +2264,12 @@ export async function registerRoutes(
   app.post("/api/bulk-ads/retry/:jobId/:adsetId", async (req: Request, res: Response) => {
     try {
       const { jobId, adsetId } = req.params;
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       
-      const job = await storage.getJob(jobId);
+      const job = await assertJobOwnership(userId, jobId);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -2146,7 +2327,11 @@ export async function registerRoutes(
   app.post("/api/bulk-ads/cancel/:jobId", async (req: Request, res: Response) => {
     try {
       const { jobId } = req.params;
-      const job = await storage.getJob(jobId);
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const job = await assertJobOwnership(userId, jobId);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -2388,8 +2573,12 @@ export async function registerRoutes(
   app.post("/api/drive/sync/:jobId", async (req: Request, res: Response) => {
     try {
       const { jobId } = req.params;
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       
-      const job = await storage.getJob(jobId);
+      const job = await assertJobOwnership(userId, jobId);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -2858,9 +3047,17 @@ export async function registerRoutes(
   // Get ad sets for Drive sync
   app.get("/api/drive/adsets", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const { jobId } = req.query;
       if (!jobId || typeof jobId !== 'string') {
         return res.status(400).json({ error: "Job ID is required" });
+      }
+      const job = await assertJobOwnership(userId, jobId);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
       }
       
       const adsets = await storage.getAdsetsByJob(jobId);
@@ -2901,9 +3098,17 @@ export async function registerRoutes(
   // Get single ad set detail with parsed copy
   app.get("/api/drive/adsets/:id", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const { id } = req.params;
       const adset = await storage.getAdset(id);
       if (!adset) {
+        return res.status(404).json({ error: "Ad set not found" });
+      }
+      const job = await assertJobOwnership(userId, adset.jobId);
+      if (!job) {
         return res.status(404).json({ error: "Ad set not found" });
       }
       
@@ -2933,11 +3138,19 @@ export async function registerRoutes(
   // Update ad set copy manually
   app.post("/api/drive/adsets/:id/copy", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const { id } = req.params;
       const { primaryTexts, headlines, descriptions } = req.body;
       
       const adset = await storage.getAdset(id);
       if (!adset) {
+        return res.status(404).json({ error: "Ad set not found" });
+      }
+      const job = await assertJobOwnership(userId, adset.jobId);
+      if (!job) {
         return res.status(404).json({ error: "Ad set not found" });
       }
 
@@ -2982,8 +3195,16 @@ export async function registerRoutes(
 
   app.post("/api/drive/jobs/:jobId/global-copy", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const { jobId } = req.params;
       const { primaryTexts, headlines, descriptions } = req.body;
+      const job = await assertJobOwnership(userId, jobId);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
 
       const hasPrimary = Array.isArray(primaryTexts) && primaryTexts.some((t: string) => t?.trim());
       const hasHeadlines = Array.isArray(headlines) && headlines.some((t: string) => t?.trim());
@@ -3678,7 +3899,15 @@ export async function registerRoutes(
   // Get adsets for a job
   app.get("/api/jobs/:jobId/adsets", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const { jobId } = req.params;
+      const job = await assertJobOwnership(userId, jobId);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
       const adsets = await storage.getAdsetsByJob(jobId);
       res.json(adsets);
     } catch (error) {
@@ -3690,7 +3919,15 @@ export async function registerRoutes(
   // Update adset settings
   app.patch("/api/adsets/:adsetId", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const { adsetId } = req.params;
+      const ownedAdset = await assertAdsetOwnership(userId, adsetId);
+      if (!ownedAdset) {
+        return res.status(404).json({ error: "Ad set not found" });
+      }
       const { name, useDefaults, overrideSettings } = req.body;
       
       const updated = await storage.updateAdset(adsetId, {
@@ -3709,15 +3946,23 @@ export async function registerRoutes(
   // Update job default settings
   app.patch("/api/jobs/:jobId/defaults", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const { jobId } = req.params;
+      const job = await assertJobOwnership(userId, jobId);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
       const { defaultSettings } = req.body;
       
       await storage.updateJob(jobId, {
         defaultSettings,
       });
       
-      const job = await storage.getJob(jobId);
-      res.json(job);
+      const updatedJob = await storage.getJob(jobId);
+      res.json(updatedJob);
     } catch (error) {
       console.error("Error updating defaults:", error);
       res.status(500).json({ error: "Failed to update defaults" });
@@ -3729,7 +3974,11 @@ export async function registerRoutes(
   // Get global settings
   app.get("/api/settings", async (req: Request, res: Response) => {
     try {
-      const settings = await storage.getGlobalSettings();
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const settings = await storage.getGlobalSettings(userId);
       res.json(settings || {
         planType: "free",
         uploadsRemaining: 15,
@@ -3747,8 +3996,12 @@ export async function registerRoutes(
   // Update global settings
   app.patch("/api/settings", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
       const updates = req.body;
-      const settings = await storage.upsertGlobalSettings(updates);
+      const settings = await storage.upsertGlobalSettings(userId, updates);
       res.json(settings);
     } catch (error) {
       console.error("Error updating settings:", error);
@@ -3965,7 +4218,7 @@ export async function registerRoutes(
 
           console.log(`[Pages] Serving ${cached.pagesJson.length} pages from DB cache for ad account ${selectedAdAccountId}`);
           return res.json({
-            data: cached.pagesJson,
+            data: sanitizePagesForClient(cached.pagesJson),
             selectedPageId,
             filteredByAdAccount: true,
             autoSelected,
@@ -4121,7 +4374,7 @@ export async function registerRoutes(
             }
 
             return res.json({ 
-              data: filteredPages, 
+              data: sanitizePagesForClient(filteredPages), 
               selectedPageId: selectedPageId,
               filteredByAdAccount: true,
               autoSelected: filteredPages.length === 1 || !currentSelectionInList,
@@ -4139,21 +4392,21 @@ export async function registerRoutes(
       const businessOwnedPages = assets[0].businessOwnedPagesJson || [];
       
       // Combine regular pages and business-owned pages
-      const allPages: Array<{id: string, name: string, source: string}> = [];
+      const allPages: Array<Record<string, unknown> & { source: string }> = [];
       
       pages.forEach((p: {id: string, name: string}) => {
-        allPages.push({ ...p, source: 'personal' });
+        allPages.push({ ...sanitizePageForClient(p), source: 'personal' });
       });
       
       businessOwnedPages.forEach((b: {business_id: string, pages: Array<{id: string, name: string}>}) => {
         b.pages.forEach(p => {
           if (!allPages.some(ap => ap.id === p.id)) {
-            allPages.push({ ...p, source: 'business' });
+            allPages.push({ ...sanitizePageForClient(p), source: 'business' });
           }
         });
       });
 
-      res.json({ 
+      res.json({
         data: allPages, 
         selectedPageId: assets[0].selectedPageId,
         filteredByAdAccount: false
@@ -4576,7 +4829,7 @@ export async function registerRoutes(
       // Parallel DB reads
       const [assets, globalSettingsRow, allSettings] = await Promise.all([
         db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1),
-        storage.getGlobalSettings(),
+        storage.getGlobalSettings(userId),
         storage.getAllAdAccountSettings(userId),
       ]);
 
@@ -4662,7 +4915,7 @@ export async function registerRoutes(
         adAccounts,
         selectedAdAccountId,
         hasPendingAccounts,
-        pages,
+        pages: sanitizePagesForClient(pages),
         selectedPageId,
         filteredByAdAccount,
         autoSelected,
@@ -4819,21 +5072,21 @@ export async function registerRoutes(
         .limit(1);
       
       const selectedAdAccountId = assets[0]?.selectedAdAccountId;
-      
-      // Filter campaigns by selected ad account
-      const campaigns = selectedAdAccountId
-        ? await db.select()
-            .from(metaCampaigns)
-            .where(and(
-              eq(metaCampaigns.userId, userId),
-              eq(metaCampaigns.adAccountId, selectedAdAccountId)
-            ))
-            .orderBy(desc(metaCampaigns.lastSyncedAt))
-        : await db.select()
-            .from(metaCampaigns)
-            .where(eq(metaCampaigns.userId, userId))
-            .orderBy(desc(metaCampaigns.lastSyncedAt));
+      const accountVariants = selectedAdAccountId ? getAdAccountIdVariants(selectedAdAccountId) : [];
 
+      const whereClause = selectedAdAccountId
+        ? and(
+            eq(metaCampaigns.userId, userId),
+            or(...accountVariants.map((id) => eq(metaCampaigns.adAccountId, id))),
+          )
+        : eq(metaCampaigns.userId, userId);
+
+      const campaignRows = await db.select()
+        .from(metaCampaigns)
+        .where(whereClause)
+        .orderBy(desc(metaCampaigns.lastSyncedAt));
+
+      const campaigns = campaignRows.map(normalizeCachedCampaign);
       res.json({ data: campaigns, source: "cache" });
     } catch (error: any) {
       console.error("Error fetching campaigns:", error);
@@ -4844,28 +5097,34 @@ export async function registerRoutes(
   // Get campaign statistics with ad sets and ads breakdown
   app.get("/api/meta/debug-creative/:creativeId", async (req: Request, res: Response) => {
     try {
-      const connections = await db.select()
-        .from(oauthConnections)
-        .where(eq(oauthConnections.provider, "meta"))
-        .orderBy(desc(oauthConnections.updatedAt))
-        .limit(1);
-      if (!connections.length) {
-        return res.status(401).json({ error: "No Meta connection found" });
-      }
-      const userId = connections[0].userId;
+      const userId = (req.session as any)?.userId;
       if (!userId) {
-        return res.status(401).json({ error: "Meta user id not found" });
+        return res.status(401).json({ error: "Not authenticated" });
       }
-      console.log("[DEBUG-CREATIVE] Using userId:", userId);
+
+      if (process.env.NODE_ENV === "production") {
+        const debugSecret = process.env.DEBUG_CREATIVE_SECRET;
+        const providedDebugSecret = req.get("x-debug-secret") || "";
+        if (!debugSecret || providedDebugSecret !== debugSecret) {
+          return res.status(404).json({ error: "Not found" });
+        }
+      }
+
       const metaApi = new MetaAdsApi(userId);
       const initialized = await metaApi.initialize();
       if (!initialized) {
         return res.status(401).json({ error: "Meta not connected" });
       }
       const { creativeId } = req.params;
-      const token = (metaApi as any).accessToken;
+      const token = metaApi.getAccessToken();
+      if (!token) {
+        return res.status(401).json({ error: "Meta access token not available" });
+      }
 
-      const adAccountId = (req.query.act as string) || "act_5163022290589690";
+      const adAccountId = String(req.query.act || "");
+      if (!adAccountId) {
+        return res.status(400).json({ error: "Query param 'act' (ad account id) is required" });
+      }
       const listUrl = `https://graph.facebook.com/v22.0/${adAccountId}/adcreatives?fields=degrees_of_freedom_spec{creative_features_spec},name,object_story_spec,asset_feed_spec&limit=5&access_token=${token}`;
       const listResp = await fetch(listUrl);
       const listResult = await listResp.json();
@@ -4988,6 +5247,45 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Campaign ID is required" });
       }
 
+      // DB-first: return cached campaign/adset/ad details when available.
+      // Use live Meta only when cache is missing or caller explicitly forces live=true.
+      if (req.query.live !== "true") {
+        const [campaignRow] = await db.select()
+          .from(metaCampaigns)
+          .where(and(
+            eq(metaCampaigns.userId, userId),
+            eq(metaCampaigns.id, campaignId),
+          ))
+          .orderBy(desc(metaCampaigns.lastSyncedAt))
+          .limit(1);
+
+        const adSetRows = await db.select()
+          .from(metaAdsets)
+          .where(and(
+            eq(metaAdsets.userId, userId),
+            eq(metaAdsets.campaignId, campaignId),
+          ))
+          .orderBy(desc(metaAdsets.lastSyncedAt));
+
+        const adRows = await db.select()
+          .from(metaAds)
+          .where(and(
+            eq(metaAds.userId, userId),
+            eq(metaAds.campaignId, campaignId),
+          ))
+          .orderBy(desc(metaAds.lastSyncedAt));
+
+        if (campaignRow || adSetRows.length > 0 || adRows.length > 0) {
+          const campaign = campaignRow
+            ? normalizeCachedCampaign(campaignRow)
+            : { id: campaignId, name: `Campaign ${campaignId}` };
+          const adSets = adSetRows.map(normalizeCachedAdSet);
+          const ads = adRows.map(normalizeCachedAd);
+          console.log(`[CampaignDetails] Cache hit: ${adSets.length} ad sets, ${ads.length} ads`);
+          return res.json({ data: { campaign, adSets, ads }, source: "cache" });
+        }
+      }
+
       const api = new MetaAdsApi(userId);
       const initialized = await api.initialize();
       if (!initialized) {
@@ -4996,7 +5294,7 @@ export async function registerRoutes(
 
       const details = await api.getCampaignDetails(campaignId);
       console.log(`[CampaignDetails] Success: ${details.adSets?.length || 0} ad sets, ${details.ads?.length || 0} ads`);
-      res.json({ data: details });
+      res.json({ data: details, source: "live" });
     } catch (error: any) {
       console.error("[CampaignDetails] Error fetching campaign details:", error);
       res.status(500).json({ error: error.message || "Failed to fetch campaign details" });
@@ -5014,6 +5312,29 @@ export async function registerRoutes(
       const { adSetId } = req.params;
       console.log(`[SampleAd] Fetching sample ad for ad set: ${adSetId}`);
 
+      // DB-first sample ad lookup to avoid unnecessary Meta requests when switching ad sets.
+      if (req.query.live !== "true") {
+        const cachedAds = await db.select()
+          .from(metaAds)
+          .where(and(
+            eq(metaAds.userId, userId),
+            eq(metaAds.adsetId, adSetId),
+          ))
+          .orderBy(desc(metaAds.lastSyncedAt));
+
+        if (cachedAds.length > 0) {
+          const normalizedAds = cachedAds.map(normalizeCachedAd);
+          const withCreativeData = normalizedAds.find((ad: any) =>
+            ad?.creative?.object_story_spec ||
+            ad?.creative?.asset_feed_spec ||
+            ad?.creative?.call_to_action_type,
+          );
+          const sample = withCreativeData || normalizedAds[0];
+          console.log(`[SampleAd] Cache hit for ad set ${adSetId}`);
+          return res.json({ data: sample, source: "cache" });
+        }
+      }
+
       const api = new MetaAdsApi(userId);
       const initialized = await api.initialize();
       if (!initialized) {
@@ -5022,7 +5343,7 @@ export async function registerRoutes(
 
       const ad = await api.getSampleAd(adSetId);
       console.log(`[SampleAd] Found ad: ${ad ? ad.id : 'none'} for ad set ${adSetId}`);
-      res.json({ data: ad });
+      res.json({ data: ad, source: "live" });
     } catch (error: any) {
       console.error("[SampleAd] Error:", error);
       res.status(500).json({ error: error.message || "Failed to fetch sample ad" });
@@ -5160,17 +5481,28 @@ export async function registerRoutes(
         return res.json({ data: adsets, source: "live" });
       }
 
-      let query = db.select()
+      const assets = await db.select()
+        .from(metaAssets)
+        .where(eq(metaAssets.userId, userId))
+        .limit(1);
+      const selectedAdAccountId = assets[0]?.selectedAdAccountId || null;
+      const accountVariants = selectedAdAccountId ? getAdAccountIdVariants(selectedAdAccountId) : [];
+
+      const baseFilters: any[] = [eq(metaAdsets.userId, userId)];
+      if (selectedAdAccountId && accountVariants.length > 0) {
+        baseFilters.push(or(...accountVariants.map((id) => eq(metaAdsets.adAccountId, id))));
+      }
+      if (campaignId) {
+        baseFilters.push(eq(metaAdsets.campaignId, String(campaignId)));
+      }
+
+      const adsetRows = await db.select()
         .from(metaAdsets)
-        .where(eq(metaAdsets.userId, userId))
+        .where(and(...baseFilters))
         .orderBy(desc(metaAdsets.lastSyncedAt));
 
-      const adsets = await query;
-      const filtered = campaignId 
-        ? adsets.filter(a => a.campaignId === campaignId)
-        : adsets;
-
-      res.json({ data: filtered, source: "cache" });
+      const adsets = adsetRows.map(normalizeCachedAdSet);
+      res.json({ data: adsets, source: "cache" });
     } catch (error: any) {
       console.error("Error fetching adsets:", error);
       res.status(500).json({ error: error.message || "Failed to fetch adsets" });

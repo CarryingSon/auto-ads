@@ -14,7 +14,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getCsrfHeaders } from "@/lib/queryClient";
 import {
   FolderOpen,
   FileVideo,
@@ -237,6 +237,16 @@ interface ParsedCopy {
   descriptions: string[];
 }
 
+type LaunchStatus = "idle" | "extracting" | "launching" | "complete" | "error";
+
+interface LaunchResults {
+  campaign?: { id: string; name: string } | null;
+  adSets: Array<{ id: string; name: string; status: string }>;
+  creatives: Array<{ id: string; name: string; type: string }>;
+  ads: Array<{ id: string; name: string; adSetName: string }>;
+  logs: string[];
+}
+
 interface AdSetInfo {
   id: string;
   name: string;
@@ -342,6 +352,8 @@ interface WizardDraft {
 
 const DRAFT_VERSION = 3;
 const DRAFT_STORAGE_KEY = "bulk-ads-draft";
+const SYNC_REQUEST_TIMEOUT_MS = 180000;
+const QUEUE_STUCK_WARNING_MS = 45000;
 
 const SYNC_STATUS_MESSAGES = [
   { after: 0, text: "Connecting to Google Drive..." },
@@ -427,7 +439,7 @@ function useSyncStore() {
 }
 
 interface ActiveLaunchState {
-  status: "idle" | "extracting" | "launching" | "complete";
+  status: LaunchStatus;
   currentStep: number;
   jobId: string | null;
   campaignId: string;
@@ -435,7 +447,7 @@ interface ActiveLaunchState {
   progress: number;
   logs: {message: string; type: string; timestamp?: string}[];
   adSetStatuses: Record<string, "pending" | "processing" | "completed" | "failed">;
-  results: { campaign: any; adSets: any[]; ads: any[] };
+  results: LaunchResults;
   adSets: AdSetInfo[];
   folderUrl: string;
   folderName: string;
@@ -448,6 +460,14 @@ interface ActiveLaunchState {
   listeners: Set<() => void>;
 }
 
+const EMPTY_LAUNCH_RESULTS: LaunchResults = {
+  campaign: null,
+  adSets: [],
+  creatives: [],
+  ads: [],
+  logs: [],
+};
+
 const activeLaunchStore: ActiveLaunchState = {
   status: "idle",
   currentStep: 0,
@@ -457,7 +477,7 @@ const activeLaunchStore: ActiveLaunchState = {
   progress: 0,
   logs: [],
   adSetStatuses: {},
-  results: { campaign: null, adSets: [], ads: [] },
+  results: { ...EMPTY_LAUNCH_RESULTS },
   adSets: [],
   folderUrl: "",
   folderName: "",
@@ -483,7 +503,7 @@ function resetLaunchStore() {
   activeLaunchStore.progress = 0;
   activeLaunchStore.logs = [];
   activeLaunchStore.adSetStatuses = {};
-  activeLaunchStore.results = { campaign: null, adSets: [], ads: [] };
+  activeLaunchStore.results = { ...EMPTY_LAUNCH_RESULTS };
   activeLaunchStore.adSets = [];
   activeLaunchStore.folderUrl = "";
   activeLaunchStore.folderName = "";
@@ -530,7 +550,7 @@ export default function BulkAds() {
     beneficiaryName: "",
     payerName: "",
   });
-  const [launchStatus, setLaunchStatus] = useState<"idle" | "extracting" | "launching" | "complete">("idle");
+  const [launchStatus, setLaunchStatus] = useState<LaunchStatus>("idle");
   const [launchProgress, setLaunchProgress] = useState(0);
   const [launchLogs, setLaunchLogs] = useState<{message: string; type: string; timestamp?: string}[]>([]);
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null);
@@ -652,13 +672,7 @@ export default function BulkAds() {
     globalDocxFound: boolean;
     adSets: AdSetInfo[];
   } | null>(null);
-  const [launchResults, setLaunchResults] = useState<{
-    campaign?: { id: string; name: string };
-    adSets: Array<{ id: string; name: string; status: string }>;
-    creatives: Array<{ id: string; name: string; type: string }>;
-    ads: Array<{ id: string; name: string; adSetName: string }>;
-    logs: string[];
-  }>({ adSets: [], creatives: [], ads: [], logs: [] });
+  const [launchResults, setLaunchResults] = useState<LaunchResults>({ ...EMPTY_LAUNCH_RESULTS });
   
   // Load ad accounts list with hasSettings flag (same source as sidebar)
   const { data: adAccountsData, isLoading: adAccountsLoading } = useQuery<{
@@ -893,13 +907,13 @@ export default function BulkAds() {
     }>;
     source: string;
   }>({
-    queryKey: ["/api/meta/campaigns", "live"],
+    queryKey: ["/api/meta/campaigns", selectedAdAccountId || "none"],
     queryFn: async () => {
-      const res = await fetch("/api/meta/campaigns?live=true");
+      const res = await fetch("/api/meta/campaigns", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch campaigns");
       return res.json();
     },
-    retry: 1,
+    enabled: !!selectedAdAccountId,
   });
 
   const metaCampaigns = campaignsData?.data || [];
@@ -922,8 +936,15 @@ export default function BulkAds() {
       dsa_payor?: string;
     }>;
   }>({
-    queryKey: [`/api/meta/adsets?live=true&campaignId=${importCampaignId}`],
-    enabled: !!importCampaignId,
+    queryKey: ["/api/meta/adsets", selectedAdAccountId || "none", importCampaignId || "none"],
+    queryFn: async () => {
+      const res = await fetch(`/api/meta/adsets?campaignId=${encodeURIComponent(importCampaignId)}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch ad sets");
+      return res.json();
+    },
+    enabled: !!importCampaignId && !!selectedAdAccountId,
   });
   const importAdSets = importAdSetsData?.data || [];
 
@@ -938,10 +959,12 @@ export default function BulkAds() {
     enabled: !!importCampaignId,
   });
   const importCampaignAds = importCampaignDetailsData?.data?.ads || [];
+  const hasImportCampaignAdsForSelectedAdSet = !!importAdSetId &&
+    importCampaignAds.some((ad: any) => ad.adset_id === importAdSetId);
 
   const { data: importSampleAdData } = useQuery<{ data: any }>({
     queryKey: [`/api/meta/adsets/${importAdSetId}/sample-ad`],
-    enabled: !!importAdSetId,
+    enabled: !!importAdSetId && !hasImportCampaignAdsForSelectedAdSet,
   });
   const importSampleAd = importSampleAdData?.data || null;
   
@@ -1323,7 +1346,7 @@ export default function BulkAds() {
     setLaunchProgress(0);
     setLaunchLogs([]);
     setAdSetStatuses({});
-    setLaunchResults({ campaign: null, adSets: [], ads: [] });
+    setLaunchResults({ ...EMPTY_LAUNCH_RESULTS });
 
     activeSyncStore.startTime = Date.now();
     activeSyncStore.syncStep = 1;
@@ -1346,7 +1369,12 @@ export default function BulkAds() {
       notifySyncListeners();
 
       const endpoint = mode === "private" ? "/api/drive/import-private" : "/api/drive/sync";
-      const apiPromise = apiRequest("POST", endpoint, { campaignId, driveUrl, geoSplit });
+      const apiPromise = apiRequest(
+        "POST",
+        endpoint,
+        { campaignId, driveUrl, geoSplit },
+        { timeoutMs: SYNC_REQUEST_TIMEOUT_MS },
+      );
 
       await new Promise(r => setTimeout(r, 800));
       activeSyncStore.syncStep = 3;
@@ -1385,6 +1413,8 @@ export default function BulkAds() {
 
   const applySyncResultRef = useRef(applySyncResult);
   applySyncResultRef.current = applySyncResult;
+  const queueWaitStartedAtRef = useRef<number | null>(null);
+  const queueKickAttemptedRef = useRef(false);
 
   useEffect(() => {
     const store = activeSyncStore;
@@ -1477,7 +1507,7 @@ export default function BulkAds() {
   useEffect(() => {
     const ls = activeLaunchStore;
     if (activeSyncStore.syncStep > 0) return;
-    if ((ls.status === "launching" || ls.status === "complete" || ls.status === "extracting") && ls.currentStep >= 4) {
+    if ((ls.status === "launching" || ls.status === "complete" || ls.status === "extracting" || ls.status === "error") && ls.currentStep >= 4) {
       console.log("[launch-restore] restoring launch state, status:", ls.status, "step:", ls.currentStep);
       setCurrentStep(ls.currentStep);
       setJobId(ls.jobId);
@@ -1543,7 +1573,10 @@ export default function BulkAds() {
                 ? ((a.validationErrors?.filter(e => e !== 'No ad copy found').length || 0) > 0 ? 'invalid' : 'valid')
                 : a.status,
               validationErrors: a.validationErrors?.filter(e => e !== 'No ad copy found') || [],
-              parsedCopy: { ...a.parsedCopy, ...variables.copy, dctName: a.parsedCopy?.dctName || a.dctName || "" },
+              parsedCopy: {
+                ...(a.parsedCopy || { primaryTexts: [], headlines: [], descriptions: [] }),
+                ...variables.copy,
+              },
             }
           : a
       ));
@@ -1698,6 +1731,8 @@ export default function BulkAds() {
       totalEstimatedSeconds = Math.ceil(totalEstimatedSeconds * 1.2);
       setEstimatedTimeRemaining(totalEstimatedSeconds);
       setInitialEstimatedTime(totalEstimatedSeconds); // Save initial for progress calculation
+      queueWaitStartedAtRef.current = null;
+      queueKickAttemptedRef.current = false;
       
       // Start polling immediately so we can get logs from the server
       // Polling is more reliable than SSE for logs - server saves logs to DB on each update
@@ -1710,6 +1745,8 @@ export default function BulkAds() {
       setIsPolling(false);
       setLaunchStatus("error");
       setLaunchProgress(0);
+      queueWaitStartedAtRef.current = null;
+      queueKickAttemptedRef.current = false;
       const parts = error.message.split("\n\n");
       const mainError = parts[0];
       const details = parts.length > 1 ? parts.slice(1).join("\n\n") : undefined;
@@ -1971,6 +2008,47 @@ export default function BulkAds() {
   // Effect to track job status during polling
   useEffect(() => {
     if (isPolling && jobDetails) {
+      const queueStatus = jobDetails.queueStatus || jobDetails.progressStatus || null;
+      const isWaitingInQueue = queueStatus === "queued" && (jobDetails.completedAdSets ?? 0) === 0;
+
+      if (isWaitingInQueue) {
+        if (!queueWaitStartedAtRef.current) {
+          queueWaitStartedAtRef.current = Date.now();
+        }
+
+        const waitedMs = Date.now() - queueWaitStartedAtRef.current;
+        if (waitedMs >= QUEUE_STUCK_WARNING_MS && !queueKickAttemptedRef.current) {
+          queueKickAttemptedRef.current = true;
+
+          const waitedSeconds = Math.floor(waitedMs / 1000);
+          const warningMessage = `Upload is still queued after ${waitedSeconds}s. Waiting for secured server-side worker trigger...`;
+          setLaunchLogs((prev) => [
+            ...prev,
+            {
+              type: "warning",
+              message: warningMessage,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+          toast({
+            title: "Upload still queued",
+            description: "Worker did not start yet. Waiting for secured server-side trigger.",
+            variant: "destructive",
+          });
+
+          setLaunchLogs((prev) => [
+            ...prev,
+            {
+              type: "info",
+              message: "Manual worker trigger is disabled in secured mode. Waiting for server-side worker trigger.",
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        }
+      } else {
+        queueWaitStartedAtRef.current = null;
+      }
+
       // Always sync logs from jobDetails - they are the source of truth
       // Server saves logs to DB on each update, so we always get fresh data
       if (jobDetails.logs && jobDetails.logs.length > 0) {
@@ -2004,6 +2082,8 @@ export default function BulkAds() {
       
       if (jobDetails.status === "done" || jobDetails.status === "completed" || jobDetails.status === "error" || jobDetails.status === "failed") {
         setIsPolling(false);
+        queueWaitStartedAtRef.current = null;
+        queueKickAttemptedRef.current = false;
         const isSuccess = jobDetails.status === "done" || jobDetails.status === "completed";
         setLaunchStatus(isSuccess ? "complete" : "idle");
         setEstimatedTimeRemaining(null); // Clear countdown when done
@@ -2179,7 +2259,7 @@ export default function BulkAds() {
     setLaunchLogs([]);
     setLaunchProgress(0);
     setAdSetStatuses({});
-    setLaunchResults({ campaign: null, adSets: [], ads: [] });
+    setLaunchResults({ ...EMPTY_LAUNCH_RESULTS });
     activeSyncStore.syncStep = 0;
     activeSyncStore.result = null;
     activeSyncStore.promise = null;
@@ -2579,6 +2659,7 @@ export default function BulkAds() {
                       method: "POST",
                       body: formData,
                       credentials: "include",
+                      headers: getCsrfHeaders(),
                     });
                     if (!parseRes.ok) {
                       const err = await parseRes.json();
@@ -2591,7 +2672,7 @@ export default function BulkAds() {
 
                     const applyRes = await fetch(`/api/drive/jobs/${jobId}/global-copy`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: { "Content-Type": "application/json", ...getCsrfHeaders() },
                       body: JSON.stringify({
                         primaryTexts: parsed.primaryTexts,
                         headlines: parsed.headlines,
@@ -4586,7 +4667,7 @@ Your description`}
             <DialogDescription>
               {(() => {
                 const editingAdSet = adSets.find(a => a.id === editingAdSetId);
-                return editingAdSet ? `Editing copy for ${editingAdSet.dctName || editingAdSet.name}` : "Edit the ad copy for this DCT folder";
+                return editingAdSet ? `Editing copy for ${editingAdSet.folderName || editingAdSet.name}` : "Edit the ad copy for this DCT folder";
               })()}
             </DialogDescription>
           </DialogHeader>
@@ -4626,6 +4707,7 @@ Your description`}
                                   method: "POST",
                                   body: formData,
                                   credentials: "include",
+                                  headers: getCsrfHeaders(),
                                 });
                                 if (!res.ok) {
                                   const err = await res.json();

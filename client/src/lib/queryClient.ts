@@ -21,16 +21,68 @@ export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
+  options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<Response> {
-  const res = await fetch(url, {
-    method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
+  const normalizedMethod = method.toUpperCase();
+  const isMutating = normalizedMethod !== "GET" && normalizedMethod !== "HEAD" && normalizedMethod !== "OPTIONS";
+  const csrfToken = getCsrfToken();
+  const headers: Record<string, string> = {};
+  if (data) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (isMutating && csrfToken) {
+    headers["x-csrf-token"] = csrfToken;
+  }
 
-  await throwIfResNotOk(res);
-  return res;
+  const timeoutMs = options?.timeoutMs;
+  const timeoutController = timeoutMs ? new AbortController() : null;
+  const signal = options?.signal ?? timeoutController?.signal;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  if (timeoutController && timeoutMs && timeoutMs > 0) {
+    timeoutHandle = setTimeout(() => timeoutController.abort(), timeoutMs);
+  }
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: data ? JSON.stringify(data) : undefined,
+      credentials: "include",
+      signal,
+    });
+
+    await throwIfResNotOk(res);
+    return res;
+  } catch (error: any) {
+    if (error?.name === "AbortError" && timeoutMs) {
+      throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+export function getCsrfToken(): string {
+  if (typeof document === "undefined") return "";
+  const cookieKey = "csrf-token=";
+  for (const part of document.cookie.split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed.startsWith(cookieKey)) continue;
+    return decodeURIComponent(trimmed.slice(cookieKey.length));
+  }
+  return "";
+}
+
+export function getCsrfHeaders(): Record<string, string> {
+  const token = getCsrfToken();
+  return token ? { "x-csrf-token": token } : {};
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";

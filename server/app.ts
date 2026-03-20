@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { createServer } from "http";
+import crypto from "crypto";
 
 import { pool } from "./db.js";
 import { registerRoutes } from "./routes.js";
@@ -12,6 +13,91 @@ import { getSessionCookieOptions } from "./session-config.js";
 export interface CreateAppOptions {
   serveFrontend?: boolean;
   enableDevVite?: boolean;
+}
+
+const CSRF_COOKIE_NAME = "csrf-token";
+const CSRF_HEADER_NAME = "x-csrf-token";
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const SENSITIVE_KEY_RE = /(^|_|-)(access_token|refresh_token|authorization|cookie|set-cookie|apikey|api_key|secret|token)$/i;
+
+function parseCookies(cookieHeader?: string): Record<string, string> {
+  if (!cookieHeader) return {};
+  return cookieHeader.split(";").reduce<Record<string, string>>((acc, part) => {
+    const trimmed = part.trim();
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx <= 0) return acc;
+    let key = trimmed.slice(0, eqIdx).trim();
+    let value = trimmed.slice(eqIdx + 1).trim();
+    try {
+      key = decodeURIComponent(key);
+      value = decodeURIComponent(value);
+    } catch {
+      // Keep raw cookie values if decoding fails.
+    }
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
+function redactString(input: string): string {
+  return input
+    .replace(/(access_token=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]");
+}
+
+function redactSensitive(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  if (seen.has(value as object)) {
+    return "[Circular]";
+  }
+  seen.add(value as object);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSensitive(item, seen));
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_KEY_RE.test(key)) {
+      sanitized[key] = "[REDACTED]";
+      continue;
+    }
+    sanitized[key] = redactSensitive(raw, seen);
+  }
+  return sanitized;
+}
+
+function getRequestOrigin(req: Request): string {
+  const host = req.get("host") || "";
+  const forwardedProto = (req.get("x-forwarded-proto") || "").split(",")[0]?.trim();
+  const proto = forwardedProto || (req.secure ? "https" : "http");
+  return host ? `${proto}://${host}` : "";
+}
+
+function isAllowedOrigin(req: Request, candidateUrl: string): boolean {
+  if (!candidateUrl) return false;
+  try {
+    const candidateOrigin = new URL(candidateUrl).origin;
+    const requestOrigin = getRequestOrigin(req);
+    const appBaseUrl = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
+    const allowed = new Set<string>();
+    if (requestOrigin) allowed.add(requestOrigin);
+    if (appBaseUrl) {
+      try {
+        allowed.add(new URL(appBaseUrl).origin);
+      } catch {
+        // Ignore malformed APP_BASE_URL during origin allow-list build.
+      }
+    }
+    return allowed.has(candidateOrigin);
+  } catch {
+    return false;
+  }
 }
 
 export function log(message: string, source = "express") {
@@ -39,6 +125,11 @@ export async function createApp(options: CreateAppOptions = {}) {
   const isVercel = process.env.VERCEL === "1";
   const serveFrontend = options.serveFrontend ?? !isVercel;
   const enableDevVite = options.enableDevVite ?? !isVercel;
+  const sessionSecret = process.env.SESSION_SECRET;
+
+  if (isProduction && !sessionSecret) {
+    throw new Error("SESSION_SECRET must be configured in production");
+  }
 
   app.set("trust proxy", 1);
 
@@ -54,7 +145,7 @@ export async function createApp(options: CreateAppOptions = {}) {
         // query can amplify connection pressure.
         createTableIfMissing: !isProduction,
       }),
-      secret: process.env.SESSION_SECRET || "development-secret-key",
+      secret: sessionSecret || "development-secret-key",
       resave: false,
       saveUninitialized: false,
       cookie: getSessionCookieOptions(),
@@ -71,9 +162,49 @@ export async function createApp(options: CreateAppOptions = {}) {
   );
   app.use(express.urlencoded({ extended: false }));
 
+  app.use((req, res, next) => {
+    const existingCookies = parseCookies(req.headers.cookie);
+    let csrfToken = existingCookies[CSRF_COOKIE_NAME];
+
+    if (!csrfToken) {
+      csrfToken = crypto.randomBytes(24).toString("hex");
+      res.cookie(CSRF_COOKIE_NAME, csrfToken, {
+        path: "/",
+        httpOnly: false,
+        secure: isProduction,
+        sameSite: "lax",
+      });
+    }
+
+    const isProtectedPath = req.path.startsWith("/api") || req.path.startsWith("/auth");
+    const isMutating = MUTATING_METHODS.has(req.method.toUpperCase());
+    if (!isProtectedPath || !isMutating) {
+      return next();
+    }
+
+    // Worker endpoint uses cron auth; CSRF is not applicable for this system trigger.
+    if (req.path.startsWith("/api/workers/launch")) {
+      return next();
+    }
+
+    const origin = req.get("origin");
+    const referer = req.get("referer");
+    const originCandidate = origin || referer || "";
+    if (!originCandidate || !isAllowedOrigin(req, originCandidate)) {
+      return res.status(403).json({ error: "Invalid request origin" });
+    }
+
+    const csrfHeader = req.get(CSRF_HEADER_NAME) || req.get("x-xsrf-token");
+    if (!csrfHeader || csrfHeader !== csrfToken) {
+      return res.status(403).json({ error: "Invalid CSRF token" });
+    }
+
+    next();
+  });
+
   app.use((req, _res, next) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/auth")) {
-      console.log(`[REQUEST] ${req.method} ${req.path}`);
+      console.log(`[REQUEST] ${req.method} ${redactString(req.originalUrl || req.path)}`);
     }
     next();
   });
@@ -94,7 +225,7 @@ export async function createApp(options: CreateAppOptions = {}) {
       if (path.startsWith("/api")) {
         let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
         if (capturedJsonResponse) {
-          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+          logLine += ` :: ${JSON.stringify(redactSensitive(capturedJsonResponse))}`;
         }
         log(logLine);
       }
