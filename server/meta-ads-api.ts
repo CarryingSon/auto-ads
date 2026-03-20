@@ -361,12 +361,24 @@ export class MetaAdsApi {
     const data = await this.apiRequest<{ data: any[] }>(
       endpoint,
       {
-        fields: "id,name,status,campaign_id,daily_budget,lifetime_budget,targeting,promoted_object,dsa_beneficiary,dsa_payor,start_time,end_time",
-        limit: "100",
+        // Include a broad set of ad set settings so import can run fully from DB cache after sync.
+        fields: "id,name,status,effective_status,campaign_id,daily_budget,lifetime_budget,daily_min_spend_target,daily_spend_cap,lifetime_spend_cap,billing_event,optimization_goal,bid_strategy,attribution_spec,pacing_type,targeting,promoted_object,start_time,end_time,dsa_beneficiary,dsa_payor",
+        limit: "500",
         filtering: JSON.stringify([{
           field: "effective_status",
           operator: "IN",
-          value: ["ACTIVE", "PAUSED"]
+          value: [
+            "ACTIVE",
+            "PAUSED",
+            "IN_PROCESS",
+            "WITH_ISSUES",
+            "PENDING_REVIEW",
+            "DISAPPROVED",
+            "PREAPPROVED",
+            "PENDING_BILLING_INFO",
+            "CAMPAIGN_PAUSED",
+            "ADSET_PAUSED",
+          ]
         }])
       }
     );
@@ -452,12 +464,23 @@ export class MetaAdsApi {
     const adSetsData = await this.apiRequest<{ data: any[] }>(
       `${campaignId}/adsets`,
       {
-        fields: "id,name,status,daily_budget,lifetime_budget,billing_event,optimization_goal,bid_strategy,targeting,promoted_object,attribution_spec,pacing_type,start_time,end_time,dsa_beneficiary,dsa_payor",
+        fields: "id,name,status,effective_status,daily_budget,lifetime_budget,daily_min_spend_target,daily_spend_cap,lifetime_spend_cap,billing_event,optimization_goal,bid_strategy,targeting,promoted_object,attribution_spec,pacing_type,start_time,end_time,dsa_beneficiary,dsa_payor",
         limit: "50",
         filtering: JSON.stringify([{
           field: "effective_status",
           operator: "IN",
-          value: ["ACTIVE", "PAUSED"]
+          value: [
+            "ACTIVE",
+            "PAUSED",
+            "IN_PROCESS",
+            "WITH_ISSUES",
+            "PENDING_REVIEW",
+            "DISAPPROVED",
+            "PREAPPROVED",
+            "PENDING_BILLING_INFO",
+            "CAMPAIGN_PAUSED",
+            "ADSET_PAUSED",
+          ]
         }])
       }
     );
@@ -1236,7 +1259,7 @@ export class MetaAdsApi {
               adAccountId: this.adAccountId!,
               campaignId: adset.campaign_id,
               name: adset.name,
-              status: adset.status,
+              status: adset.effective_status || adset.status,
               dailyBudget: adset.daily_budget,
               lifetimeBudget: adset.lifetime_budget,
               targetingJson: adset.targeting,
@@ -1249,7 +1272,7 @@ export class MetaAdsApi {
               target: metaAdsets.id,
               set: {
                 name: adset.name,
-                status: adset.status,
+                status: adset.effective_status || adset.status,
                 dailyBudget: adset.daily_budget,
                 lifetimeBudget: adset.lifetime_budget,
                 targetingJson: adset.targeting,
