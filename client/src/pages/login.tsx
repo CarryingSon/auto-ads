@@ -71,31 +71,13 @@ export default function LoginPage() {
               Continue with Facebook
             </button>
 
-            <div className="relative py-2">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[#c1c6d6]/40" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-4 text-[#5f6673] font-medium tracking-[0.2em]">
-                  Enterprise Access
+            <div className="pt-2">
+              <div className="inline-flex items-center gap-3 bg-[#1877F2]/5 py-3 px-6 rounded-full border border-[#1877F2]/20">
+                <SiMeta className="text-[#1877F2] text-base" />
+                <span className="text-[#1877F2] font-bold text-sm tracking-tight">
+                  Official Meta marketing partner
                 </span>
               </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="relative">
-                <input
-                  className="w-full bg-[#e7e8e9] border border-transparent rounded-2xl py-4 px-5 focus:outline-none focus:ring-2 focus:ring-[#005bbf] focus:bg-white transition-all"
-                  placeholder="Work email"
-                  type="email"
-                />
-              </div>
-              <button
-                type="button"
-                className="w-full py-4 px-6 text-[#191c1d] font-semibold rounded-2xl border border-[#c1c6d6] hover:bg-[#f3f4f5] transition-colors"
-              >
-                Continue with Email
-              </button>
             </div>
           </div>
         </div>
@@ -195,12 +177,6 @@ export default function LoginPage() {
             <p className="text-white text-sm font-semibold">Trusted by marketers worldwide</p>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/5 py-3 px-6 rounded-full border border-white/10">
-            <SiMeta className="text-white text-base" />
-            <span className="text-white font-bold text-sm tracking-tight">
-              Official Meta marketing partner
-            </span>
-          </div>
         </div>
 
         <div className="absolute right-[-10%] top-[40%] transform rotate-[-12deg] opacity-60 pointer-events-none">
