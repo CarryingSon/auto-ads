@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { useState } from "react";
+import { motion } from "framer-motion";
 
 import avatarHero1 from "../assets/images/avatar-hero-1.png";
 import avatarHero2 from "../assets/images/avatar-hero-2.png";
@@ -73,7 +74,7 @@ function DemoVideoPlaceholder() {
               <div className="aspect-video bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl border border-slate-100 shadow-sm" />
               <div className="aspect-video bg-gradient-to-br from-blue-50/50 to-white rounded-xl border border-blue-100 shadow-sm" />
             </div>
-            <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px]" />
+            <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px]" />
           </div>
         </div>
         <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
@@ -98,6 +99,8 @@ function DemoVideoPlaceholder() {
 }
 
 export default function Landing() {
+  const [isYearly, setIsYearly] = useState(false);
+
   const handleSmoothScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault();
     const element = document.getElementById(targetId);
@@ -236,7 +239,7 @@ export default function Landing() {
       </div>
 
       {/* HERO */}
-      <section className="relative pt-28 pb-24 overflow-hidden">
+      <section className="relative pt-32 pb-16 overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-8">
@@ -252,7 +255,7 @@ export default function Landing() {
                   <i className="fab fa-meta" /> Meta Ads
                 </span>
               </h1>
-              <p className="text-lg text-gray-500 max-w-xl leading-relaxed">
+              <p className="text-xl text-gray-500 max-w-xl leading-relaxed font-medium">
                 Stop manually downloading and uploading files. Connect a folder, and we'll auto-sync your creatives to Meta Ads manager instantly.
               </p>
               <div className="flex flex-wrap gap-3 text-sm font-medium text-gray-600">
@@ -331,7 +334,7 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="mt-20 flex justify-center relative z-10">
+          <div className="mt-12 flex justify-center relative z-10">
             <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full glass-card hover:bg-white/60 transition-colors shadow-lg" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.1)" }}>
               <i className="fab fa-meta text-[#1877F2] text-xl" />
               <span className="font-medium text-gray-700">Official Meta marketing partner</span>
@@ -342,9 +345,8 @@ export default function Landing() {
       </section>
 
       {/* FEATURES */}
-      <section className="py-24 relative z-10 overflow-visible" id="features">
-        <div className="absolute inset-0 bg-white/20 backdrop-blur-3xl -z-10" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="py-24 relative z-10 overflow-visible bg-white" id="features">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-20">
             <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
               Powerful Features
@@ -357,82 +359,30 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className="relative flex justify-center items-center py-20 px-4">
-            <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20 hidden lg:block" fill="none" viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg">
-              <path d="M600 300 L300 100" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
-              <path d="M600 300 L900 100" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
-              <path d="M600 300 L250 300" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
-              <path d="M600 300 L950 300" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
-              <path d="M600 300 L400 500" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
-              <path d="M600 300 L800 500" stroke="#1877F2" strokeDasharray="8 8" strokeWidth="2" />
-            </svg>
-
-            <div className="grid grid-cols-1 lg:grid-cols-7 lg:grid-rows-3 gap-8 items-center justify-items-center w-full max-w-6xl">
-              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-1 lg:translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-0">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            {[
+              { icon: "fab fa-google-drive", title: "Drive Integration", desc: "Drop files into your Google Drive folder and they automatically appear in your dashboard, ready to launch as Meta ads." },
+              { icon: "fas fa-clock", title: "Save hours every week", desc: "No more downloading, renaming, and re-uploading files. Go from creative to live ad in under 2 minutes." },
+              { icon: "fas fa-ban", title: "Auto-disable enhancements", desc: "Meta's Advantage+ enhancements get auto-disabled so your creatives run exactly as designed." },
+              { icon: "fas fa-layer-group", title: "Multi-account support", desc: "Manage multiple Meta ad accounts from one dashboard. Assign different Drive folders to different accounts." },
+              { icon: "fas fa-tag", title: "Auto-naming conventions", desc: "Your Google Drive file names become your ad names automatically. No more manual renaming in Ads Manager." },
+              { icon: "fas fa-chart-line", title: "Performance insights", desc: "See which creatives perform best across all your accounts in one unified dashboard." },
+            ].map((feature, index) => (
+              <motion.div key={index} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: index * 0.1 }} className="group bg-white border border-blue-100/50 shadow-sm hover:shadow-md hover:border-blue-200 hover:-translate-y-1 transition-all p-6 rounded-2xl" data-testid={`card-feature-${index}`}>
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
-                  <i className="fab fa-google-drive" />
+                  <i className={feature.icon} />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Drive Integration</h3>
-                <p className="text-gray-500 text-xs leading-relaxed">Connect your creative folders directly. Changes in Drive reflect instantly in your dashboard.</p>
-              </div>
-
-              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-1 lg:-translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-1">
-                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
-                  <i className="fas fa-clock" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Save hours every week</h3>
-                <p className="text-gray-500 text-xs leading-relaxed">Eliminate tedious manual uploading and reclaim your time for higher ROI tasks.</p>
-              </div>
-
-              <div className="lg:col-start-3 lg:col-span-3 lg:row-start-2 flex items-center justify-center">
-                <div className="w-40 h-40 bg-white/40 backdrop-blur-3xl rounded-full border-2 border-blue-200/50 shadow-2xl flex items-center justify-center relative p-6 group">
-                  <div className="absolute inset-0 bg-[#1877F2]/5 rounded-full scale-110" />
-                  <div className="bg-[#1877F2] text-white w-full h-full rounded-full flex items-center justify-center text-4xl shadow-lg ring-6 ring-white/30">
-                    <i className="fas fa-bolt" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="lg:col-start-1 lg:col-span-2 lg:row-start-2 lg:translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-2">
-                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
-                  <i className="fas fa-ban" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Auto-disable enhancements</h3>
-                <p className="text-gray-500 text-xs leading-relaxed">Stop Meta from ruining your ads with unwanted 'advantage+' enhancements.</p>
-              </div>
-
-              <div className="lg:col-start-6 lg:col-span-2 lg:row-start-2 lg:-translate-x-10 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-3">
-                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
-                  <i className="fas fa-layer-group" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Multi-account support</h3>
-                <p className="text-gray-500 text-xs leading-relaxed">Map different Drive folders to different Meta ad accounts from one dashboard.</p>
-              </div>
-
-              <div className="lg:col-start-2 lg:col-span-2 lg:row-start-3 lg:translate-x-8 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-4">
-                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
-                  <i className="fas fa-tag" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Auto-naming conventions</h3>
-                <p className="text-gray-500 text-xs leading-relaxed">Automatically name your ads based on Google Drive file names to stay organized.</p>
-              </div>
-
-              <div className="lg:col-start-5 lg:col-span-2 lg:row-start-3 lg:-translate-x-8 group glass-card p-6 rounded-2xl w-full max-w-xs transition-all hover:scale-105" data-testid="card-feature-5">
-                <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
-                  <i className="fas fa-chart-line" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">Performance insights</h3>
-                <p className="text-gray-500 text-xs leading-relaxed">Track creative performance and get actionable insights to improve ROAS.</p>
-              </div>
-            </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">{feature.title}</h3>
+                <p className="text-gray-500 text-sm leading-relaxed">{feature.desc}</p>
+              </motion.div>
+            ))}
           </div>
-        </div>
+        </motion.div>
       </section>
 
       {/* BENEFITS */}
-      <section className="py-24 relative z-10 overflow-hidden" id="benefits">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-50/30 to-transparent" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
+      <section className="py-24 relative z-10 overflow-hidden bg-blue-50/40" id="benefits">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
           <div className="text-center mb-16">
             <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm shadow-sm">
               Why advertisers choose us
@@ -445,7 +395,7 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className="relative glass-heavy rounded-3xl border border-white/60 p-2 shadow-2xl backdrop-blur-3xl overflow-hidden max-w-6xl mx-auto">
+          <div className="relative bg-white rounded-3xl border border-blue-100/50 p-2 shadow-2xl overflow-hidden max-w-6xl mx-auto">
             <div className="absolute inset-0 bg-gradient-to-r from-red-50/40 via-transparent to-blue-50/40 pointer-events-none" />
             <div className="grid md:grid-cols-2 relative bg-white/30 rounded-2xl overflow-hidden">
               {/* OLD WORKFLOW */}
@@ -530,7 +480,7 @@ export default function Landing() {
                           </div>
                           <div className="flex-1">
                             <h4 className="font-bold text-gray-900 text-sm">{item.title}</h4>
-                            <p className="text-xs text-gray-500 mt-0.5">{item.desc}</p>
+                            <p className="text-sm text-gray-500 mt-0.5">{item.desc}</p>
                           </div>
                           <div className="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
                             <i className="fas fa-check text-[10px]" />
@@ -546,7 +496,7 @@ export default function Landing() {
           </div>
 
           {/* STATS CARD */}
-          <div className="mt-12 max-w-5xl mx-auto glass-heavy rounded-3xl p-8 shadow-2xl border border-white/40" style={{ boxShadow: "0 10px 40px rgba(24,119,242,0.1)" }}>
+          <div className="mt-12 max-w-5xl mx-auto bg-white rounded-3xl p-8 shadow-2xl border border-blue-100/50" style={{ boxShadow: "0 10px 40px rgba(24,119,242,0.1)" }}>
             <div className="flex flex-col md:flex-row justify-between items-center gap-8">
               <div className="text-center md:text-left">
                 <h3 className="text-2xl font-bold text-gray-900 mb-2">
@@ -567,37 +517,36 @@ export default function Landing() {
                 <div className="text-center md:text-left">
                   <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="far fa-clock" /></div>
                   <div className="text-3xl font-extrabold text-gray-900">13 <span className="text-lg font-medium text-gray-500">min</span></div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Avg time saved</div>
+                  <div className="text-sm text-gray-500 uppercase tracking-wide font-semibold mt-1">Avg time saved</div>
                   <div className="text-[10px] text-gray-400">per ad launch</div>
                 </div>
                 <div className="text-center md:text-left">
                   <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="fas fa-chart-line" /></div>
                   <div className="text-3xl font-extrabold text-gray-900">88.2 <span className="text-lg font-medium text-gray-500">%</span></div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Time saved</div>
+                  <div className="text-sm text-gray-500 uppercase tracking-wide font-semibold mt-1">Time saved</div>
                   <div className="text-[10px] text-gray-400">on average</div>
                 </div>
                 <div className="text-center md:text-left">
                   <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="fas fa-users" /></div>
                   <div className="text-3xl font-extrabold text-gray-900">1,200+</div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Happy users</div>
+                  <div className="text-sm text-gray-500 uppercase tracking-wide font-semibold mt-1">Happy users</div>
                   <div className="text-[10px] text-gray-400">and growing daily</div>
                 </div>
                 <div className="text-center md:text-left">
                   <div className="text-[#1877F2] text-xl mb-1 drop-shadow-sm"><i className="fas fa-star" /></div>
                   <div className="text-3xl font-extrabold text-gray-900">4.8</div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mt-1">Out of 5 stars</div>
+                  <div className="text-sm text-gray-500 uppercase tracking-wide font-semibold mt-1">Out of 5 stars</div>
                   <div className="text-[10px] text-gray-400">on average</div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="py-24 relative z-10" id="how-it-works">
-        <div className="absolute inset-0 bg-white/30 backdrop-blur-3xl -z-10" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="py-24 relative z-10 bg-white" id="how-it-works">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-20">
             <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
               Simple process
@@ -631,20 +580,20 @@ export default function Landing() {
                       </div>
                     )}
                   </div>
-                  <div className="glass-card p-6 rounded-2xl w-full max-w-[280px]">
+                  <div className="bg-white border border-blue-100/50 shadow-sm p-6 rounded-2xl w-full max-w-[280px]">
                     <h3 className="text-lg font-bold text-gray-900 mb-2">{item.title}</h3>
-                    <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+                    <p className="text-sm text-gray-500 leading-relaxed">{item.desc}</p>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        </div>
+        </motion.div>
       </section>
 
       {/* PRICING */}
-      <section className="py-24 relative z-10" id="pricing">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="py-24 relative z-10 bg-blue-50/40" id="pricing">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
               Pricing Plans
@@ -656,16 +605,16 @@ export default function Landing() {
               Choose the plan that fits your needs. No hidden fees, no commitments.
             </p>
             <div className="flex justify-center items-center gap-4 mb-8">
-              <span className="text-sm font-semibold text-gray-900">Monthly</span>
-              <button className="w-12 h-6 bg-[#1877F2] rounded-full relative focus:outline-none shadow-md">
-                <span className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform shadow-sm" />
+              <span className={`text-sm font-semibold ${!isYearly ? 'text-gray-900' : 'text-gray-500'}`}>Monthly</span>
+              <button onClick={() => setIsYearly(!isYearly)} className="w-12 h-6 bg-[#1877F2] rounded-full relative focus:outline-none shadow-md cursor-pointer">
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 shadow-sm ${isYearly ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
-              <span className="text-sm font-medium text-gray-500">Yearly <span className="text-[#1877F2] text-xs ml-1 font-bold">(-20%)</span></span>
+              <span className={`text-sm font-medium ${isYearly ? 'text-gray-900' : 'text-gray-500'}`}>Yearly <span className="text-[#1877F2] text-xs ml-1 font-bold">(-20%)</span></span>
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
             {/* FREE */}
-            <div className="glass-card rounded-3xl p-8 border-t-4 border-t-gray-200 hover:border-t-[#1877F2]/50 transition-colors" data-testid="card-pricing-free">
+            <div className="bg-white border border-blue-100/50 shadow-sm rounded-3xl p-8 border-t-4 border-t-gray-200 hover:border-t-[#1877F2]/50 transition-colors" data-testid="card-pricing-free">
               <h3 className="text-xl font-bold text-gray-900">Free plan</h3>
               <p className="text-sm text-gray-500 mt-2 mb-6">Try Auto-ads risk-free</p>
               <div className="flex items-baseline mb-6">
@@ -687,15 +636,15 @@ export default function Landing() {
               </ul>
             </div>
             {/* PAID */}
-            <div className="glass-heavy rounded-3xl p-8 border-2 border-[#1877F2] relative shadow-2xl transform hover:-translate-y-2 transition-transform duration-300" style={{ boxShadow: "0 10px 40px rgba(24,119,242,0.2)" }} data-testid="card-pricing-paid">
+            <div className="bg-white rounded-3xl p-8 border-2 border-[#1877F2] relative shadow-2xl transform hover:-translate-y-2 transition-transform duration-300" style={{ boxShadow: "0 10px 40px rgba(24,119,242,0.2)" }} data-testid="card-pricing-paid">
               <div className="absolute top-0 right-0 bg-[#1877F2] text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-xl shadow-lg">Most popular</div>
               <h3 className="text-xl font-bold text-gray-900">Rapid launch</h3>
               <p className="text-sm text-gray-500 mt-2 mb-6">Perfect for scaling agencies</p>
               <div className="flex items-baseline mb-6">
-                <span className="text-4xl font-extrabold text-gray-900">$39</span>
-                <span className="text-gray-500 ml-2">/month</span>
+                <span className="text-4xl font-extrabold text-gray-900">{isYearly ? "$31" : "$39"}</span>
+                <span className="text-gray-500 ml-2">{isYearly ? "/mo, billed yearly" : "/month"}</span>
               </div>
-              <p className="text-xs text-[#1877F2] mb-6 font-semibold">Unlimited Drive syncing + ad accounts</p>
+              <p className="text-xs text-[#1877F2] mb-6 font-semibold">{isYearly ? "Save $96/year — " : ""}Unlimited Drive syncing + ad accounts</p>
               <Link href="/login">
                 <span className="block w-full py-3 px-4 bg-gradient-to-r from-[#1877F2] to-blue-600 text-white font-bold text-center rounded-xl hover:shadow-lg transition-all mb-8 shadow-md cursor-pointer" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.4)" }} data-testid="button-get-started-pricing">
                   Get Started
@@ -711,13 +660,12 @@ export default function Landing() {
             </div>
           </div>
           <p className="text-center text-xs text-gray-400 mt-8">All plans include 24/7 support and a 14-day money-back guarantee</p>
-        </div>
+        </motion.div>
       </section>
 
       {/* TESTIMONIALS */}
-      <section className="py-24 relative z-10 overflow-hidden" id="testimonials">
-        <div className="absolute inset-0 bg-white/30 backdrop-blur-[48px] -z-10" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="py-24 relative z-10 overflow-hidden bg-white" id="testimonials">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50">
               Wall of love
@@ -729,37 +677,33 @@ export default function Landing() {
               Don't just take our word for it. See what advertisers have to say about Auto-ads.
             </p>
           </div>
-        </div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative overflow-hidden pb-4">
-          <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-white via-white/90 to-transparent z-10 pointer-events-none" />
-          <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-white via-white/90 to-transparent z-10 pointer-events-none" />
-          <div className="flex animate-slide-testimonials hover:[animation-play-state:paused]" data-testid="testimonials-slider">
-            {[...testimonials, ...testimonials].map((t, idx) => (
-              <div key={idx} className="flex-shrink-0 w-[340px] mx-3" data-testid={`card-testimonial-${idx % testimonials.length}`}>
-                <div className="glass-card p-6 rounded-2xl h-full">
-                  <div className="flex text-yellow-400 text-xs mb-3 space-x-0.5">
-                    <i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" />
-                  </div>
-                  <p className="text-sm text-gray-700 mb-4 leading-relaxed font-medium">
-                    "{t.quote}"
-                  </p>
-                  <div className="flex items-center gap-3 pt-4 border-t border-gray-100/50">
-                    <img alt={t.author} className="w-10 h-10 rounded-full ring-2 ring-white object-cover" src={t.img} loading="lazy" decoding="async" />
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-900">{t.author}</h4>
-                      <p className="text-xs text-gray-500">{t.role}</p>
-                    </div>
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6, delay: 0.1 }} className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="testimonials-grid">
+            {testimonials.map((t, idx) => (
+              <motion.div key={idx} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: idx * 0.1 }} className="bg-white border border-blue-100/50 shadow-sm hover:shadow-md transition-shadow p-6 rounded-2xl" data-testid={`card-testimonial-${idx}`}>
+                <div className="flex text-yellow-400 text-xs mb-3 space-x-0.5">
+                  <i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" /><i className="fas fa-star" />
+                </div>
+                <p className="text-sm text-gray-700 mb-4 leading-relaxed font-medium">
+                  "{t.quote}"
+                </p>
+                <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
+                  <img alt={t.author} className="w-10 h-10 rounded-full ring-2 ring-blue-50 object-cover" src={t.img} loading="lazy" decoding="async" />
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-900">{t.author}</h4>
+                    <p className="text-xs text-gray-500">{t.role}</p>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
-        </div>
+        </motion.div>
       </section>
 
       {/* FAQ */}
       <section className="py-24 relative z-10" id="faq">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50">
               Questions Answered
@@ -773,7 +717,7 @@ export default function Landing() {
           </div>
           <div className="space-y-4">
             {faqItems.map((faq, index) => (
-              <details key={index} className="group glass-card rounded-xl" data-testid={`faq-item-${index}`}>
+              <details key={index} className="group bg-white border border-blue-100/50 shadow-sm rounded-xl" data-testid={`faq-item-${index}`}>
                 <summary className="flex justify-between items-center font-medium cursor-pointer list-none p-5 text-gray-900 hover:bg-white/30 transition-colors">
                   <span>{faq.q}</span>
                   <span className="transition group-open:rotate-180">
@@ -786,7 +730,7 @@ export default function Landing() {
               </details>
             ))}
           </div>
-          <div className="mt-12 glass-heavy rounded-2xl p-8 text-center shadow-lg border border-white/40">
+          <div className="mt-12 bg-white rounded-2xl p-8 text-center shadow-lg border border-blue-100/50">
             <h4 className="font-bold text-gray-900 mb-2">Still have questions?</h4>
             <p className="text-sm text-gray-500 mb-6">Our support team is here to help, send us an email. We typically respond within 2 hours.</p>
             <div className="flex justify-center flex-wrap gap-4">
@@ -798,12 +742,12 @@ export default function Landing() {
               </a>
             </div>
           </div>
-        </div>
+        </motion.div>
       </section>
 
       {/* FINAL CTA */}
       <section className="py-24 relative z-10 border-t border-white/10 overflow-hidden">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
           <h2 className="text-4xl sm:text-5xl font-extrabold text-gray-900 mb-6 drop-shadow-sm">
             Join the advertising <span className="text-[#1877F2]">revolution</span>
           </h2>
@@ -820,7 +764,7 @@ export default function Landing() {
               View pricing
             </a>
           </div>
-        </div>
+        </motion.div>
       </section>
 
       {/* FOOTER */}
