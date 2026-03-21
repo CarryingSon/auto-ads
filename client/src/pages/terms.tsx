@@ -9,10 +9,10 @@ export default function Terms() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
           <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer">
-              <div className="w-8 h-8 rounded-xl overflow-hidden shadow-lg ring-1 ring-border/40">
-                <img src="/favicon.png" alt="Auto Ads logo" className="w-full h-full object-cover" />
+              <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center shadow-lg ring-1 ring-border/40">
+                <img src="/favicon.png" alt="Auto-ads logo" className="w-full h-full object-contain" />
               </div>
-              <span className="font-semibold">Auto Ads</span>
+              <span className="font-semibold">Auto-ads</span>
             </div>
           </Link>
           <Link href="/">
