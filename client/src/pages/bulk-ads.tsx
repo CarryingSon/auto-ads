@@ -29,7 +29,6 @@ import {
   Eye,
   Rocket,
   Settings,
-  ChevronDown,
   ExternalLink,
   Loader2,
   Plus,
@@ -623,10 +622,8 @@ export default function BulkAds() {
     headlines: string[];
     descriptions: string[];
   }>({ primaryTexts: [], headlines: [], descriptions: [] });
-  const [isParsingDocx, setIsParsingDocx] = useState(false);
   const [isApplyingGlobalCopy, setIsApplyingGlobalCopy] = useState(false);
   const [pasteText, setPasteText] = useState("");
-  const [showImportSection, setShowImportSection] = useState(false);
   const [showTargetingEditDialog, setShowTargetingEditDialog] = useState(false);
   const [showCreativeEditDialog, setShowCreativeEditDialog] = useState(false);
   const [editingTargeting, setEditingTargeting] = useState({
@@ -2166,8 +2163,12 @@ export default function BulkAds() {
         if (draft.version === DRAFT_VERSION && 
             Date.now() - draft.timestamp < 24 * 60 * 60 * 1000 &&
             sameAdAccount && samePage && sameConnection) {
-          // Only restore if draft is less than 24 hours old AND same context AND same connection
-          if (draft.currentStep < 4 || (draft.currentStep === 4 && launchStatus === "idle")) {
+          // Step 1 is always a fresh start; only restore active sessions from step 2+
+          const shouldRestoreDraft =
+            draft.currentStep >= 2 &&
+            (draft.currentStep < 4 || (draft.currentStep === 4 && launchStatus === "idle"));
+
+          if (shouldRestoreDraft) {
             setFolderUrl(draft.folderUrl || "");
             setFolderName(draft.folderName || "");
             setJobId(draft.jobId);
@@ -2201,11 +2202,12 @@ export default function BulkAds() {
                   })));
                 })
                 .catch(() => {
-                  // If adSets can't be loaded, reset to step 1
-                  setCurrentStep(1);
-                  setJobId(null);
+                  // If adSets can't be loaded, force a full fresh session
+                  resetSession();
                 });
             }
+          } else {
+            localStorage.removeItem(DRAFT_STORAGE_KEY);
           }
         } else if (!sameAdAccount || !samePage || !sameConnection) {
           // Different context or reconnected - clear old draft
@@ -2219,6 +2221,12 @@ export default function BulkAds() {
 
   // Save draft to localStorage when key state changes
   useEffect(() => {
+    // Step 1 is always fresh; don't persist draft here
+    if (currentStep < 2) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      return;
+    }
+
     // Don't save if we're launching or complete, or if no ad account selected, or no connection info
     if (launchStatus !== "idle" || !selectedAdAccountId || !connectionUpdatedAt) return;
     
@@ -2259,20 +2267,52 @@ export default function BulkAds() {
     }
   }, [launchStatus]);
 
-  const resetSession = () => {
+  function resetSession() {
     setCurrentStep(1);
     setJobId(null);
     setFolderUrl("");
     setFolderName("");
     setAdSets([]);
+    setExpandedAdSets([]);
     setSyncResultsData(null);
     setSelectedCampaignId("");
     setCampaignName("");
+    setAdSetOverrides({});
+    setAdSetCopyOverrides({});
+    setDisabledAdSetIds(new Set());
+    setDryRunPreview(null);
+    setLaunchMode("now");
+    setScheduledDate("");
+    setScheduledTime("09:00");
+    setAdUploadMode("dynamic");
     setLaunchStatus("idle");
     setLaunchLogs([]);
     setLaunchProgress(0);
     setAdSetStatuses({});
     setLaunchResults({ ...EMPTY_LAUNCH_RESULTS });
+    setIsPolling(false);
+    setSyncElapsedTime(0);
+    setEstimatedTimeRemaining(null);
+    setInitialEstimatedTime(null);
+    setLaunchStartTime(null);
+    setShowCopyEditor(false);
+    setShowCopyEditModal(false);
+    setShowCreateCampaignModal(false);
+    setShowTargetingEditDialog(false);
+    setShowCreativeEditDialog(false);
+    setPasteText("");
+    setEditingAdSetId(null);
+    setCurrentAdSetIndex(0);
+    setShowInfoModal(false);
+    setImportCampaignId("");
+    setImportAdSetId("");
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    enhancementsLoadedRef.current = null;
+
+    activeSyncStore.startTime = 0;
+    activeSyncStore.driveUrl = "";
+    activeSyncStore.campaignId = "";
+    activeSyncStore.mode = "public";
     activeSyncStore.syncStep = 0;
     activeSyncStore.result = null;
     activeSyncStore.promise = null;
@@ -2280,7 +2320,7 @@ export default function BulkAds() {
     activeSyncStore.resultApplied = false;
     notifySyncListeners();
     resetLaunchStore();
-  };
+  }
 
   // Navigate to a specific step with validation
   const navigateToStep = (targetStep: number) => {
@@ -2648,7 +2688,7 @@ export default function BulkAds() {
             <div className="flex items-center gap-2">
               <Upload className="h-4 w-4 text-amber-600 dark:text-amber-400" />
               <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                Upload ad copy for all ad sets
+                Upload ad copy for missing ad sets
               </span>
               <span className="text-xs text-muted-foreground ml-auto">
                 {adSets.length - withDocx} ad set{adSets.length - withDocx !== 1 ? 's' : ''} missing copy
@@ -2802,7 +2842,6 @@ export default function BulkAds() {
                             headlines: [""],
                             descriptions: [""],
                           });
-                          setShowImportSection(false);
                           setPasteText("");
                           setShowCopyEditModal(true);
                         }}
@@ -2831,7 +2870,6 @@ export default function BulkAds() {
                           headlines: adset.parsedCopy?.headlines || [],
                           descriptions: adset.parsedCopy?.descriptions || [],
                         });
-                        setShowImportSection(false);
                         setPasteText("");
                         setShowCopyEditModal(true);
                       }}
@@ -4680,7 +4718,7 @@ Your description`}
 
       <Dialog open={showCopyEditModal} onOpenChange={(open) => {
         setShowCopyEditModal(open);
-        if (!open) { setShowImportSection(false); setPasteText(""); }
+        if (!open) { setPasteText(""); }
       }}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl">
           <DialogHeader>
@@ -4697,118 +4735,53 @@ Your description`}
           </DialogHeader>
           <div className="space-y-6 py-2">
             <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 p-4 space-y-3">
-              <button
-                type="button"
-                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors w-full"
-                onClick={() => setShowImportSection(prev => !prev)}
-                data-testid="button-toggle-import"
-              >
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Upload className="h-4 w-4" />
-                {adSets.find(a => a.id === editingAdSetId)?.hasDocx ? "Import / override from file" : "Paste text"}
-                <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${showImportSection ? 'rotate-180' : ''}`} />
-              </button>
-              {showImportSection && (
-                <div className="space-y-4 pt-2">
-                  {adSets.find(a => a.id === editingAdSetId)?.hasDocx && (
-                    <>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-medium text-muted-foreground">Upload .docx file</Label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="file"
-                            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 file:cursor-pointer cursor-pointer"
-                            data-testid="input-upload-docx"
-                            disabled={isParsingDocx}
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (!file) return;
-                              setIsParsingDocx(true);
-                              try {
-                                const formData = new FormData();
-                                formData.append("docx", file);
-                                const res = await fetch("/api/drive/parse-docx", {
-                                  method: "POST",
-                                  body: formData,
-                                  credentials: "include",
-                                  headers: getCsrfHeaders(),
-                                });
-                                if (!res.ok) {
-                                  const err = await res.json();
-                                  throw new Error(err.error || "Failed to parse DOCX");
-                                }
-                                const data = await res.json();
-                                setEditingAdSetCopy({
-                                  primaryTexts: data.primaryTexts.length > 0 ? data.primaryTexts : [""],
-                                  headlines: data.headlines.length > 0 ? data.headlines : [""],
-                                  descriptions: data.descriptions.length > 0 ? data.descriptions : [""],
-                                });
-                                setShowImportSection(false);
-                                toast({ title: `Imported ${data.adCount} ad variations from DOCX` });
-                              } catch (err) {
-                                const message = err instanceof Error ? err.message : "Unknown error";
-                                toast({ title: "Failed to parse file", description: message, variant: "destructive" });
-                              } finally {
-                                setIsParsingDocx(false);
-                                e.target.value = "";
-                              }
-                            }}
-                          />
-                          {isParsingDocx && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                        </div>
-                      </div>
-                      <div className="relative">
-                        <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-200 dark:border-slate-700" /></div>
-                        <div className="relative flex justify-center text-xs"><span className="bg-slate-50 dark:bg-slate-900 px-2 text-muted-foreground">or paste text</span></div>
-                      </div>
-                    </>
-                  )}
-                  <div className="space-y-2">
-                    <textarea
-                      className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-y font-mono"
-                      placeholder={"Primary text: Your ad text here\nHeadline: Your headline\nDescription: Your description\n---\nPrimary text: Second variation\nHeadline: Second headline\nDescription: Second description"}
-                      value={pasteText}
-                      onChange={(e) => setPasteText(e.target.value)}
-                      data-testid="textarea-paste-copy"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs rounded-lg"
-                      data-testid="button-parse-pasted-text"
-                      disabled={!pasteText.trim()}
-                      onClick={() => {
-                        const blocks = pasteText.split(/\n?\s*---\s*\n?/).filter(b => b.trim());
-                        const primaryTexts: string[] = [];
-                        const headlines: string[] = [];
-                        const descriptions: string[] = [];
-                        for (const block of blocks) {
-                          const pt = block.match(/Primary\s*text[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Headline|Description|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
-                          const hl = block.match(/Headline[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Primary\s*text|Description|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
-                          const desc = block.match(/Description[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Primary\s*text|Headline|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
-                          if (pt?.[1]?.trim()) primaryTexts.push(pt[1].trim());
-                          if (hl?.[1]?.trim()) headlines.push(hl[1].trim());
-                          if (desc?.[1]?.trim()) descriptions.push(desc[1].trim());
-                        }
-                        if (primaryTexts.length === 0 && headlines.length === 0 && descriptions.length === 0) {
-                          toast({ title: "Could not parse text", description: "Use format: Primary text: ..., Headline: ..., Description: ..., separated by ---", variant: "destructive" });
-                          return;
-                        }
-                        setEditingAdSetCopy({
-                          primaryTexts: primaryTexts.length > 0 ? primaryTexts : [""],
-                          headlines: headlines.length > 0 ? headlines : [""],
-                          descriptions: descriptions.length > 0 ? descriptions : [""],
-                        });
-                        setPasteText("");
-                        setShowImportSection(false);
-                        toast({ title: `Parsed ${Math.max(primaryTexts.length, headlines.length)} variations from text` });
-                      }}
-                    >
-                      Parse & fill fields
-                    </Button>
-                  </div>
-                </div>
-              )}
+                Paste text
+              </div>
+              <div className="space-y-2">
+                <textarea
+                  className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-y font-mono"
+                  placeholder={"Primary text: Your ad text here\nHeadline: Your headline\nDescription: Your description\n---\nPrimary text: Second variation\nHeadline: Second headline\nDescription: Second description"}
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  data-testid="textarea-paste-copy"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs rounded-lg"
+                  data-testid="button-parse-pasted-text"
+                  disabled={!pasteText.trim()}
+                  onClick={() => {
+                    const blocks = pasteText.split(/\n?\s*---\s*\n?/).filter(b => b.trim());
+                    const primaryTexts: string[] = [];
+                    const headlines: string[] = [];
+                    const descriptions: string[] = [];
+                    for (const block of blocks) {
+                      const pt = block.match(/Primary\s*text[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Headline|Description|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
+                      const hl = block.match(/Headline[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Primary\s*text|Description|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
+                      const desc = block.match(/Description[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Primary\s*text|Headline|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
+                      if (pt?.[1]?.trim()) primaryTexts.push(pt[1].trim());
+                      if (hl?.[1]?.trim()) headlines.push(hl[1].trim());
+                      if (desc?.[1]?.trim()) descriptions.push(desc[1].trim());
+                    }
+                    if (primaryTexts.length === 0 && headlines.length === 0 && descriptions.length === 0) {
+                      toast({ title: "Could not parse text", description: "Use format: Primary text: ..., Headline: ..., Description: ..., separated by ---", variant: "destructive" });
+                      return;
+                    }
+                    setEditingAdSetCopy({
+                      primaryTexts: primaryTexts.length > 0 ? primaryTexts : [""],
+                      headlines: headlines.length > 0 ? headlines : [""],
+                      descriptions: descriptions.length > 0 ? descriptions : [""],
+                    });
+                    setPasteText("");
+                    toast({ title: `Parsed ${Math.max(primaryTexts.length, headlines.length)} variations from text` });
+                  }}
+                >
+                  Parse & fill fields
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-3">
