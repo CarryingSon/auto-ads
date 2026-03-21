@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Zap } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 export default function Privacy() {
   return (
@@ -9,8 +9,8 @@ export default function Privacy() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
           <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer">
-              <div className="w-8 h-8 bg-gradient-to-br from-primary to-primary/70 rounded-xl flex items-center justify-center shadow-lg shadow-primary/25">
-                <Zap className="w-4 h-4 text-primary-foreground" />
+              <div className="w-8 h-8 rounded-xl overflow-hidden shadow-lg ring-1 ring-border/40">
+                <img src="/favicon.png" alt="Auto Ads logo" className="w-full h-full object-cover" />
               </div>
               <span className="font-semibold">Auto Ads</span>
             </div>
