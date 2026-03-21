@@ -54,10 +54,10 @@ export default function LoginPage() {
         </div>
 
         <div className="flex-grow flex flex-col justify-center max-w-md mx-auto w-full">
-          <h1 className="text-4xl md:text-5xl font-extrabold text-[#191c1d] mb-4 tracking-tight">
+          <h1 className="text-4xl md:text-5xl font-extrabold text-[#191c1d] mb-4 tracking-tight text-center">
             Welcome back
           </h1>
-          <p className="text-[#5f6673] text-lg mb-10 leading-relaxed">
+          <p className="text-[#5f6673] text-lg mb-10 leading-relaxed text-center">
             Log in with Facebook to access Auto-ads.
           </p>
 
@@ -71,7 +71,7 @@ export default function LoginPage() {
               Continue with Facebook
             </button>
 
-            <div className="pt-2">
+            <div className="pt-2 flex justify-center">
               <div className="inline-flex items-center gap-3 bg-[#1877F2]/5 py-3 px-6 rounded-full border border-[#1877F2]/20">
                 <SiMeta className="text-[#1877F2] text-base" />
                 <span className="text-[#1877F2] font-bold text-sm tracking-tight">
