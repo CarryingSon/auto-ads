@@ -79,6 +79,17 @@ export default function LoginPage() {
                 </span>
               </div>
             </div>
+
+            <p className="text-center text-xs text-[#5f6673] leading-relaxed">
+              By continuing, you agree to Auto-ads&apos;{" "}
+              <Link href="/terms" className="text-[#005bbf] hover:underline">
+                Terms of Service
+              </Link>{" "}
+              &{" "}
+              <Link href="/privacy-policy" className="text-[#005bbf] hover:underline">
+                Privacy policy
+              </Link>
+            </p>
           </div>
         </div>
 
