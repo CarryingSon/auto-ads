@@ -924,9 +924,6 @@ export default function Settings() {
   const currentPeriodEndLabel = billingStatus?.currentPeriodEnd
     ? new Date(billingStatus.currentPeriodEnd).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null;
-  const adAccountsUsed = adAccounts.length || 1;
-  const adAccountsTotal = 1;
-  const adAccountsPercent = Math.min(100, Math.round((adAccountsUsed / adAccountsTotal) * 100));
   const userInitials = (user?.name || "U").split(" ").map(n => n[0]).join("").toUpperCase();
 
   return (
@@ -1144,28 +1141,6 @@ export default function Settings() {
                     {uploadsRemaining ?? 0} uploads remaining this month
                   </p>
                 </>
-              )}
-            </div>
-            {/* Active Ad Accounts */}
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <div>
-                  <p className="text-xs font-bold">Active Ad Accounts</p>
-                  <p className="text-[11px] font-medium text-muted-foreground opacity-70">Max connected business profiles</p>
-                </div>
-                <div className="text-right">
-                  <span className="text-base font-bold">{adAccountsUsed}</span>
-                  <span className="text-xs font-bold text-muted-foreground opacity-40">/ {adAccountsTotal}</span>
-                </div>
-              </div>
-              <div className="w-full bg-gray-200/50 dark:bg-gray-800/50 rounded-full h-2.5 overflow-hidden p-0.5 border border-white/10">
-                <div className="bg-gradient-to-r from-amber-400 to-orange-500 h-1.5 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.4)] transition-all duration-500" style={{ width: `${adAccountsPercent}%` }} />
-              </div>
-              {adAccountsPercent >= 100 && (
-                <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-2 flex items-center uppercase tracking-wide">
-                  <span className="material-symbols-outlined text-[14px] mr-1">info</span>
-                  Limit reached - Upgrade to add more
-                </p>
               )}
             </div>
           </div>

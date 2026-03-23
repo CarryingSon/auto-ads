@@ -61,6 +61,13 @@ interface SidebarData {
   drive: { email: string | null; connected: boolean };
 }
 
+interface BillingStatusSummary {
+  planType: "free" | "pro";
+  uploadsUsed: number;
+  uploadsLimit: number | null;
+  uploadsRemaining: number | null;
+}
+
 const SIDEBAR_CACHE_PREFIX = "auto_ads_sidebar_cache_v1";
 const SIDEBAR_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
@@ -152,6 +159,11 @@ export function AppSidebar() {
     placeholderData: cachedSidebarData,
     staleTime: 30_000,
     refetchOnMount: "always",
+  });
+
+  const { data: billingStatus } = useQuery<BillingStatusSummary>({
+    queryKey: ["/api/billing/status"],
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -385,11 +397,13 @@ export function AppSidebar() {
     updateAdAccountMutation.mutate(adAccountId);
   };
 
-  const isProPlan = (settings?.planType || "free") === "pro";
-  const uploadsRemaining = settings?.uploadsRemaining;
-  const maxUploads = 3;
-  const remainingForProgress = typeof uploadsRemaining === "number" ? uploadsRemaining : 0;
-  const progressPercent = isProPlan ? 100 : Math.max(0, Math.min(100, (remainingForProgress / maxUploads) * 100));
+  const effectivePlanType = billingStatus?.planType || (settings?.planType || "free");
+  const isProPlan = effectivePlanType === "pro";
+  const uploadsRemaining = billingStatus?.uploadsRemaining ?? settings?.uploadsRemaining ?? 0;
+  const maxUploads = billingStatus?.uploadsLimit ?? 3;
+  const remainingForProgress = typeof uploadsRemaining === "number" ? Math.max(0, uploadsRemaining) : 0;
+  const freeLimitForProgress = Math.max(1, maxUploads);
+  const progressPercent = isProPlan ? 100 : Math.max(0, Math.min(100, (remainingForProgress / freeLimitForProgress) * 100));
 
   const selectedPage = metaPages.find(p => p.id === selectedPageId);
   const displayName = selectedPage?.name || "Select Page";
