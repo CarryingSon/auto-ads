@@ -385,9 +385,11 @@ export function AppSidebar() {
     updateAdAccountMutation.mutate(adAccountId);
   };
 
-  const uploadsRemaining = settings?.uploadsRemaining ?? 15;
-  const maxUploads = 15;
-  const progressPercent = (uploadsRemaining / maxUploads) * 100;
+  const isProPlan = (settings?.planType || "free") === "pro";
+  const uploadsRemaining = settings?.uploadsRemaining;
+  const maxUploads = 3;
+  const remainingForProgress = typeof uploadsRemaining === "number" ? uploadsRemaining : 0;
+  const progressPercent = isProPlan ? 100 : Math.max(0, Math.min(100, (remainingForProgress / maxUploads) * 100));
 
   const selectedPage = metaPages.find(p => p.id === selectedPageId);
   const displayName = selectedPage?.name || "Select Page";
@@ -692,9 +694,9 @@ export function AppSidebar() {
 
           <div className="mt-3 pt-3 border-t border-slate-200/50 dark:border-white/10">
             <div className="flex justify-between items-center mb-1">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Free Plan</span>
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">{isProPlan ? "Pro Plan" : "Free Plan"}</span>
               <Link href="/settings" className="text-xs font-bold text-[#1877F2] hover:text-[#0c5ed1]" data-testid="link-upgrade">
-                Upgrade
+                {isProPlan ? "Manage" : "Upgrade"}
               </Link>
             </div>
             <div className="w-full h-1.5 bg-slate-200/50 dark:bg-slate-700/50 rounded-full overflow-hidden">
@@ -703,7 +705,9 @@ export function AppSidebar() {
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">{uploadsRemaining} free uploads remaining</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">
+              {isProPlan ? "Unlimited uploads" : `${uploadsRemaining ?? 0} free uploads remaining`}
+            </p>
           </div>
         </div>
       </SidebarFooter>

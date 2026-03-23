@@ -29,6 +29,13 @@
       "when": 1773951000000,
       "tag": "0003_security_multitenant_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775508000000,
+      "tag": "0004_stripe_billing",
+      "breakpoints": true
     }
   ]
 }

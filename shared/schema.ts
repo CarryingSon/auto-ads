@@ -487,7 +487,7 @@ export const globalSettings = pgTable("global_settings", {
   
   // Account info (for display)
   planType: text("plan_type").default("free"),
-  uploadsRemaining: integer("uploads_remaining").default(15),
+  uploadsRemaining: integer("uploads_remaining").default(3),
   
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
@@ -854,10 +854,35 @@ export const insertAdAccountSettingsSchema = createInsertSchema(adAccountSetting
 export type InsertAdAccountSettings = z.infer<typeof insertAdAccountSettingsSchema>;
 export type AdAccountSettings = typeof adAccountSettings.$inferSelect;
 
+// Billing subscriptions table - current source of truth from Stripe
+export const billingSubscriptions = pgTable("billing_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  status: text("status").notNull().default("inactive"), // inactive | trialing | active | past_due | unpaid | canceled
+  interval: text("interval"), // monthly | yearly
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  currentPeriodStart: timestamp("current_period_start"),
+  currentPeriodEnd: timestamp("current_period_end"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertBillingSubscriptionSchema = createInsertSchema(billingSubscriptions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertBillingSubscription = z.infer<typeof insertBillingSubscriptionSchema>;
+export type BillingSubscription = typeof billingSubscriptions.$inferSelect;
+
 // Billing Payments table - stores monthly payment history
 export const billingPayments = pgTable("billing_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull(),
+  stripeInvoiceId: text("stripe_invoice_id"),
   amount: real("amount").notNull(),
   currency: text("currency").notNull().default("EUR"),
   status: text("status").notNull().default("paid"),

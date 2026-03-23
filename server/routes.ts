@@ -26,6 +26,7 @@ import {
 import { eq, desc, and, or, sql } from "drizzle-orm";
 import {
   enqueueLaunchJob,
+  enqueueLaunchJobWithMonthlyQuotaGuard,
   claimLaunchQueueItems,
   completeQueueItem,
   failOrRetryQueueItem,
@@ -34,6 +35,16 @@ import {
   markQueueFailed,
   type LaunchQueuePayload,
 } from "./job-queue.js";
+import {
+  FREE_MONTHLY_UPLOAD_LIMIT,
+  createCheckoutSessionForUser,
+  createPortalSessionForUser,
+  getBillingStatusForUser,
+  getUtcMonthBounds,
+  recordInvoicePaymentFromStripeEvent,
+  syncSubscriptionFromStripeEvent,
+  verifyStripeWebhookSignature,
+} from "./billing.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
@@ -245,7 +256,10 @@ function emitJobLog(jobId: string, message: string, type: "info" | "success" | "
 
 // Authentication middleware for API routes
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (req.originalUrl.startsWith("/api/workers/launch")) {
+  if (
+    req.originalUrl.startsWith("/api/workers/launch") ||
+    req.originalUrl.startsWith("/api/stripe/webhook")
+  ) {
     return next();
   }
   let userId = (req.session as any)?.userId;
@@ -378,6 +392,59 @@ function mapProgressStatus(jobStatus: string | null | undefined, queueStatus?: s
   return normalized;
 }
 
+const ALLOWED_GLOBAL_SETTINGS_PATCH_KEYS = new Set([
+  "facebookPageId",
+  "facebookPageName",
+  "instagramPageId",
+  "instagramPageName",
+  "useInstagramFromFacebook",
+  "beneficiaryName",
+  "payerName",
+  "useDynamicCreative",
+  "primaryTextVariations",
+  "headlineVariations",
+  "descriptionVariations",
+  "defaultCta",
+  "defaultWebsiteUrl",
+  "defaultUtmTemplate",
+]);
+
+function resolveRequestBaseUrl(req: Request): string {
+  const host = req.get("host");
+  if (!host) return "";
+  const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+  const protocol = forwardedProto || (req.secure ? "https" : "http");
+  return `${protocol}://${host}`.replace(/\/+$/, "");
+}
+
+function resolveBillingUrls(req: Request): {
+  successUrl: string;
+  cancelUrl: string;
+  portalReturnUrl: string;
+} {
+  const appBaseUrl = (process.env.APP_BASE_URL || resolveRequestBaseUrl(req)).replace(/\/+$/, "");
+  if (!appBaseUrl) {
+    throw new Error("Unable to resolve APP_BASE_URL for Stripe redirects");
+  }
+
+  const successUrl = process.env.STRIPE_CHECKOUT_SUCCESS_URL || `${appBaseUrl}/settings?billing=success`;
+  const cancelUrl = process.env.STRIPE_CHECKOUT_CANCEL_URL || `${appBaseUrl}/settings?billing=cancel`;
+  const portalReturnUrl = process.env.STRIPE_PORTAL_RETURN_URL || `${appBaseUrl}/settings`;
+
+  for (const candidate of [successUrl, cancelUrl, portalReturnUrl]) {
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("Invalid redirect protocol");
+      }
+    } catch {
+      throw new Error(`Invalid Stripe redirect URL configured: ${candidate}`);
+    }
+  }
+
+  return { successUrl, cancelUrl, portalReturnUrl };
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -398,6 +465,113 @@ export async function registerRoutes(
 
   // Apply authentication middleware to all /api routes
   app.use("/api", requireAuth);
+
+  app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
+    try {
+      const signature = req.headers["stripe-signature"];
+      if (!signature || typeof signature !== "string") {
+        return res.status(400).json({ error: "Missing Stripe signature" });
+      }
+
+      const rawBody = (req as any).rawBody;
+      if (!Buffer.isBuffer(rawBody)) {
+        return res.status(400).json({ error: "Missing raw request body" });
+      }
+
+      const event = verifyStripeWebhookSignature({ rawBody, signature });
+      switch (event.type) {
+        case "customer.subscription.created":
+        case "customer.subscription.updated":
+        case "customer.subscription.deleted": {
+          await syncSubscriptionFromStripeEvent(event.data.object as any);
+          break;
+        }
+        case "invoice.payment_succeeded": {
+          await recordInvoicePaymentFromStripeEvent(event.data.object as any);
+          break;
+        }
+        default:
+          break;
+      }
+
+      res.json({ received: true });
+    } catch (error: any) {
+      console.error("[StripeWebhook] Failed to process event:", error);
+      res.status(400).json({ error: error?.message || "Invalid Stripe webhook" });
+    }
+  });
+
+  app.get("/api/billing/status", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const billing = await getBillingStatusForUser(userId);
+      res.json(billing);
+    } catch (error: any) {
+      console.error("[Billing] Failed to fetch status:", error);
+      res.status(500).json({ error: error?.message || "Failed to fetch billing status" });
+    }
+  });
+
+  app.post("/api/billing/checkout", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const parsed = z.object({
+        interval: z.enum(["monthly", "yearly"]),
+      }).safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: "interval must be monthly or yearly" });
+      }
+
+      const currentBilling = await getBillingStatusForUser(userId);
+      if (currentBilling.planType === "pro" && currentBilling.subscriptionStatus !== "legacy_pro") {
+        return res.status(400).json({ error: "You already have an active Pro plan" });
+      }
+
+      const { successUrl, cancelUrl } = resolveBillingUrls(req);
+
+      const checkoutUrl = await createCheckoutSessionForUser({
+        userId,
+        email: (req.session as any)?.userEmail || null,
+        interval: parsed.data.interval,
+        successUrl,
+        cancelUrl,
+      });
+
+      res.json({ url: checkoutUrl });
+    } catch (error: any) {
+      console.error("[Billing] Failed to create checkout session:", error);
+      res.status(500).json({ error: error?.message || "Failed to start checkout" });
+    }
+  });
+
+  app.post("/api/billing/portal", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { portalReturnUrl } = resolveBillingUrls(req);
+
+      const portalUrl = await createPortalSessionForUser({
+        userId,
+        returnUrl: portalReturnUrl,
+      });
+
+      res.json({ url: portalUrl });
+    } catch (error: any) {
+      console.error("[Billing] Failed to create portal session:", error);
+      res.status(500).json({ error: error?.message || "Failed to open billing portal" });
+    }
+  });
   
   // ===== Connection Routes =====
   
@@ -1131,24 +1305,6 @@ export async function registerRoutes(
 
       // Store scheduling info if scheduled
       const isScheduled = launchMode === "scheduled" && scheduledAt;
-      
-      // Update job with campaign settings (include budget info for history page)
-      const existingDefaults = (job.defaultSettings || {}) as Record<string, any>;
-      await storage.updateJob(jobId, {
-        status: "queued",
-        currentStep: 3,
-        adAccountId,
-        userId,
-        campaignId: campaignId || undefined,
-        campaignName: campaignName || `Campaign-${new Date().toISOString().split("T")[0]}`,
-        adUploadMode: effectiveUploadMode,
-        defaultSettings: {
-          ...existingDefaults,
-          dailyBudget: campaignSettings.budgetAmount || existingDefaults.dailyBudget,
-          budgetType: campaignSettings.budgetType || existingDefaults.budgetType,
-          budgetAmount: campaignSettings.budgetAmount || existingDefaults.budgetAmount || existingDefaults.dailyBudget,
-        } as any,
-      });
 
       // Get adsets, assets and ads (filter out disabled ad sets)
       const allJobAdsets = await storage.getAdsetsByJob(jobId);
@@ -1288,10 +1444,63 @@ export async function registerRoutes(
         jobAdsets, assets, extractedAds, pageId, pageName,
         globalSettingsRecord,
       };
-      const queueItem = await enqueueLaunchJob({
-        jobId,
+
+      const billingStatus = await getBillingStatusForUser(userId);
+      let queueItem;
+      if (billingStatus.planType === "free") {
+        const monthBounds = getUtcMonthBounds();
+        const queued = await enqueueLaunchJobWithMonthlyQuotaGuard({
+          jobId,
+          userId,
+          payload: queuePayload,
+          monthStart: monthBounds.start,
+          monthEnd: monthBounds.end,
+          monthlyLimit: FREE_MONTHLY_UPLOAD_LIMIT,
+        });
+
+        if (queued.limitReached || !queued.created) {
+          const uploadsRemaining = Math.max(0, FREE_MONTHLY_UPLOAD_LIMIT - queued.used);
+          return res.status(402).json({
+            code: "FREE_LIMIT_REACHED",
+            error: `FREE_LIMIT_REACHED: Free plan includes ${FREE_MONTHLY_UPLOAD_LIMIT} launches per UTC month. Upgrade to continue.`,
+            details: [
+              `You have used ${queued.used}/${FREE_MONTHLY_UPLOAD_LIMIT} launches this month.`,
+              "Upgrade to Pro to unlock unlimited launches.",
+            ],
+            billing: {
+              ...billingStatus,
+              uploadsUsed: queued.used,
+              uploadsLimit: FREE_MONTHLY_UPLOAD_LIMIT,
+              uploadsRemaining,
+              canLaunch: uploadsRemaining > 0,
+            },
+          });
+        }
+        queueItem = queued.created;
+      } else {
+        queueItem = await enqueueLaunchJob({
+          jobId,
+          userId,
+          payload: queuePayload,
+        });
+      }
+
+      // Update job with campaign settings (include budget info for history page)
+      const existingDefaults = (job.defaultSettings || {}) as Record<string, any>;
+      await storage.updateJob(jobId, {
+        status: "queued",
+        currentStep: 3,
+        adAccountId,
         userId,
-        payload: queuePayload,
+        campaignId: campaignId || undefined,
+        campaignName: campaignName || `Campaign-${new Date().toISOString().split("T")[0]}`,
+        adUploadMode: effectiveUploadMode,
+        defaultSettings: {
+          ...existingDefaults,
+          dailyBudget: campaignSettings.budgetAmount || existingDefaults.dailyBudget,
+          budgetType: campaignSettings.budgetType || existingDefaults.budgetType,
+          budgetAmount: campaignSettings.budgetAmount || existingDefaults.budgetAmount || existingDefaults.dailyBudget,
+        } as any,
       });
 
       // Hobby Vercel plans do not support minute-level Cron jobs. Trigger worker
@@ -4028,14 +4237,20 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      const settings = await storage.getGlobalSettings(userId);
-      res.json(settings || {
-        planType: "free",
-        uploadsRemaining: 15,
-        primaryTextVariations: [],
-        headlineVariations: [],
-        descriptionVariations: [],
-        defaultCta: "LEARN_MORE",
+      const [settings, billing] = await Promise.all([
+        storage.getGlobalSettings(userId),
+        getBillingStatusForUser(userId),
+      ]);
+
+      res.json({
+        ...(settings || {
+          primaryTextVariations: [],
+          headlineVariations: [],
+          descriptionVariations: [],
+          defaultCta: "LEARN_MORE",
+        }),
+        planType: billing.planType,
+        uploadsRemaining: billing.uploadsRemaining,
       });
     } catch (error) {
       console.error("Error fetching settings:", error);
@@ -4050,9 +4265,34 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      const updates = req.body;
-      const settings = await storage.upsertGlobalSettings(userId, updates);
-      res.json(settings);
+      const payload = (req.body && typeof req.body === "object")
+        ? (req.body as Record<string, unknown>)
+        : {};
+
+      const disallowedKeys = Object.keys(payload).filter(
+        (key) => !ALLOWED_GLOBAL_SETTINGS_PATCH_KEYS.has(key),
+      );
+
+      if (disallowedKeys.length > 0) {
+        return res.status(400).json({
+          error: "Invalid settings keys",
+          details: [
+            `These keys are not editable via /api/settings: ${disallowedKeys.join(", ")}`,
+          ],
+        });
+      }
+
+      const updates = Object.fromEntries(
+        Object.entries(payload).filter(([key]) => ALLOWED_GLOBAL_SETTINGS_PATCH_KEYS.has(key)),
+      );
+
+      const settings = await storage.upsertGlobalSettings(userId, updates as any);
+      const billing = await getBillingStatusForUser(userId);
+      res.json({
+        ...settings,
+        planType: billing.planType,
+        uploadsRemaining: billing.uploadsRemaining,
+      });
     } catch (error) {
       console.error("Error updating settings:", error);
       res.status(500).json({ error: "Failed to update settings" });
@@ -4917,10 +5157,11 @@ export async function registerRoutes(
       }
 
       // Parallel DB reads
-      const [assets, globalSettingsRow, allSettings] = await Promise.all([
+      const [assets, globalSettingsRow, allSettings, billing] = await Promise.all([
         db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1),
         storage.getGlobalSettings(userId),
         storage.getAllAdAccountSettings(userId),
+        getBillingStatusForUser(userId),
       ]);
 
       // --- Ad Accounts ---
@@ -4991,8 +5232,6 @@ export async function registerRoutes(
 
       // --- Global settings ---
       const settings = globalSettingsRow || {
-        planType: "free",
-        uploadsRemaining: 15,
         instagramPageId: null,
         instagramPageName: null,
         facebookPageName: null,
@@ -5019,8 +5258,8 @@ export async function registerRoutes(
         autoSelected,
         instagramAccounts,
         settings: {
-          planType: (settings as any).planType ?? "free",
-          uploadsRemaining: (settings as any).uploadsRemaining ?? 15,
+          planType: billing.planType,
+          uploadsRemaining: billing.uploadsRemaining,
           instagramPageId: (settings as any).instagramPageId ?? null,
           instagramPageName: (settings as any).instagramPageName ?? null,
           facebookPageName: (settings as any).facebookPageName ?? null,

@@ -185,8 +185,8 @@ export async function createApp(options: CreateAppOptions = {}) {
       return next();
     }
 
-    // Worker endpoint uses cron auth; CSRF is not applicable for this system trigger.
-    if (req.path.startsWith("/api/workers/launch")) {
+    // Worker and Stripe webhook endpoints use their own authentication mechanisms.
+    if (req.path.startsWith("/api/workers/launch") || req.path.startsWith("/api/stripe/webhook")) {
       return next();
     }
 

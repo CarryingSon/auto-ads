@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db, pool } from "./db.js";
 import {
@@ -36,6 +36,7 @@ export interface LaunchQueuePayload {
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const LOCK_WINDOW_MINUTES = 15;
+const MONTHLY_COUNTED_STATUSES: QueueStatus[] = ["queued", "processing", "retrying", "completed"];
 let ensureQueueTablesPromise: Promise<void> | null = null;
 
 async function ensureQueueTables(): Promise<void> {
@@ -106,6 +107,70 @@ export async function enqueueLaunchJob(params: {
     .returning();
 
   return created;
+}
+
+export async function enqueueLaunchJobWithMonthlyQuotaGuard(params: {
+  jobId: string;
+  userId: string;
+  payload: LaunchQueuePayload;
+  monthStart: Date;
+  monthEnd: Date;
+  monthlyLimit: number;
+  maxAttempts?: number;
+}): Promise<{
+  created: JobQueue | null;
+  used: number;
+  limitReached: boolean;
+}> {
+  await ensureQueueTables();
+
+  return db.transaction(async (tx) => {
+    // Serialize quota checks per user to prevent concurrent over-enqueue.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${params.userId}))`);
+
+    const [usageRow] = await tx
+      .select({
+        count: sql<number>`count(*)::int`,
+      })
+      .from(jobQueue)
+      .where(
+        and(
+          eq(jobQueue.userId, params.userId),
+          inArray(jobQueue.status, MONTHLY_COUNTED_STATUSES),
+          gte(jobQueue.createdAt, params.monthStart),
+          lt(jobQueue.createdAt, params.monthEnd),
+        ),
+      );
+
+    const used = Number(usageRow?.count || 0);
+    if (used >= params.monthlyLimit) {
+      return {
+        created: null,
+        used,
+        limitReached: true,
+      };
+    }
+
+    const [created] = await tx
+      .insert(jobQueue)
+      .values({
+        jobId: params.jobId,
+        userId: params.userId,
+        queueType: "launch",
+        status: "queued",
+        attempts: 0,
+        maxAttempts: params.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
+        payload: params.payload as unknown as Record<string, unknown>,
+        nextRunAt: new Date(),
+      })
+      .returning();
+
+    return {
+      created,
+      used: used + 1,
+      limitReached: false,
+    };
+  });
 }
 
 export async function claimLaunchQueueItems(workerId: string, limit = 1): Promise<JobQueue[]> {

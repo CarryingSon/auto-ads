@@ -29,8 +29,8 @@ const faqItems = [
   { q: "Can I use different aspect ratios in the same ad?", a: "Yes! Auto-ads supports uploading multiple aspect ratios from your Drive folder and will automatically map them to the correct placements." },
 ];
 
-const freePlanFeatures = ["First 10 syncs free", "Unlimited ad accounts", "Dashboard overview", "No credit card required"];
-const paidPlanFeatures = ["Unlimited Drive syncs", "Launch 100's of ads instantly", "Auto-disable enhancements", "Google Drive Integration", "Auto-naming from filenames", "Saved ad copy templates"];
+const freePlanFeatures = ["3 launches / month", "Dashboard overview", "Google Drive sync", "No credit card required"];
+const paidPlanFeatures = ["Unlimited launches", "Unlimited Drive syncs", "Auto-disable enhancements", "Google Drive integration", "Auto-naming from filenames", "Saved ad copy templates"];
 
 function DemoVideoPlaceholder() {
   const [isHovered, setIsHovered] = useState(false);
@@ -609,7 +609,7 @@ export default function Landing() {
               <button onClick={() => setIsYearly(!isYearly)} className="w-12 h-6 bg-[#1877F2] rounded-full relative focus:outline-none shadow-md cursor-pointer">
                 <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 shadow-sm ${isYearly ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
-              <span className={`text-sm font-medium ${isYearly ? 'text-gray-900' : 'text-gray-500'}`}>Yearly <span className="text-[#1877F2] text-xs ml-1 font-bold">(-20%)</span></span>
+              <span className={`text-sm font-medium ${isYearly ? 'text-gray-900' : 'text-gray-500'}`}>Yearly <span className="text-[#1877F2] text-xs ml-1 font-bold">(2 months free)</span></span>
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
@@ -618,7 +618,7 @@ export default function Landing() {
               <h3 className="text-xl font-bold text-gray-900">Free plan</h3>
               <p className="text-sm text-gray-500 mt-2 mb-6">Try Auto-ads risk-free</p>
               <div className="flex items-baseline mb-6">
-                <span className="text-4xl font-extrabold text-gray-900">$0</span>
+                <span className="text-4xl font-extrabold text-gray-900">€0</span>
                 <span className="text-gray-500 ml-2">/forever</span>
               </div>
               <p className="text-xs text-gray-500 mb-6">No credit card required</p>
@@ -641,10 +641,10 @@ export default function Landing() {
               <h3 className="text-xl font-bold text-gray-900">Rapid launch</h3>
               <p className="text-sm text-gray-500 mt-2 mb-6">Perfect for scaling agencies</p>
               <div className="flex items-baseline mb-6">
-                <span className="text-4xl font-extrabold text-gray-900">{isYearly ? "$31" : "$39"}</span>
-                <span className="text-gray-500 ml-2">{isYearly ? "/mo, billed yearly" : "/month"}</span>
+                <span className="text-4xl font-extrabold text-gray-900">{isYearly ? "€290" : "€29"}</span>
+                <span className="text-gray-500 ml-2">{isYearly ? "/year" : "/month"}</span>
               </div>
-              <p className="text-xs text-[#1877F2] mb-6 font-semibold">{isYearly ? "Save $96/year — " : ""}Unlimited Drive syncing + ad accounts</p>
+              <p className="text-xs text-[#1877F2] mb-6 font-semibold">{isYearly ? "2 months free — " : ""}Unlimited launches + Drive syncing</p>
               <Link href="/login">
                 <span className="block w-full py-3 px-4 bg-gradient-to-r from-[#1877F2] to-blue-600 text-white font-bold text-center rounded-xl hover:shadow-lg transition-all mb-8 shadow-md cursor-pointer" style={{ boxShadow: "0 4px 14px rgba(24,119,242,0.4)" }} data-testid="button-get-started-pricing">
                   Get Started

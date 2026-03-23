@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { ToastAction } from "@/components/ui/toast";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1683,6 +1684,23 @@ export default function BulkAds() {
     },
   });
 
+  const upgradeCheckoutMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/billing/checkout", { interval: "monthly" });
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: ({ url }) => {
+      window.location.href = url;
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Checkout failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const launchMutation = useMutation({
     mutationFn: async () => {
       if (!jobId) throw new Error("No job ID");
@@ -1760,15 +1778,38 @@ export default function BulkAds() {
       const parts = error.message.split("\n\n");
       const mainError = parts[0];
       const details = parts.length > 1 ? parts.slice(1).join("\n\n") : undefined;
-      const errorLines = details ? details.split("\n") : [mainError];
+      const isFreeLimitReached = mainError.includes("FREE_LIMIT_REACHED");
+      const normalizedMainError = mainError.replace(/^FREE_LIMIT_REACHED:\s*/, "");
+      const errorLines = details ? details.split("\n") : [normalizedMainError];
       setLaunchLogs(prev => [
         ...prev,
-        { type: "error" as const, message: `Upload stopped: ${mainError}`, timestamp: new Date().toISOString() },
+        { type: "error" as const, message: `Upload stopped: ${normalizedMainError}`, timestamp: new Date().toISOString() },
         ...errorLines.map(line => ({ type: "error" as const, message: line, timestamp: new Date().toISOString() })),
       ]);
-      toast({ 
-        title: "Launch failed — upload stopped", 
-        description: details || mainError, 
+      if (isFreeLimitReached) {
+        toast({
+          title: "Free limit reached",
+          description: "Free plan allows 3 launches per UTC month. Upgrade to continue.",
+          variant: "destructive",
+          duration: 15000,
+          action: (
+            <ToastAction
+              altText="Upgrade"
+              onClick={(event) => {
+                event.preventDefault();
+                upgradeCheckoutMutation.mutate();
+              }}
+            >
+              Upgrade
+            </ToastAction>
+          ),
+        });
+        return;
+      }
+
+      toast({
+        title: "Launch failed — upload stopped",
+        description: details || normalizedMainError,
         variant: "destructive",
         duration: 15000,
       });

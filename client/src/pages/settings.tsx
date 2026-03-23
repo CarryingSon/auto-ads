@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { SiFacebook } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
 import type { CampaignSettings, AdSetSettings, AdSettings, CreativeSettings } from "@shared/schema";
@@ -50,6 +50,18 @@ interface BillingPayment {
   createdAt: string;
 }
 
+interface BillingStatus {
+  planType: "free" | "pro";
+  billingInterval: "monthly" | "yearly" | null;
+  subscriptionStatus: string | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
+  uploadsUsed: number;
+  uploadsLimit: number | null;
+  uploadsRemaining: number | null;
+  canLaunch: boolean;
+}
+
 const CTA_OPTIONS = [
   { value: "LEARN_MORE", label: "Learn More" },
   { value: "SHOP_NOW", label: "Shop Now" },
@@ -69,6 +81,10 @@ export default function Settings() {
   
   const { data: settings, isLoading } = useQuery<GlobalSettings>({
     queryKey: ["/api/settings"],
+  });
+
+  const { data: billingStatus, isLoading: billingStatusLoading } = useQuery<BillingStatus>({
+    queryKey: ["/api/billing/status"],
   });
   
   const { data: connections = [] } = useQuery<Connection[]>({
@@ -417,6 +433,30 @@ export default function Settings() {
       setDefaultCta(settings.defaultCta || "LEARN_MORE");
     }
   }, [settings]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billingParam = params.get("billing");
+    if (!billingParam) return;
+
+    if (billingParam === "success") {
+      toast({
+        title: "Subscription updated",
+        description: "Payment completed successfully.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/payments"] });
+    } else if (billingParam === "cancel") {
+      toast({
+        title: "Checkout cancelled",
+        description: "No payment was made.",
+      });
+    }
+
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [toast]);
   
   // Auto-select first Instagram account when Facebook page is selected and no Instagram is configured
   // But don't override if user explicitly chose "Use Facebook Page"
@@ -618,6 +658,40 @@ export default function Settings() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to save settings", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const checkoutMutation = useMutation({
+    mutationFn: async (interval: "monthly" | "yearly") => {
+      const res = await apiRequest("POST", "/api/billing/checkout", { interval });
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: ({ url }) => {
+      window.location.href = url;
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Checkout failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const portalMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/billing/portal");
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: ({ url }) => {
+      window.location.href = url;
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Portal failed",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
   
@@ -828,7 +902,7 @@ export default function Settings() {
     setIsApplyingImport(false);
   };
   
-  if (isLoading) {
+  if (isLoading || billingStatusLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -836,9 +910,20 @@ export default function Settings() {
     );
   }
 
-  const uploadsUsed = 20 - (settings?.uploadsRemaining || 15);
-  const uploadsTotal = 20;
-  const uploadsPercent = Math.round((uploadsUsed / uploadsTotal) * 100);
+  const effectivePlanType = billingStatus?.planType || (settings?.planType === "pro" ? "pro" : "free");
+  const isProPlan = effectivePlanType === "pro";
+  const isLegacyPro = billingStatus?.subscriptionStatus === "legacy_pro";
+  const uploadsTotal = billingStatus?.uploadsLimit ?? (isProPlan ? null : 3);
+  const uploadsUsed = billingStatus?.uploadsUsed ?? (
+    uploadsTotal !== null ? Math.max(0, uploadsTotal - (settings?.uploadsRemaining ?? uploadsTotal)) : 0
+  );
+  const uploadsRemaining = billingStatus?.uploadsRemaining ?? (
+    uploadsTotal !== null ? Math.max(0, uploadsTotal - uploadsUsed) : null
+  );
+  const uploadsPercent = uploadsTotal ? Math.min(100, Math.round((uploadsUsed / uploadsTotal) * 100)) : 0;
+  const currentPeriodEndLabel = billingStatus?.currentPeriodEnd
+    ? new Date(billingStatus.currentPeriodEnd).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
   const adAccountsUsed = adAccounts.length || 1;
   const adAccountsTotal = 1;
   const adAccountsPercent = Math.min(100, Math.round((adAccountsUsed / adAccountsTotal) * 100));
@@ -946,19 +1031,71 @@ export default function Settings() {
           <div>
             <h3 className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Current Plan</h3>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-2xl font-extrabold">{settings?.planType === "pro" ? "Pro" : "Free"}</span>
+              <span className="text-2xl font-extrabold">{isProPlan ? "Pro" : "Free"}</span>
+              {isProPlan && billingStatus?.billingInterval && (
+                <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+                  {billingStatus.billingInterval}
+                </Badge>
+              )}
             </div>
-            <p className="text-[11px] font-medium text-muted-foreground">Explore basic features</p>
+            <p className="text-[11px] font-medium text-muted-foreground">
+              {isProPlan ? (isLegacyPro ? "Legacy Pro access (temporary)" : "Unlimited launches enabled") : "3 launches per UTC month"}
+            </p>
+            {isProPlan && billingStatus?.cancelAtPeriodEnd && currentPeriodEndLabel && (
+              <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-2">
+                Cancels on {currentPeriodEndLabel}
+              </p>
+            )}
+            {isProPlan && !billingStatus?.cancelAtPeriodEnd && currentPeriodEndLabel && (
+              <p className="text-[10px] font-semibold text-muted-foreground mt-2">
+                Renews on {currentPeriodEndLabel}
+              </p>
+            )}
           </div>
-          <div className="mt-5">
-            <button
-              className="w-full py-2.5 px-3 bg-[#1877F2] hover:bg-[#1565c0] text-white text-xs font-bold rounded-xl shadow-lg shadow-[#1877F2]/25 transition-all flex items-center justify-center gap-2 group/btn"
-              data-testid="button-upgrade"
-            >
-              Upgrade Now
-              <span className="material-symbols-outlined text-base group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
-            </button>
-            <p className="text-center text-[10px] font-bold text-gray-400 dark:text-gray-500 mt-2">From {billingPeriod === "monthly" ? "€34" : "€29"}/mo</p>
+          <div className="mt-5 space-y-2">
+            {!isProPlan && (
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-white/40 dark:bg-white/5 border border-white/20 dark:border-white/10">
+                <button
+                  className={`text-[10px] font-bold py-1.5 rounded-md transition-all ${billingPeriod === "monthly" ? "bg-[#1877F2] text-white" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setBillingPeriod("monthly")}
+                  type="button"
+                >
+                  Monthly
+                </button>
+                <button
+                  className={`text-[10px] font-bold py-1.5 rounded-md transition-all ${billingPeriod === "yearly" ? "bg-[#1877F2] text-white" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => setBillingPeriod("yearly")}
+                  type="button"
+                >
+                  Yearly
+                </button>
+              </div>
+            )}
+            {isProPlan && !isLegacyPro ? (
+              <button
+                className="w-full py-2.5 px-3 bg-white/60 dark:bg-white/10 border border-white/40 dark:border-white/15 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                data-testid="button-manage-subscription"
+                onClick={() => portalMutation.mutate()}
+                disabled={portalMutation.isPending}
+              >
+                {portalMutation.isPending ? "Opening..." : "Manage subscription"}
+              </button>
+            ) : (
+              <button
+                className="w-full py-2.5 px-3 bg-[#1877F2] hover:bg-[#1565c0] text-white text-xs font-bold rounded-xl shadow-lg shadow-[#1877F2]/25 transition-all flex items-center justify-center gap-2 group/btn disabled:opacity-60"
+                data-testid="button-upgrade"
+                onClick={() => checkoutMutation.mutate(billingPeriod)}
+                disabled={checkoutMutation.isPending}
+              >
+                {checkoutMutation.isPending ? "Redirecting..." : "Upgrade Now"}
+                <span className="material-symbols-outlined text-base group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
+              </button>
+            )}
+            {(!isProPlan || isLegacyPro) && (
+              <p className="text-center text-[10px] font-bold text-gray-400 dark:text-gray-500">
+                {billingPeriod === "monthly" ? "€29 / month" : "€290 / year (2 months free)"}
+              </p>
+            )}
           </div>
         </div>
 
@@ -969,7 +1106,9 @@ export default function Settings() {
               <span className="material-symbols-outlined text-[#1877F2] text-lg">analytics</span>
               <h3 className="text-base font-bold">Usage & Limits</h3>
             </div>
-            <span className="text-[10px] font-bold bg-white/40 dark:bg-white/5 px-2.5 py-1 rounded-full text-muted-foreground border border-white/20 dark:border-white/5">RESETS MONTHLY</span>
+            <span className="text-[10px] font-bold bg-white/40 dark:bg-white/5 px-2.5 py-1 rounded-full text-muted-foreground border border-white/20 dark:border-white/5">
+              {isProPlan ? "UNLIMITED" : "RESETS MONTHLY (UTC)"}
+            </span>
           </div>
           <div className="space-y-5">
             {/* Uploads */}
@@ -977,16 +1116,35 @@ export default function Settings() {
               <div className="flex justify-between items-end mb-2">
                 <div>
                   <p className="text-xs font-bold">Uploads</p>
-                  <p className="text-[11px] font-medium text-muted-foreground opacity-70">Monthly processing volume</p>
+                  <p className="text-[11px] font-medium text-muted-foreground opacity-70">
+                    {isProPlan ? "Unlimited processing volume" : "Monthly processing volume"}
+                  </p>
                 </div>
                 <div className="text-right">
-                  <span className="text-base font-bold">{uploadsUsed}</span>
-                  <span className="text-xs font-bold text-muted-foreground opacity-40">/ {uploadsTotal}</span>
+                  {isProPlan ? (
+                    <span className="text-base font-bold">Unlimited</span>
+                  ) : (
+                    <>
+                      <span className="text-base font-bold">{uploadsUsed}</span>
+                      <span className="text-xs font-bold text-muted-foreground opacity-40">/ {uploadsTotal ?? 3}</span>
+                    </>
+                  )}
                 </div>
               </div>
-              <div className="w-full bg-gray-200/50 dark:bg-gray-800/50 rounded-full h-2.5 overflow-hidden p-0.5 border border-white/10">
-                <div className="bg-gradient-to-r from-[#1877F2] to-blue-400 h-1.5 rounded-full shadow-[0_0_8px_rgba(24,119,242,0.4)] transition-all duration-500" style={{ width: `${uploadsPercent}%` }} />
-              </div>
+              {isProPlan ? (
+                <div className="rounded-xl border border-emerald-300/50 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                  Your Pro plan has no upload cap.
+                </div>
+              ) : (
+                <>
+                  <div className="w-full bg-gray-200/50 dark:bg-gray-800/50 rounded-full h-2.5 overflow-hidden p-0.5 border border-white/10">
+                    <div className="bg-gradient-to-r from-[#1877F2] to-blue-400 h-1.5 rounded-full shadow-[0_0_8px_rgba(24,119,242,0.4)] transition-all duration-500" style={{ width: `${uploadsPercent}%` }} />
+                  </div>
+                  <p className="text-[10px] font-semibold text-muted-foreground mt-2">
+                    {uploadsRemaining ?? 0} uploads remaining this month
+                  </p>
+                </>
+              )}
             </div>
             {/* Active Ad Accounts */}
             <div>
