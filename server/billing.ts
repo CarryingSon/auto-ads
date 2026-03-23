@@ -527,13 +527,11 @@ export async function recordInvoicePaymentFromStripeEvent(
   const periodEndUnix = linePeriod?.end ?? (invoice as any).period_end ?? invoice.created;
 
   const amountPaid = Number(invoice.amount_paid ?? invoice.amount_due ?? 0) / 100;
-  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
-    return;
-  }
+  const normalizedAmount = Number.isFinite(amountPaid) ? Math.max(0, amountPaid) : 0;
   const paymentRecord: InsertBillingPayment = {
     userId,
     stripeInvoiceId,
-    amount: Number.isFinite(amountPaid) ? amountPaid : 0,
+    amount: normalizedAmount,
     currency: normalizeInvoiceCurrency(invoice.currency),
     status: normalizeInvoiceStatus(invoice.status),
     periodStart: new Date(Number(periodStartUnix) * 1000),
@@ -576,9 +574,7 @@ export async function backfillBillingPaymentsFromStripeForUser(params: {
 
     for (const invoice of invoices.data) {
       const amountPaid = Number(invoice.amount_paid ?? invoice.amount_due ?? 0) / 100;
-      if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
-        continue;
-      }
+      const normalizedAmount = Number.isFinite(amountPaid) ? Math.max(0, amountPaid) : 0;
 
       const line = invoice.lines?.data?.[0];
       const linePeriod = line?.period;
@@ -587,7 +583,7 @@ export async function backfillBillingPaymentsFromStripeForUser(params: {
       const paymentRecord: InsertBillingPayment = {
         userId: params.userId,
         stripeInvoiceId: invoice.id,
-        amount: amountPaid,
+        amount: normalizedAmount,
         currency: normalizeInvoiceCurrency(invoice.currency),
         status: normalizeInvoiceStatus(invoice.status),
         periodStart: new Date(Number(periodStartUnix) * 1000),

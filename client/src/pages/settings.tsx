@@ -1009,9 +1009,13 @@ export default function Settings() {
         <div
           className={`md:col-span-1 glass-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden group transition-all ${
             isProPlan
-              ? "border border-[#1877F2]/60 shadow-[0_0_0_1px_rgba(24,119,242,0.2),0_14px_36px_rgba(24,119,242,0.18)]"
+              ? "ring-1 ring-[#1877F2]/25"
               : ""
           }`}
+          style={isProPlan ? {
+            border: "1.5px solid rgba(24, 119, 242, 0.78)",
+            boxShadow: "0 0 0 1px rgba(24, 119, 242, 0.35), 0 16px 38px rgba(24, 119, 242, 0.2)",
+          } : undefined}
         >
           <div className="absolute -top-12 -right-12 w-40 h-40 bg-[#1877F2]/20 rounded-full blur-3xl group-hover:bg-[#1877F2]/30 transition-colors pointer-events-none" />
           <div>
@@ -1063,7 +1067,10 @@ export default function Settings() {
                 className="w-full py-2.5 px-3 bg-white/60 dark:bg-white/10 border border-white/40 dark:border-white/15 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60"
                 data-testid="button-manage-subscription"
                 onClick={() => {
-                  window.location.href = "/api/billing/portal";
+                  const opened = window.open("/api/billing/portal", "_blank", "noopener,noreferrer");
+                  if (!opened) {
+                    window.location.href = "/api/billing/portal";
+                  }
                 }}
               >
                 Manage subscription
@@ -1149,7 +1156,7 @@ export default function Settings() {
             </div>
             <div>
               <h2 className="text-base font-extrabold tracking-tight" data-testid="text-billing-title">Billing</h2>
-              <p className="text-[10px] font-medium text-muted-foreground">Monthly payment history</p>
+              <p className="text-[10px] font-medium text-muted-foreground">Payment history</p>
             </div>
           </div>
 
