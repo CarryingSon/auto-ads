@@ -724,11 +724,6 @@ export function AppSidebar() {
                   >
                     {isProPlan ? "Pro Plan" : "Free Plan"}
                   </span>
-                  {isProPlan && (
-                    <span className="text-[8px] font-extrabold uppercase tracking-[0.16em] px-1.5 py-0.5 rounded-full border border-[#1877F2]/35 bg-white/75 text-[#1877F2] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-                      Unlimited
-                    </span>
-                  )}
                 </div>
                 <Link
                   href="/settings"
