@@ -237,6 +237,120 @@ interface ParsedCopy {
   descriptions: string[];
 }
 
+function parsePastedCopyText(rawText: string): ParsedCopy {
+  const extractCopyFields = (text: string): ParsedCopy => {
+    const primaryTexts: string[] = [];
+    const headlines: string[] = [];
+    const descriptions: string[] = [];
+
+    // Keep label boundary behavior aligned with server file parser.
+    const fieldLabels = [
+      "Primary\\s*text",
+      "Primary",
+      "Headline",
+      "Description",
+      "Desc",
+    ];
+    const extractByLabel = (labelPattern: string): string[] => {
+      const results: string[] = [];
+      const regex = new RegExp(
+        `${labelPattern}[\\s_]*(\\d*):\\s*(.+?)(?=\\n\\s*(?:(?:${fieldLabels.join("|")})[\\s_]*\\d*\\s*:)|$)`,
+        "gis",
+      );
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(text)) !== null) {
+        const value = match[2].trim();
+        if (value) results.push(value);
+      }
+      return results;
+    };
+
+    primaryTexts.push(...extractByLabel("(?:Primary\\s*text|Primary)"));
+    headlines.push(...extractByLabel("Headline"));
+    descriptions.push(...extractByLabel("(?:Description|Desc)"));
+
+    return { primaryTexts, headlines, descriptions };
+  };
+
+  const results: ParsedCopy[] = [];
+  const dctHeaders: { start: number; contentStart: number }[] = [];
+
+  const dctBlockPattern = /(?:^|\n)\s*(DCT[\s_]*\d+[^\n:]*):\s*/gi;
+  let match: RegExpExecArray | null;
+  while ((match = dctBlockPattern.exec(rawText)) !== null) {
+    dctHeaders.push({
+      start: match.index,
+      contentStart: match.index + match[0].length,
+    });
+  }
+
+  if (dctHeaders.length === 0) {
+    const adBlockPattern = /(?:^|\n)\s*(Ad\s*(\d{1,3}))[:\s]*/gi;
+    while ((match = adBlockPattern.exec(rawText)) !== null) {
+      dctHeaders.push({
+        start: match.index,
+        contentStart: match.index + match[0].length,
+      });
+    }
+  }
+
+  if (dctHeaders.length > 0) {
+    dctHeaders.sort((a, b) => a.start - b.start);
+    for (let i = 0; i < dctHeaders.length; i++) {
+      const start = dctHeaders[i].contentStart;
+      const end = i + 1 < dctHeaders.length ? dctHeaders[i + 1].start : rawText.length;
+      const blockText = rawText.slice(start, end);
+      results.push(extractCopyFields(blockText));
+    }
+  } else {
+    const separatorPattern = /[-–—_=]{5,}/g;
+    if (separatorPattern.test(rawText)) {
+      const blocks = rawText.split(/[-–—_=]{5,}/).filter((b) => b.trim());
+      for (const block of blocks) {
+        const blockText = block.trim();
+        if (!blockText) continue;
+
+        const dctNameMatch = blockText.match(/^\s*(DCT[\s_-]*[^\n:]+):\s*/i);
+        const contentText = dctNameMatch ? blockText.slice(dctNameMatch[0].length) : blockText;
+        const copy = extractCopyFields(contentText);
+        if (copy.primaryTexts.length > 0 || copy.headlines.length > 0) {
+          results.push(copy);
+        }
+      }
+    } else {
+      const numberedPattern = /(?:^|\n)\s*(\d{1,3})\.\s+/g;
+      const numberedHeaders: { start: number; contentStart: number }[] = [];
+      while ((match = numberedPattern.exec(rawText)) !== null) {
+        numberedHeaders.push({
+          start: match.index,
+          contentStart: match.index + match[0].length,
+        });
+      }
+
+      if (numberedHeaders.length > 0) {
+        numberedHeaders.sort((a, b) => a.start - b.start);
+        for (let i = 0; i < numberedHeaders.length; i++) {
+          const start = numberedHeaders[i].contentStart;
+          const end = i + 1 < numberedHeaders.length ? numberedHeaders[i + 1].start : rawText.length;
+          const blockText = rawText.slice(start, end);
+          results.push(extractCopyFields(blockText));
+        }
+      } else {
+        const copy = extractCopyFields(rawText);
+        if (copy.primaryTexts.length > 0 || copy.headlines.length > 0) {
+          results.push(copy);
+        }
+      }
+    }
+  }
+
+  return {
+    primaryTexts: results.flatMap((r) => r.primaryTexts),
+    headlines: results.flatMap((r) => r.headlines),
+    descriptions: results.flatMap((r) => r.descriptions),
+  };
+}
+
 type LaunchStatus = "idle" | "extracting" | "launching" | "complete" | "error";
 
 interface LaunchResults {
@@ -4789,29 +4903,23 @@ Your description`}
                   data-testid="button-parse-pasted-text"
                   disabled={!pasteText.trim()}
                   onClick={() => {
-                    const blocks = pasteText.split(/\n?\s*---\s*\n?/).filter(b => b.trim());
-                    const primaryTexts: string[] = [];
-                    const headlines: string[] = [];
-                    const descriptions: string[] = [];
-                    for (const block of blocks) {
-                      const pt = block.match(/Primary\s*text[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Headline|Description|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
-                      const hl = block.match(/Headline[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Primary\s*text|Description|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
-                      const desc = block.match(/Description[_\s]*\d*\s*:\s*([\s\S]*?)(?=(?:Primary\s*text|Headline|CTA|URL|UTM)[_\s]*\d*\s*:|$)/i);
-                      if (pt?.[1]?.trim()) primaryTexts.push(pt[1].trim());
-                      if (hl?.[1]?.trim()) headlines.push(hl[1].trim());
-                      if (desc?.[1]?.trim()) descriptions.push(desc[1].trim());
-                    }
-                    if (primaryTexts.length === 0 && headlines.length === 0 && descriptions.length === 0) {
-                      toast({ title: "Could not parse text", description: "Use format: Primary text: ..., Headline: ..., Description: ..., separated by ---", variant: "destructive" });
+                    const parsed = parsePastedCopyText(pasteText);
+                    if (parsed.primaryTexts.length === 0 && parsed.headlines.length === 0 && parsed.descriptions.length === 0) {
+                      toast({
+                        title: "Could not parse text",
+                        description: "Use labels like Primary text_1:, Headline_1:, Description_1: (or separate entries with ---).",
+                        variant: "destructive",
+                      });
                       return;
                     }
                     setEditingAdSetCopy({
-                      primaryTexts: primaryTexts.length > 0 ? primaryTexts : [""],
-                      headlines: headlines.length > 0 ? headlines : [""],
-                      descriptions: descriptions.length > 0 ? descriptions : [""],
+                      primaryTexts: parsed.primaryTexts.length > 0 ? parsed.primaryTexts : [""],
+                      headlines: parsed.headlines.length > 0 ? parsed.headlines : [""],
+                      descriptions: parsed.descriptions.length > 0 ? parsed.descriptions : [""],
                     });
                     setPasteText("");
-                    toast({ title: `Parsed ${Math.max(primaryTexts.length, headlines.length)} variations from text` });
+                    const variationCount = Math.max(parsed.primaryTexts.length, parsed.headlines.length, parsed.descriptions.length);
+                    toast({ title: `Parsed ${variationCount} variations from text` });
                   }}
                 >
                   Parse & fill fields
