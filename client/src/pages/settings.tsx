@@ -1019,25 +1019,50 @@ export default function Settings() {
         >
           <div className="absolute -top-12 -right-12 w-40 h-40 bg-[#1877F2]/20 rounded-full blur-3xl group-hover:bg-[#1877F2]/30 transition-colors pointer-events-none" />
           <div>
-            <h3 className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Current Plan</h3>
+            <h3
+              className={`text-[10px] font-bold uppercase tracking-[0.18em] mb-2 ${
+                isProPlan
+                  ? "text-[#1877F2]/85 drop-shadow-[0_1px_0_rgba(255,255,255,0.35)]"
+                  : "text-gray-400 dark:text-gray-500"
+              }`}
+            >
+              Current Plan
+            </h3>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-2xl font-extrabold">{isProPlan ? "Pro" : "Free"}</span>
+              <span
+                className={`${
+                  isProPlan
+                    ? "text-[48px] leading-none font-black tracking-[-0.03em] bg-gradient-to-b from-[#0f1f3d] via-[#1d3f7a] to-[#1877F2] bg-clip-text text-transparent drop-shadow-[0_3px_10px_rgba(24,119,242,0.18)]"
+                    : "text-2xl font-extrabold"
+                }`}
+              >
+                {isProPlan ? "Pro" : "Free"}
+              </span>
               {isProPlan && billingStatus?.billingInterval && (
-                <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] uppercase tracking-[0.14em] font-extrabold bg-white/70 text-[#15386e] border border-[#1877F2]/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]"
+                >
                   {billingStatus.billingInterval}
                 </Badge>
               )}
             </div>
-            <p className="text-[11px] font-medium text-muted-foreground">
+            <p
+              className={`text-[11px] ${
+                isProPlan
+                  ? "font-semibold text-slate-700 dark:text-slate-200 tracking-[0.01em]"
+                  : "font-medium text-muted-foreground"
+              }`}
+            >
               {isProPlan ? (isLegacyPro ? "Legacy Pro access (temporary)" : "Unlimited launches enabled") : "3 launches per UTC month"}
             </p>
             {isProPlan && billingStatus?.cancelAtPeriodEnd && currentPeriodEndLabel && (
-              <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-2">
+              <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-2 tracking-[0.01em]">
                 Cancels on {currentPeriodEndLabel}
               </p>
             )}
             {isProPlan && !billingStatus?.cancelAtPeriodEnd && currentPeriodEndLabel && (
-              <p className="text-[10px] font-semibold text-muted-foreground mt-2">
+              <p className="text-[10px] font-bold text-[#2457a1] dark:text-blue-300 mt-2 tracking-[0.01em]">
                 Renews on {currentPeriodEndLabel}
               </p>
             )}
@@ -1073,7 +1098,7 @@ export default function Settings() {
                   }
                 }}
               >
-                Manage subscription
+                <span className="tracking-[0.01em]">Manage subscription</span>
               </button>
             ) : (
               <button
