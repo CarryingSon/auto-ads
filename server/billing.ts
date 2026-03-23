@@ -543,9 +543,7 @@ export async function recordInvoicePaymentFromStripeEvent(
   await db
     .insert(billingPayments)
     .values(paymentRecord)
-    .onConflictDoNothing({
-      target: billingPayments.stripeInvoiceId,
-    });
+    .onConflictDoNothing();
 }
 
 export async function backfillBillingPaymentsFromStripeForUser(params: {
@@ -595,9 +593,7 @@ export async function backfillBillingPaymentsFromStripeForUser(params: {
       await db
         .insert(billingPayments)
         .values(paymentRecord)
-        .onConflictDoNothing({
-          target: billingPayments.stripeInvoiceId,
-        });
+        .onConflictDoNothing();
 
       processed += 1;
       if (processed >= maxInvoices) break;
