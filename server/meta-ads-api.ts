@@ -82,6 +82,59 @@ export class MetaAdsApi {
   private accessToken: string | null = null;
   private adAccountId: string | null = null;
 
+  private extractAllowedCreativeFeatureKeys(error: any): Set<string> | null {
+    const message = [error?.message, error?.error_user_msg]
+      .filter((part) => typeof part === "string" && part.trim().length > 0)
+      .join(" ");
+    const match = message.match(/must be one of\s*\{([^}]+)\}/i);
+    if (!match) return null;
+    const keys = match[1]
+      .split(",")
+      .map((key: string) => key.trim().replace(/^"|"$/g, ""))
+      .filter((key: string) => key.length > 0)
+      .map((key: string) => key.toUpperCase());
+    return keys.length > 0 ? new Set(keys) : null;
+  }
+
+  private buildStrictCreativeFeaturesSpec(
+    enhancements: Record<string, boolean>,
+    isVideo: boolean
+  ): { spec: Record<string, { enroll_status: "OPT_IN" | "OPT_OUT" }>; ignoredToggles: string[] } {
+    const withStatus = (enabled: boolean): { enroll_status: "OPT_IN" | "OPT_OUT" } => ({
+      enroll_status: enabled ? "OPT_IN" : "OPT_OUT",
+    });
+
+    const spec: Record<string, { enroll_status: "OPT_IN" | "OPT_OUT" }> = isVideo
+      ? {
+          video_auto_crop: withStatus(!!enhancements.visual_touch_ups),
+          text_optimizations: withStatus(!!enhancements.text_improvements),
+          advantage_plus_creative: withStatus(!!enhancements.add_video_effects),
+          show_summary: withStatus(!!enhancements.show_summaries),
+          inline_comment: withStatus(!!enhancements.relevant_comments),
+          enhance_cta: withStatus(!!enhancements.enhance_cta),
+          reveal_details_over_time: withStatus(!!enhancements.reveal_details),
+          video_highlights: withStatus(!!enhancements.show_spotlights),
+        }
+      : {
+          add_text_overlay: withStatus(!!enhancements.add_overlays),
+          image_touchups: withStatus(!!enhancements.visual_touch_ups),
+          text_optimizations: withStatus(!!enhancements.text_improvements),
+          show_summary: withStatus(!!enhancements.show_summaries),
+          inline_comment: withStatus(!!enhancements.relevant_comments),
+          enhance_cta: withStatus(!!enhancements.enhance_cta),
+          image_brightness_and_contrast: withStatus(!!enhancements.brightness_and_contrast),
+          reveal_details_over_time: withStatus(!!enhancements.reveal_details),
+          video_highlights: withStatus(!!enhancements.show_spotlights),
+        };
+
+    const ignoredToggles: string[] = [];
+    if (!isVideo && enhancements.add_music) {
+      ignoredToggles.push("add_music");
+    }
+
+    return { spec, ignoredToggles };
+  }
+
   constructor(userId: string) {
     this.userId = userId;
   }
@@ -2820,89 +2873,75 @@ export class MetaAdsApi {
         }
       }
 
-      // Build creative_features_spec from user-selected enhancements
-      // MUST be nested inside degrees_of_freedom_spec (not top-level) for Meta to store them
-      // standard_enhancements is deprecated and must NOT be included
-      // Enhancement keys map to Meta API creative_features_spec field names
+      // Strict mode: send only verified keys per media type, then auto-restrict if Meta responds with a key allow-list.
       const enh = params.creativeEnhancements || {};
       const isVideo = !!params.videoId;
-      const s = (key: string) => (enh[key] ?? false) ? "OPT_IN" : "OPT_OUT";
-      const creativeFeaturesSpec: Record<string, any> = {};
-      if (isVideo) {
-        // Video creative mapping for all UI toggles:
-        // Visual touch-ups -> video_auto_crop
-        // Text improvements -> text_optimizations
-        // Add video effects -> advantage_plus_creative
-        // Show summaries -> product_extensions
-        // Relevant comments -> inline_comment
-        // Enhance CTA -> enhance_cta
-        // Reveal details over time -> image_animation
-        // Show spotlights -> site_extensions
-        creativeFeaturesSpec.video_auto_crop = { enroll_status: s("visual_touch_ups") };
-        creativeFeaturesSpec.text_optimizations = { enroll_status: s("text_improvements") };
-        creativeFeaturesSpec.advantage_plus_creative = { enroll_status: s("add_video_effects") };
-        creativeFeaturesSpec.product_extensions = { enroll_status: s("show_summaries") };
-        creativeFeaturesSpec.inline_comment = { enroll_status: s("relevant_comments") };
-        creativeFeaturesSpec.enhance_cta = { enroll_status: s("enhance_cta") };
-        creativeFeaturesSpec.image_animation = { enroll_status: s("reveal_details") };
-        creativeFeaturesSpec.site_extensions = { enroll_status: s("show_spotlights") };
-      } else {
-        // Image creative mapping for all UI toggles:
-        // Add overlays -> image_uncrop
-        // Visual touch-ups -> image_touchups
-        // Text improvements -> text_optimizations
-        // Show summaries -> product_extensions
-        // Relevant comments -> inline_comment
-        // Enhance CTA -> enhance_cta
-        // Adjust brightness and contrast -> image_brightness_and_contrast
-        // Reveal details over time -> image_animation
-        // Show spotlights -> site_extensions
-        creativeFeaturesSpec.image_uncrop = { enroll_status: s("add_overlays") };
-        creativeFeaturesSpec.image_touchups = { enroll_status: s("visual_touch_ups") };
-        if (enh.add_music === true) {
-          console.log("[MetaAdsApi] add_music requested, but music_overlay is not supported for this creative API flow. Skipping.");
-        }
-        creativeFeaturesSpec.text_optimizations = { enroll_status: s("text_improvements") };
-        creativeFeaturesSpec.product_extensions = { enroll_status: s("show_summaries") };
-        creativeFeaturesSpec.inline_comment = { enroll_status: s("relevant_comments") };
-        creativeFeaturesSpec.enhance_cta = { enroll_status: s("enhance_cta") };
-        creativeFeaturesSpec.image_brightness_and_contrast = { enroll_status: s("brightness_and_contrast") };
-        creativeFeaturesSpec.image_animation = { enroll_status: s("reveal_details") };
-        creativeFeaturesSpec.site_extensions = { enroll_status: s("show_spotlights") };
+      let { spec: creativeFeaturesSpec, ignoredToggles } = this.buildStrictCreativeFeaturesSpec(enh, isVideo);
+      if (ignoredToggles.length > 0) {
+        console.log("[MetaAdsApi] Strict mode ignored unsupported toggles for this creative type:", ignoredToggles.join(", "));
       }
-
-      const hasCreativeFeatures = Object.keys(creativeFeaturesSpec).length > 0;
-      const degreesOfFreedomSpec = hasCreativeFeatures
-        ? { creative_features_spec: creativeFeaturesSpec }
-        : {};
 
       console.log('[MetaAdsApi] object_story_spec:', JSON.stringify(objectStorySpec, null, 2));
       console.log('[MetaAdsApi] asset_feed_spec:', JSON.stringify(assetFeedSpec, null, 2));
-      if (hasCreativeFeatures) {
-        console.log('[MetaAdsApi] degrees_of_freedom_spec:', JSON.stringify(degreesOfFreedomSpec, null, 2));
-      } else {
-        console.log('[MetaAdsApi] Skipping creative_features_spec for video creative (not supported via API)');
-      }
+      const sendCreativeRequest = async (
+        featuresSpec: Record<string, { enroll_status: "OPT_IN" | "OPT_OUT" }>,
+        attemptLabel: string
+      ) => {
+        const hasCreativeFeatures = Object.keys(featuresSpec).length > 0;
+        const degreesOfFreedomSpec = hasCreativeFeatures
+          ? { creative_features_spec: featuresSpec }
+          : {};
 
-      const requestBody = new URLSearchParams();
-      requestBody.append('name', params.name);
-      requestBody.append('object_story_spec', JSON.stringify(objectStorySpec));
-      requestBody.append('asset_feed_spec', JSON.stringify(assetFeedSpec));
-      if (hasCreativeFeatures) {
-        requestBody.append('degrees_of_freedom_spec', JSON.stringify(degreesOfFreedomSpec));
-      }
-      requestBody.append('access_token', this.accessToken!);
-
-      const response = await fetch(
-        `${META_GRAPH_URL}/${adAccountFormatted}/adcreatives`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: requestBody.toString(),
+        if (hasCreativeFeatures) {
+          console.log(`[MetaAdsApi] ${attemptLabel} degrees_of_freedom_spec:`, JSON.stringify(degreesOfFreedomSpec, null, 2));
+        } else {
+          console.log(`[MetaAdsApi] ${attemptLabel} without creative_features_spec`);
         }
-      );
 
-      const data = await response.json();
+        const requestBody = new URLSearchParams();
+        requestBody.append('name', params.name);
+        requestBody.append('object_story_spec', JSON.stringify(objectStorySpec));
+        requestBody.append('asset_feed_spec', JSON.stringify(assetFeedSpec));
+        if (hasCreativeFeatures) {
+          requestBody.append('degrees_of_freedom_spec', JSON.stringify(degreesOfFreedomSpec));
+        }
+        requestBody.append('access_token', this.accessToken!);
+
+        const response = await fetch(
+          `${META_GRAPH_URL}/${adAccountFormatted}/adcreatives`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: requestBody.toString(),
+          }
+        );
+        return response.json();
+      };
+
+      let data = await sendCreativeRequest(creativeFeaturesSpec, "initial request");
+
+      if (data?.error && Object.keys(creativeFeaturesSpec).length > 0) {
+        const allowedKeys = this.extractAllowedCreativeFeatureKeys(data.error);
+        if (allowedKeys && allowedKeys.size > 0) {
+          const filteredSpec = Object.fromEntries(
+            Object.entries(creativeFeaturesSpec).filter(([key]) => allowedKeys.has(key.toUpperCase()))
+          ) as Record<string, { enroll_status: "OPT_IN" | "OPT_OUT" }>;
+          const removedKeys = Object.keys(creativeFeaturesSpec).filter((key) => !allowedKeys.has(key.toUpperCase()));
+
+          if (removedKeys.length > 0) {
+            console.log(
+              "[MetaAdsApi] Meta returned an allow-list for creative features. Retrying with filtered keys only.",
+              {
+                removedKeys,
+                allowedKeys: Array.from(allowedKeys),
+              }
+            );
+            creativeFeaturesSpec = filteredSpec;
+            data = await sendCreativeRequest(creativeFeaturesSpec, "allow-list retry");
+          }
+        }
+      }
+
       console.log('[MetaAdsApi] createSingleCreativeWithTextVariations response:', JSON.stringify(data, null, 2));
 
       if (data.error) {

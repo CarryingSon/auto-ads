@@ -867,17 +867,23 @@ export default function BulkAds() {
           visual_touch_ups: "visual_touch_ups",
           text_generation: "text_improvements",
           text_improvements: "text_improvements",
+          text_optimizations: "text_improvements",
           image_expansion: "add_overlays",
           add_overlays: "add_overlays",
+          add_text_overlay: "add_overlays",
           image_brightness_and_contrast: "brightness_and_contrast",
           brightness_and_contrast: "brightness_and_contrast",
           image_animation: "reveal_details",
           reveal_details: "reveal_details",
+          reveal_details_over_time: "reveal_details",
           show_summaries: "show_summaries",
+          show_summary: "show_summaries",
           add_catalog_items: "show_summaries",
           show_spotlights: "show_spotlights",
+          video_highlights: "show_spotlights",
           add_site_links: "show_spotlights",
           music_overlay: "add_music",
+          music_generation: "add_music",
           add_music: "add_music",
         };
         const oldToVideoMap: Record<string, keyof VideoEnhancements> = {
@@ -886,14 +892,18 @@ export default function BulkAds() {
           visual_touch_ups: "visual_touch_ups",
           text_generation: "text_improvements",
           text_improvements: "text_improvements",
+          text_optimizations: "text_improvements",
           advantage_plus_creative: "add_video_effects",
           dynamic_media: "add_video_effects",
           add_catalog_items: "show_summaries",
           show_summaries: "show_summaries",
+          show_summary: "show_summaries",
           add_site_links: "show_spotlights",
           show_spotlights: "show_spotlights",
+          video_highlights: "show_spotlights",
           translate_text: "reveal_details",
           reveal_details: "reveal_details",
+          reveal_details_over_time: "reveal_details",
           add_video_effects: "add_video_effects",
         };
         setCreativeEnhancements(prev => {
@@ -2553,6 +2563,8 @@ export default function BulkAds() {
     startGlobalSync({ campaignId: selectedCampaignId, driveUrl: folderUrl.trim(), mode: driveMode });
   };
 
+  const isSyncInProgress = syncStep > 0 && syncStep < 5;
+
   const renderStep1 = () => (
     <div className="space-y-4">
       {/* Campaign Selection - separate glass-panel */}
@@ -2639,7 +2651,9 @@ export default function BulkAds() {
 
         <div className="grid grid-cols-2 gap-3 mb-4">
           <button
-            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "private" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"}`}
+            type="button"
+            disabled={isSyncInProgress}
+            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "private" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
             onClick={() => setDriveMode("private")}
             data-testid="radio-drive-private"
           >
@@ -2658,7 +2672,9 @@ export default function BulkAds() {
           </button>
 
           <button
-            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "public" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"}`}
+            type="button"
+            disabled={isSyncInProgress}
+            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "public" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
             onClick={() => setDriveMode("public")}
             data-testid="radio-drive-public"
           >
@@ -2760,9 +2776,10 @@ export default function BulkAds() {
             type="button"
             role="switch"
             aria-checked={geoSplit}
+            disabled={isSyncInProgress}
             data-testid="toggle-geo-split"
             onClick={() => setGeoSplit(!geoSplit)}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${geoSplit ? 'bg-[#1877F2]' : 'bg-slate-200 dark:bg-slate-700'}`}
+            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ${geoSplit ? 'bg-[#1877F2]' : 'bg-slate-200 dark:bg-slate-700'} ${isSyncInProgress ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
           >
             <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${geoSplit ? 'translate-x-4' : 'translate-x-0'}`} />
           </button>
@@ -3615,6 +3632,11 @@ export default function BulkAds() {
                 >
                   Reset Defaults
                 </button>
+              </div>
+              <div className="px-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Meta may auto-disable unsupported enhancements based on creative type, placements, and account eligibility (for example, Add music on image creatives).
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-5">
