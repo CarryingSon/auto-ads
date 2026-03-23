@@ -1532,19 +1532,24 @@ export default function BulkAds() {
       return data;
     };
 
-    activeSyncStore.promise = run().then(data => {
-      if (!activeSyncStore.resultApplied) {
-        activeSyncStore.resultApplied = true;
-        console.log("[sync] directly applying result, adSets:", data?.adSets?.length);
-        applySyncResultRef.current(data);
-        toast({ title: "Sync successful", description: `Found ${data.adSets?.length || 0} DCT folders` });
-      }
-    }).catch(err => {
-      activeSyncStore.syncStep = 0;
-      activeSyncStore.error = err?.message || "Sync failed";
-      activeSyncStore.promise = null;
-      notifySyncListeners();
-    });
+    activeSyncStore.promise = run()
+      .then(data => {
+        if (!activeSyncStore.resultApplied) {
+          activeSyncStore.resultApplied = true;
+          console.log("[sync] directly applying result, adSets:", data?.adSets?.length);
+          applySyncResultRef.current(data);
+          toast({ title: "Sync successful", description: `Found ${data.adSets?.length || 0} DCT folders` });
+        }
+      })
+      .catch(err => {
+        activeSyncStore.syncStep = 0;
+        activeSyncStore.error = err?.message || "Sync failed";
+        notifySyncListeners();
+      })
+      .finally(() => {
+        // Important: clear settled promise so a new sync can start without page refresh.
+        activeSyncStore.promise = null;
+      });
   };
 
   const applySyncResultRef = useRef(applySyncResult);
