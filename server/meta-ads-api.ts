@@ -2829,18 +2829,43 @@ export class MetaAdsApi {
       const s = (key: string) => (enh[key] ?? false) ? "OPT_IN" : "OPT_OUT";
       const creativeFeaturesSpec: Record<string, any> = {};
       if (isVideo) {
+        // Video creative mapping for all UI toggles:
+        // Visual touch-ups -> video_auto_crop
+        // Text improvements -> text_optimizations
+        // Add video effects -> advantage_plus_creative
+        // Show summaries -> product_extensions
+        // Relevant comments -> inline_comment
+        // Enhance CTA -> enhance_cta
+        // Reveal details over time -> image_animation
+        // Show spotlights -> site_extensions
         creativeFeaturesSpec.video_auto_crop = { enroll_status: s("visual_touch_ups") };
         creativeFeaturesSpec.text_optimizations = { enroll_status: s("text_improvements") };
+        creativeFeaturesSpec.advantage_plus_creative = { enroll_status: s("add_video_effects") };
         creativeFeaturesSpec.product_extensions = { enroll_status: s("show_summaries") };
         creativeFeaturesSpec.inline_comment = { enroll_status: s("relevant_comments") };
         creativeFeaturesSpec.enhance_cta = { enroll_status: s("enhance_cta") };
         creativeFeaturesSpec.image_animation = { enroll_status: s("reveal_details") };
         creativeFeaturesSpec.site_extensions = { enroll_status: s("show_spotlights") };
       } else {
+        // Image creative mapping for all UI toggles:
+        // Add overlays -> image_uncrop
+        // Visual touch-ups -> image_touchups
+        // Add music -> music_overlay
+        // Text improvements -> text_optimizations
+        // Show summaries -> product_extensions
+        // Relevant comments -> inline_comment
+        // Enhance CTA -> enhance_cta
+        // Adjust brightness and contrast -> image_brightness_and_contrast
+        // Reveal details over time -> image_animation
+        // Show spotlights -> site_extensions
+        creativeFeaturesSpec.image_uncrop = { enroll_status: s("add_overlays") };
+        creativeFeaturesSpec.image_touchups = { enroll_status: s("visual_touch_ups") };
+        creativeFeaturesSpec.music_overlay = { enroll_status: s("add_music") };
         creativeFeaturesSpec.text_optimizations = { enroll_status: s("text_improvements") };
         creativeFeaturesSpec.product_extensions = { enroll_status: s("show_summaries") };
         creativeFeaturesSpec.inline_comment = { enroll_status: s("relevant_comments") };
         creativeFeaturesSpec.enhance_cta = { enroll_status: s("enhance_cta") };
+        creativeFeaturesSpec.image_brightness_and_contrast = { enroll_status: s("brightness_and_contrast") };
         creativeFeaturesSpec.image_animation = { enroll_status: s("reveal_details") };
         creativeFeaturesSpec.site_extensions = { enroll_status: s("show_spotlights") };
       }

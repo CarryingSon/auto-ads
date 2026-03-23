@@ -2326,13 +2326,8 @@ export default function BulkAds() {
             setLaunchMode(draft.launchMode || "now");
             setScheduledDate(draft.scheduledDate || "");
             setScheduledTime(draft.scheduledTime || "09:00");
-            // Map legacy values
-            const legacyMode = draft.adUploadMode as string | undefined;
-            if (legacyMode === "single") {
-              setAdUploadMode("single");
-            } else {
-              setAdUploadMode("dynamic"); // Default
-            }
+            // Multi Single mode is deprecated; always use Dynamic format.
+            setAdUploadMode("dynamic");
             // Only restore step if not launching/complete
             if (draft.currentStep <= 4) {
               setCurrentStep(draft.currentStep);
@@ -3566,21 +3561,15 @@ export default function BulkAds() {
                 <span className="material-symbols-outlined mr-2 text-muted-foreground">style</span>
                 Ad Format
               </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setAdUploadMode("dynamic")}
-                  className={`glass-card rounded-xl p-4 text-left transition-all duration-300 h-full ${
-                    adUploadMode === "dynamic" ? "active" : "opacity-80"
-                  }`}
+              <div className="grid grid-cols-1 gap-4">
+                <div
+                  className="glass-card rounded-xl p-4 text-left transition-all duration-300 h-full active"
                   data-testid="button-format-dynamic"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2.5">
-                      <div className={`w-5 h-5 rounded-full border flex items-center justify-center shadow-sm ${
-                        adUploadMode === "dynamic" ? "border-blue-200 bg-white dark:bg-slate-800" : "border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-white/10"
-                      }`}>
-                        {adUploadMode === "dynamic" && <div className="w-2.5 h-2.5 rounded-full bg-[#1877F2] shadow-[0_0_8px_#1877F2]" />}
+                      <div className="w-5 h-5 rounded-full border flex items-center justify-center shadow-sm border-blue-200 bg-white dark:bg-slate-800">
+                        <div className="w-2.5 h-2.5 rounded-full bg-[#1877F2] shadow-[0_0_8px_#1877F2]" />
                       </div>
                       <span className="text-sm font-semibold text-foreground">Dynamic</span>
                     </div>
@@ -3601,40 +3590,7 @@ export default function BulkAds() {
                       Does not fill ad limit
                     </li>
                   </ul>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setAdUploadMode("single")}
-                  className={`glass-card rounded-xl p-4 text-left transition-all duration-300 h-full ${
-                    adUploadMode === "single" ? "active" : "opacity-80"
-                  }`}
-                  data-testid="button-format-single"
-                >
-                  <div className="flex items-center space-x-2.5 mb-2">
-                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${
-                      adUploadMode === "single" ? "border-blue-200 bg-white dark:bg-slate-800" : "border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-white/10"
-                    }`}>
-                      {adUploadMode === "single" && <div className="w-2.5 h-2.5 rounded-full bg-[#1877F2] shadow-[0_0_8px_#1877F2]" />}
-                    </div>
-                    <span className="text-sm font-semibold text-foreground">Multi Single</span>
-                  </div>
-                  <p className="text-[13px] text-muted-foreground mb-2 pl-[30px]">1 ad for each asset x primary text.</p>
-                  <ul className="space-y-1.5 pl-[30px]">
-                    <li className="text-[13px] text-muted-foreground flex items-center">
-                      <span className="material-symbols-outlined text-[14px] text-emerald-500 mr-1.5">check_circle</span>
-                      Full statistics for each text
-                    </li>
-                    <li className="text-[13px] text-muted-foreground flex items-center">
-                      <span className="material-symbols-outlined text-[14px] text-emerald-500 mr-1.5">check_circle</span>
-                      Detailed performance tracking
-                    </li>
-                    <li className="text-[13px] text-[#1877F2] dark:text-blue-300 flex items-center">
-                      <span className="material-symbols-outlined text-[14px] text-[#1877F2] mr-1.5">warning</span>
-                      Creates many ads - watch limit
-                    </li>
-                  </ul>
-                </button>
+                </div>
               </div>
             </div>
 

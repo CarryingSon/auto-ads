@@ -308,9 +308,6 @@ export default function History() {
                 {queueJobs.map((job) => {
                   const isExpanded = expandedQueueJob === job.id;
                   const progress = getProgressPercent(job);
-                  const defaults = job.defaultSettings as any;
-                  const budgetAmount = defaults?.budgetAmount ?? defaults?.dailyBudget;
-                  const budgetType = defaults?.budgetType || "DAILY";
                   
                   return (
                     <div key={job.id} data-testid={`queue-job-${job.id}`}>
@@ -345,12 +342,6 @@ export default function History() {
                             <span className="material-symbols-outlined text-[14px]">folder</span>
                             {job.totalAdSets || 0} ad sets
                           </span>
-                          {budgetAmount && (
-                            <span className="flex items-center gap-1" data-testid={`queue-budget-${job.id}`}>
-                              <span className="material-symbols-outlined text-[14px]">payments</span>
-                              {budgetAmount}€{budgetType === "LIFETIME" ? " lifetime" : "/day"}
-                            </span>
-                          )}
                           <Button
                             size="icon"
                             variant="ghost"
@@ -386,13 +377,7 @@ export default function History() {
                               </div>
                             )}
 
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <div>
-                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Campaign</p>
-                                <p className="text-xs font-medium text-slate-700 dark:text-slate-300" data-testid={`detail-campaign-${job.id}`}>
-                                  {job.campaignName || "—"}
-                                </p>
-                              </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                               <div>
                                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Ad Sets</p>
                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-300" data-testid={`detail-adsets-${job.id}`}>
@@ -406,14 +391,16 @@ export default function History() {
                                 </p>
                               </div>
                               <div>
-                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Budget</p>
-                                <p className="text-xs font-medium text-slate-700 dark:text-slate-300" data-testid={`detail-budget-${job.id}`}>
-                                  {budgetAmount ? `${budgetAmount}€${budgetType === "LIFETIME" ? " lifetime" : "/day"}` : "—"}
+                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Started</p>
+                                <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                                  {new Date(job.createdAt).toLocaleString('en-US', {
+                                    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+                                  })}
                                 </p>
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
                                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Upload Mode</p>
                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -426,20 +413,6 @@ export default function History() {
                                   {job.driveRootFolderName || "—"}
                                 </p>
                               </div>
-                              <div>
-                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Ad Account</p>
-                                <p className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">
-                                  {job.adAccountId || "—"}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Started</p>
-                                <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                                  {new Date(job.createdAt).toLocaleString('en-US', {
-                                    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
-                                  })}
-                                </p>
-                              </div>
                             </div>
 
                             {job.errorMessage && (
@@ -450,10 +423,14 @@ export default function History() {
 
                             {job.logs && (job.logs as string[]).length > 0 && (
                               <div>
-                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-1">Recent Logs</p>
-                                <div className="bg-slate-100 dark:bg-slate-800/50 rounded-md p-2 max-h-24 overflow-y-auto space-y-0.5">
-                                  {(job.logs as string[]).slice(-5).map((log, i) => (
-                                    <p key={i} className="text-[10px] text-slate-600 dark:text-slate-400 font-mono truncate">{log}</p>
+                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-1">
+                                  Terminal Output ({(job.logs as string[]).length} lines)
+                                </p>
+                                <div className="bg-slate-950 text-slate-100 rounded-md p-3 max-h-72 overflow-y-auto border border-slate-700/70">
+                                  {(job.logs as string[]).map((log, i) => (
+                                    <p key={i} className="text-[11px] leading-5 font-mono whitespace-pre-wrap break-words">
+                                      {log}
+                                    </p>
                                   ))}
                                 </div>
                               </div>
@@ -680,9 +657,6 @@ export default function History() {
                             <div className="space-y-2">
                               {batch.jobs.map((job) => {
                                 const duration = formatDuration(job.createdAt, job.completedAt);
-                                const defaults = job.defaultSettings as any;
-                                const budgetAmount = defaults?.budgetAmount ?? defaults?.dailyBudget;
-                                const budgetType = defaults?.budgetType || "DAILY";
                                 const actId = job.adAccountId?.replace(/^act_/, '') || '';
                                 const metaUrl = actId && job.campaignId
                                   ? `https://www.facebook.com/adsmanager/manage/campaigns?act=${actId}&selected_campaign_ids=${job.campaignId}`
@@ -720,7 +694,7 @@ export default function History() {
                                       </a>
                                     </div>
 
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-x-4 gap-y-2">
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-2">
                                       <div>
                                         <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Creatives</p>
                                         <div className="flex items-center gap-1.5">
@@ -758,12 +732,6 @@ export default function History() {
                                         <p className="flex items-center gap-1 text-xs font-medium text-slate-700 dark:text-slate-300" data-testid={`batch-duration-${job.id}`}>
                                           <Clock className="h-3 w-3 text-slate-400" />
                                           {duration}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">Budget</p>
-                                        <p className="text-xs font-medium text-slate-700 dark:text-slate-300" data-testid={`batch-budget-${job.id}`}>
-                                          {budgetAmount ? `${budgetAmount}€${budgetType === "LIFETIME" ? " lifetime" : "/day"}` : "—"}
                                         </p>
                                       </div>
                                     </div>
