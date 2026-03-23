@@ -22,6 +22,7 @@ import {
   metaAccountCache,
   bulkUploadJobs,
   adsets,
+  billingPayments,
 } from "../shared/schema.js";
 import { eq, desc, and, or, sql } from "drizzle-orm";
 import {
@@ -36,6 +37,7 @@ import {
   type LaunchQueuePayload,
 } from "./job-queue.js";
 import {
+  backfillBillingPaymentsFromStripeForUser,
   FREE_MONTHLY_UPLOAD_LIMIT,
   createCheckoutSessionForUser,
   createPortalSessionForUser,
@@ -486,7 +488,8 @@ export async function registerRoutes(
           await syncSubscriptionFromStripeEvent(event.data.object as any);
           break;
         }
-        case "invoice.payment_succeeded": {
+        case "invoice.payment_succeeded":
+        case "invoice.paid": {
           await recordInvoicePaymentFromStripeEvent(event.data.object as any);
           break;
         }
@@ -4307,10 +4310,27 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      const { db } = await import("./db.js");
-      const { billingPayments } = await import("../shared/schema.js");
-      const { eq, desc } = await import("drizzle-orm");
-      const payments = await db.select().from(billingPayments).where(eq(billingPayments.userId, userId)).orderBy(desc(billingPayments.periodStart));
+
+      let payments = await db
+        .select()
+        .from(billingPayments)
+        .where(eq(billingPayments.userId, userId))
+        .orderBy(desc(billingPayments.periodStart));
+
+      // One-time lazy sync for users with historical Stripe invoices before webhook setup.
+      if (payments.length === 0) {
+        try {
+          await backfillBillingPaymentsFromStripeForUser({ userId, maxInvoices: 100 });
+          payments = await db
+            .select()
+            .from(billingPayments)
+            .where(eq(billingPayments.userId, userId))
+            .orderBy(desc(billingPayments.periodStart));
+        } catch (syncError) {
+          console.warn("[Billing] Lazy payment backfill failed:", syncError);
+        }
+      }
+
       res.json(payments);
     } catch (error) {
       console.error("Error fetching billing payments:", error);

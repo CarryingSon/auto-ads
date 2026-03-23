@@ -527,6 +527,9 @@ export async function recordInvoicePaymentFromStripeEvent(
   const periodEndUnix = linePeriod?.end ?? (invoice as any).period_end ?? invoice.created;
 
   const amountPaid = Number(invoice.amount_paid ?? invoice.amount_due ?? 0) / 100;
+  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+    return;
+  }
   const paymentRecord: InsertBillingPayment = {
     userId,
     stripeInvoiceId,
@@ -545,6 +548,71 @@ export async function recordInvoicePaymentFromStripeEvent(
     .onConflictDoNothing({
       target: billingPayments.stripeInvoiceId,
     });
+}
+
+export async function backfillBillingPaymentsFromStripeForUser(params: {
+  userId: string;
+  maxInvoices?: number;
+}): Promise<number> {
+  const stripe = getStripe();
+  const subscription = await getBillingSubscriptionForUser(params.userId);
+  const customerId = subscription?.stripeCustomerId;
+  if (!customerId) return 0;
+
+  const maxInvoices = Math.max(1, Math.min(params.maxInvoices ?? 100, 500));
+  let processed = 0;
+  let cursor: string | undefined;
+
+  while (processed < maxInvoices) {
+    const remaining = maxInvoices - processed;
+    const invoices = await stripe.invoices.list({
+      customer: customerId,
+      status: "paid",
+      limit: Math.min(100, remaining),
+      ...(cursor ? { starting_after: cursor } : {}),
+    });
+
+    if (!invoices.data.length) break;
+
+    for (const invoice of invoices.data) {
+      const amountPaid = Number(invoice.amount_paid ?? invoice.amount_due ?? 0) / 100;
+      if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+        continue;
+      }
+
+      const line = invoice.lines?.data?.[0];
+      const linePeriod = line?.period;
+      const periodStartUnix = linePeriod?.start ?? (invoice as any).period_start ?? invoice.created;
+      const periodEndUnix = linePeriod?.end ?? (invoice as any).period_end ?? invoice.created;
+      const paymentRecord: InsertBillingPayment = {
+        userId: params.userId,
+        stripeInvoiceId: invoice.id,
+        amount: amountPaid,
+        currency: normalizeInvoiceCurrency(invoice.currency),
+        status: normalizeInvoiceStatus(invoice.status),
+        periodStart: new Date(Number(periodStartUnix) * 1000),
+        periodEnd: new Date(Number(periodEndUnix) * 1000),
+        planType: "pro",
+        invoiceUrl: invoice.invoice_pdf || invoice.hosted_invoice_url || null,
+      };
+
+      await db
+        .insert(billingPayments)
+        .values(paymentRecord)
+        .onConflictDoNothing({
+          target: billingPayments.stripeInvoiceId,
+        });
+
+      processed += 1;
+      if (processed >= maxInvoices) break;
+    }
+
+    if (!invoices.has_more) break;
+    cursor = invoices.data[invoices.data.length - 1]?.id;
+    if (!cursor) break;
+  }
+
+  return processed;
 }
 
 export function verifyStripeWebhookSignature(params: {
