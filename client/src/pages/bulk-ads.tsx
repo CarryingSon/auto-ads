@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { SiFacebook, SiInstagram } from "react-icons/si";
 import { TypewriterProgressBar } from "@/components/typewriter-progress-bar";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -915,6 +915,17 @@ export default function BulkAds() {
   });
 
   const metaCampaigns = campaignsData?.data || [];
+  const isCampaignActive = (campaign: { effective_status?: string; status?: string }) =>
+    campaign.effective_status === "ACTIVE" || campaign.status === "ACTIVE";
+
+  const sortedMetaCampaigns = useMemo(() => {
+    return [...metaCampaigns].sort((a, b) => {
+      const aActive = isCampaignActive(a) ? 1 : 0;
+      const bActive = isCampaignActive(b) ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      return (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" });
+    });
+  }, [metaCampaigns]);
   
   // Fetch ad sets for import settings feature
   const {
@@ -2463,9 +2474,9 @@ export default function BulkAds() {
               <SelectValue placeholder={campaignsLoading ? "Loading campaigns..." : "Select campaign"} />
             </SelectTrigger>
             <SelectContent>
-              {metaCampaigns.map((campaign) => {
+              {sortedMetaCampaigns.map((campaign) => {
                 const isCBO = !!(campaign.daily_budget || campaign.lifetime_budget);
-                const isActive = campaign.effective_status === "ACTIVE" || campaign.status === "ACTIVE";
+                const isActive = isCampaignActive(campaign);
                 return (
                   <SelectItem key={campaign.id} value={campaign.id}>
                     <span className="flex items-center gap-1.5 text-[13px]">
@@ -2484,9 +2495,9 @@ export default function BulkAds() {
           </Select>
 
           {!selectedCampaignId && (
-            <div className="rounded-xl border border-amber-200 dark:border-amber-800 p-3 bg-amber-50/50 dark:bg-amber-950/30 flex items-center gap-2">
-              <span className="material-symbols-outlined text-amber-600 text-lg">warning</span>
-              <span className="text-sm text-amber-700 dark:text-amber-300">
+            <div className="rounded-xl border border-[#1877F2]/30 dark:border-[#1877F2]/50 p-3 bg-[#1877F2]/10 dark:bg-[#1877F2]/20 flex items-center gap-2">
+              <span className="material-symbols-outlined text-[#1877F2] text-lg">warning</span>
+              <span className="text-sm text-[#1556b6] dark:text-blue-200">
                 Select a campaign to continue
               </span>
             </div>
@@ -2694,13 +2705,13 @@ export default function BulkAds() {
             <div className="text-[11px] text-muted-foreground">Creatives</div>
           </div>
           <div className="text-center">
-            <div className={`text-base font-semibold ${validCount === adSets.length ? "text-green-600" : "text-amber-600"}`}>
+            <div className={`text-base font-semibold ${validCount === adSets.length ? "text-green-600" : "text-[#1877F2]"}`}>
               {validCount}/{adSets.length}
             </div>
             <div className="text-[11px] text-muted-foreground">Valid</div>
           </div>
           <div className="text-center">
-            <div className={`text-base font-semibold ${withDocx === adSets.length ? "text-green-600" : "text-amber-600"}`}>
+            <div className={`text-base font-semibold ${withDocx === adSets.length ? "text-green-600" : "text-[#1877F2]"}`}>
               {withDocx}/{adSets.length}
             </div>
             <div className="text-[11px] text-muted-foreground">With text</div>
@@ -2708,10 +2719,10 @@ export default function BulkAds() {
         </div>
         
         {withDocx < adSets.length && adSets.length > 0 && (
-          <div className="rounded-xl border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20 p-4 space-y-3" data-testid="global-docx-upload-card">
+          <div className="rounded-xl border border-dashed border-[#1877F2]/35 dark:border-[#1877F2]/55 bg-[#1877F2]/8 dark:bg-[#1877F2]/18 p-4 space-y-3" data-testid="global-docx-upload-card">
             <div className="flex items-center gap-2">
-              <Upload className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-              <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
+              <Upload className="h-4 w-4 text-[#1877F2] dark:text-blue-300" />
+              <span className="text-sm font-medium text-[#1556b6] dark:text-blue-200">
                 Upload ad copy for missing ad sets
               </span>
               <span className="text-xs text-muted-foreground ml-auto">
@@ -2952,8 +2963,8 @@ export default function BulkAds() {
         </div>
 
         {invalidAdSets.length > 0 && (
-          <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3">
-            <p className="text-sm text-amber-800 dark:text-amber-200">
+          <div className="rounded-md bg-[#1877F2]/10 dark:bg-[#1877F2]/20 border border-[#1877F2]/30 dark:border-[#1877F2]/50 p-3">
+            <p className="text-sm text-[#1556b6] dark:text-blue-200">
               <AlertTriangle className="h-4 w-4 inline mr-1" />
               {invalidAdSets.length} Ad Sets have errors and will be skipped.
             </p>
@@ -2995,12 +3006,12 @@ export default function BulkAds() {
                   <SelectValue placeholder={campaignsLoading ? "Loading campaigns..." : "Choose a campaign"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {metaCampaigns.length === 0 ? (
+                  {sortedMetaCampaigns.length === 0 ? (
                     <SelectItem value="none" disabled>No campaigns found</SelectItem>
                   ) : (
-                    metaCampaigns.map((campaign) => {
+                    sortedMetaCampaigns.map((campaign) => {
                       const isCBO = !!(campaign.daily_budget || campaign.lifetime_budget);
-                      const isActive = campaign.effective_status === "ACTIVE" || campaign.status === "ACTIVE";
+                      const isActive = isCampaignActive(campaign);
                       return (
                         <SelectItem key={campaign.id} value={campaign.id}>
                           <div className="flex items-center gap-2">
@@ -3224,7 +3235,7 @@ export default function BulkAds() {
                   <p className="text-sm text-muted-foreground">Loading...</p>
                 </div>
               ) : (
-                <p className={`text-sm font-medium truncate ${selectedPage ? "" : "text-amber-600"}`}>
+                <p className={`text-sm font-medium truncate ${selectedPage ? "" : "text-[#1877F2]"}`}>
                   {selectedPage?.name || "Not set"}
                 </p>
               )}
@@ -3249,7 +3260,7 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Pixel</p>
-              <p className={`text-sm font-medium truncate ${effectiveSettings.pixelId ? (effectiveSettings.isImported && importedPromotedObject?.pixel_id ? "text-[#1877F2]" : "") : "text-amber-600"}`}>
+              <p className={`text-sm font-medium truncate ${effectiveSettings.pixelId ? (effectiveSettings.isImported && importedPromotedObject?.pixel_id ? "text-[#1877F2]" : "") : "text-[#1877F2]"}`}>
                 {effectiveSettings.isImported && importedPromotedObject?.pixel_id 
                   ? effectiveSettings.pixelId 
                   : (adAccountSettingsData?.settings?.pixelName || effectiveSettings.pixelId || "Not set")}
@@ -3263,7 +3274,7 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Website URL</p>
-              <p className={`text-sm font-medium truncate ${!(defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl) ? "text-amber-600" : (importedWebsiteUrl && effectiveSettings.isImported ? "text-[#1877F2]" : "")}`}>
+              <p className={`text-sm font-medium truncate ${!(defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl) ? "text-[#1877F2]" : (importedWebsiteUrl && effectiveSettings.isImported ? "text-[#1877F2]" : "")}`}>
                 {defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl || "Not set"}
               </p>
             </div>
@@ -3504,8 +3515,8 @@ export default function BulkAds() {
                       <span className="material-symbols-outlined text-[14px] text-emerald-500 mr-1.5">check_circle</span>
                       Detailed performance tracking
                     </li>
-                    <li className="text-[13px] text-amber-600 dark:text-amber-400 flex items-center">
-                      <span className="material-symbols-outlined text-[14px] text-amber-500 mr-1.5">warning</span>
+                    <li className="text-[13px] text-[#1877F2] dark:text-blue-300 flex items-center">
+                      <span className="material-symbols-outlined text-[14px] text-[#1877F2] mr-1.5">warning</span>
                       Creates many ads - watch limit
                     </li>
                   </ul>
@@ -3682,7 +3693,7 @@ export default function BulkAds() {
             </div>
 
             {!selectedPageId && (
-              <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-800 dark:text-amber-200">
+              <div className="rounded-md border border-[#1877F2]/30 dark:border-[#1877F2]/50 bg-[#1877F2]/10 dark:bg-[#1877F2]/20 p-3 text-sm text-[#1556b6] dark:text-blue-200">
                 Select a Facebook Page in the sidebar to enable launch.
               </div>
             )}
@@ -3813,7 +3824,7 @@ export default function BulkAds() {
               <div className="w-5 h-5 border-2 border-[#1877F2]/10 border-t-[#1877F2] rounded-full animate-spin" style={{ filter: "drop-shadow(0 0 4px #1877F2)" }} />
             ) : isComplete ? (
               hasWarnings ? (
-                <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                <AlertTriangle className="h-5 w-5 text-[#1877F2]" />
               ) : (
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               )
@@ -4019,7 +4030,7 @@ export default function BulkAds() {
                         className={`flex gap-2 ${
                           isError ? "text-red-400" :
                           isSuccess ? "text-emerald-400" :
-                          isWarning ? "text-yellow-400" :
+                          isWarning ? "text-blue-400" :
                           isAction ? "text-blue-400" :
                           "text-slate-400"
                         }`}
@@ -4354,7 +4365,7 @@ export default function BulkAds() {
             {currentStep < 4 && launchStatus === "idle" && (
               <div className="flex items-center gap-3">
                 {currentStep === 3 && getStep3Errors().length > 0 && (
-                  <div className="text-xs text-amber-600 dark:text-amber-400 text-right max-w-[300px]" data-testid="text-step3-errors">
+                  <div className="text-xs text-[#1877F2] dark:text-blue-300 text-right max-w-[300px]" data-testid="text-step3-errors">
                     {getStep3Errors().map((err, i) => (
                       <div key={i}>{err}</div>
                     ))}
@@ -4672,8 +4683,8 @@ Your description`}
 
             <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-amber-500 text-lg">folder_open</span>
+                <div className="w-8 h-8 rounded-lg bg-[#1877F2]/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[#1877F2] text-lg">folder_open</span>
                 </div>
                 <div>
                   <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Folder Structure</h4>
@@ -4682,15 +4693,15 @@ Your description`}
               </div>
               <div className="rounded-lg bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 p-4 font-mono text-xs text-slate-600 dark:text-slate-400 leading-relaxed overflow-x-auto">
                 <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-semibold mb-1">
-                  <span className="material-symbols-outlined text-sm text-amber-500">folder</span>
+                  <span className="material-symbols-outlined text-sm text-[#1877F2]">folder</span>
                   Campaign Folder/
                 </div>
                 <div className="ml-5 space-y-0.5">
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-amber-400">folder</span>DCT 161 - Spring_Sale_Images/</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 161 - Spring_Sale_Images/</div>
                   <div className="ml-7 text-slate-400">image1.jpg, image2.png</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-amber-400">folder</span>DCT 162 - Comparison_Images/</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 162 - Comparison_Images/</div>
                   <div className="ml-7 text-slate-400">image1.jpg</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-amber-400">folder</span>DCT 163 - Video_Ads/</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 163 - Video_Ads/</div>
                   <div className="ml-7 text-slate-400">video1.mp4</div>
                   <div className="flex items-center gap-2 text-[#1877F2]"><span className="material-symbols-outlined text-sm">description</span>ad_copy.docx</div>
                 </div>
