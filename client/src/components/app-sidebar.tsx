@@ -707,36 +707,67 @@ export function AppSidebar() {
           )}
 
           <div className="mt-3 pt-3 border-t border-slate-200/50 dark:border-white/10">
-            <div className="flex justify-between items-center mb-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">{isProPlan ? "Pro Plan" : "Free Plan"}</span>
-                {isProPlan && (
-                  <span className="text-[8px] font-bold uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-full border border-[#1877F2]/35 bg-[#1877F2]/10 text-[#1877F2]">
-                    Unlimited
-                  </span>
-                )}
-              </div>
-              <Link href="/settings" className="text-xs font-bold text-[#1877F2] hover:text-[#0c5ed1]" data-testid="link-upgrade">
-                {isProPlan ? "Manage" : "Upgrade"}
-              </Link>
-            </div>
             <div
-              className={`w-full h-1.5 rounded-full overflow-hidden ${
-                isProPlan ? "bg-[#1877F2]/15 border border-[#1877F2]/20" : "bg-slate-200/50 dark:bg-slate-700/50"
-              }`}
+              className={isProPlan
+                ? "rounded-xl px-2.5 py-2 border border-[#1877F2]/25 bg-gradient-to-br from-[#1877F2]/10 via-white/50 to-[#1877F2]/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_8px_18px_rgba(24,119,242,0.12)]"
+                : ""
+              }
             >
+              <div className="flex justify-between items-center mb-1">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`text-xs ${
+                      isProPlan
+                        ? "font-semibold text-[#143d7a] tracking-[0.01em]"
+                        : "font-medium text-slate-600 dark:text-slate-400"
+                    }`}
+                  >
+                    {isProPlan ? "Pro Plan" : "Free Plan"}
+                  </span>
+                  {isProPlan && (
+                    <span className="text-[8px] font-extrabold uppercase tracking-[0.16em] px-1.5 py-0.5 rounded-full border border-[#1877F2]/35 bg-white/75 text-[#1877F2] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+                      Unlimited
+                    </span>
+                  )}
+                </div>
+                <Link
+                  href="/settings"
+                  className={`text-xs font-bold ${
+                    isProPlan
+                      ? "text-[#1877F2] hover:text-[#0c5ed1] rounded-md px-1.5 py-0.5 bg-white/55 border border-[#1877F2]/20"
+                      : "text-[#1877F2] hover:text-[#0c5ed1]"
+                  }`}
+                  data-testid="link-upgrade"
+                >
+                  {isProPlan ? "Manage" : "Upgrade"}
+                </Link>
+              </div>
               <div
-                className={`h-full rounded-full transition-all ${
+                className={`w-full rounded-full overflow-hidden ${
                   isProPlan
-                    ? "bg-gradient-to-r from-[#1877F2] via-[#56a3ff] to-[#1877F2] shadow-[0_0_14px_rgba(24,119,242,0.65)]"
-                    : "bg-[#1877F2] shadow-[0_0_10px_rgba(24,119,242,0.5)]"
+                    ? "h-2 bg-[#1877F2]/18 border border-[#1877F2]/22 shadow-[inset_0_1px_2px_rgba(255,255,255,0.35)]"
+                    : "h-1.5 bg-slate-200/50 dark:bg-slate-700/50"
                 }`}
-                style={{ width: `${progressPercent}%` }}
-              />
+              >
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    isProPlan
+                      ? "bg-gradient-to-r from-[#1877F2] via-[#6bb3ff] to-[#1877F2] shadow-[0_0_16px_rgba(24,119,242,0.68)]"
+                      : "bg-[#1877F2] shadow-[0_0_10px_rgba(24,119,242,0.5)]"
+                  }`}
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <p
+                className={`text-[10px] mt-1.5 ${
+                  isProPlan
+                    ? "font-semibold text-[#4f6c93]"
+                    : "text-slate-400 dark:text-slate-500"
+                }`}
+              >
+                {isProPlan ? "Unlimited uploads" : `${uploadsRemaining ?? 0} free uploads remaining`}
+              </p>
             </div>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">
-              {isProPlan ? "Unlimited uploads" : `${uploadsRemaining ?? 0} free uploads remaining`}
-            </p>
           </div>
         </div>
       </SidebarFooter>
