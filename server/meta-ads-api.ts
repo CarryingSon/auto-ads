@@ -2850,7 +2850,6 @@ export class MetaAdsApi {
         // Image creative mapping for all UI toggles:
         // Add overlays -> image_uncrop
         // Visual touch-ups -> image_touchups
-        // Add music -> music_overlay
         // Text improvements -> text_optimizations
         // Show summaries -> product_extensions
         // Relevant comments -> inline_comment
@@ -2860,7 +2859,9 @@ export class MetaAdsApi {
         // Show spotlights -> site_extensions
         creativeFeaturesSpec.image_uncrop = { enroll_status: s("add_overlays") };
         creativeFeaturesSpec.image_touchups = { enroll_status: s("visual_touch_ups") };
-        creativeFeaturesSpec.music_overlay = { enroll_status: s("add_music") };
+        if (enh.add_music === true) {
+          console.log("[MetaAdsApi] add_music requested, but music_overlay is not supported for this creative API flow. Skipping.");
+        }
         creativeFeaturesSpec.text_optimizations = { enroll_status: s("text_improvements") };
         creativeFeaturesSpec.product_extensions = { enroll_status: s("show_summaries") };
         creativeFeaturesSpec.inline_comment = { enroll_status: s("relevant_comments") };

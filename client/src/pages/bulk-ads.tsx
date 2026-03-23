@@ -4124,7 +4124,10 @@ export default function BulkAds() {
               </div>
             </div>
             {isRunning && (
-              <div className="flex justify-end mt-3">
+              <div className="flex items-center justify-between gap-3 mt-3">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  You can safely leave this page. The upload will continue in the background.
+                </p>
                 <button
                   data-testid="button-cancel-upload"
                   className="px-4 h-9 text-sm font-medium rounded-lg bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-colors"
