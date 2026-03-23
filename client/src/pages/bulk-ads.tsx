@@ -1684,23 +1684,6 @@ export default function BulkAds() {
     },
   });
 
-  const upgradeCheckoutMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/billing/checkout", { interval: "monthly" });
-      return res.json() as Promise<{ url: string }>;
-    },
-    onSuccess: ({ url }) => {
-      window.location.href = url;
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Checkout failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
   const launchMutation = useMutation({
     mutationFn: async () => {
       if (!jobId) throw new Error("No job ID");
@@ -1797,7 +1780,7 @@ export default function BulkAds() {
               altText="Upgrade"
               onClick={(event) => {
                 event.preventDefault();
-                upgradeCheckoutMutation.mutate();
+                window.location.href = "/settings";
               }}
             >
               Upgrade

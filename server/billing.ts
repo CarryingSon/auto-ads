@@ -50,9 +50,26 @@ interface UtcMonthBounds {
 }
 
 function resolveStripeSecretKey(): string {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) {
+  const raw = process.env.STRIPE_SECRET_KEY;
+  if (!raw) {
     throw new Error("STRIPE_SECRET_KEY is not configured");
+  }
+  let key = raw.trim();
+  const quoted =
+    (key.startsWith(`"`) && key.endsWith(`"`)) ||
+    (key.startsWith(`'`) && key.endsWith(`'`));
+  if (quoted && key.length >= 2) {
+    key = key.slice(1, -1).trim();
+  }
+  // Defensive sanitization for accidental copy/paste punctuation.
+  if (key.endsWith(",")) {
+    key = key.slice(0, -1).trim();
+  }
+  if (!key) {
+    throw new Error("STRIPE_SECRET_KEY is empty after normalization");
+  }
+  if (key.startsWith("pk_")) {
+    throw new Error("STRIPE_SECRET_KEY must be a secret key (sk_*), not publishable (pk_*)");
   }
   return key;
 }
@@ -75,20 +92,53 @@ function mapStripeInterval(interval: string | null | undefined): BillingInterval
   return null;
 }
 
+function normalizeEnvValue(raw: string | undefined | null): string {
+  if (!raw) return "";
+  let value = raw.trim();
+  const quoted =
+    (value.startsWith(`"`) && value.endsWith(`"`)) ||
+    (value.startsWith(`'`) && value.endsWith(`'`));
+  if (quoted && value.length >= 2) {
+    value = value.slice(1, -1).trim();
+  }
+  if (value.endsWith(",")) {
+    value = value.slice(0, -1).trim();
+  }
+  return value;
+}
+
+function parsePriceAmountCents(value: string): number | null {
+  if (!/^\d+(\.\d+)?$/.test(value)) return null;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return Math.round(amount * 100);
+}
+
 async function resolvePriceId(interval: "monthly" | "yearly"): Promise<string> {
   const cached = resolvedPriceIdCache.get(interval);
   if (cached) return cached;
 
-  const monthly = process.env.STRIPE_PRICE_MONTHLY_EUR || process.env.STRIPE_PRICE_MONTHLY_ID;
-  const yearly = process.env.STRIPE_PRICE_YEARLY_EUR || process.env.STRIPE_PRICE_YEARLY_ID;
-  const configuredValue = interval === "monthly" ? monthly : yearly;
+  const monthlyRaw = process.env.STRIPE_PRICE_MONTHLY_EUR || process.env.STRIPE_PRICE_MONTHLY_ID;
+  const yearlyRaw = process.env.STRIPE_PRICE_YEARLY_EUR || process.env.STRIPE_PRICE_YEARLY_ID;
+  const configuredValue = normalizeEnvValue(interval === "monthly" ? monthlyRaw : yearlyRaw);
+  const fallbackConfig = FALLBACK_PRICING[interval];
 
+  let configuredAmountCents: number | null = null;
   if (configuredValue) {
-    resolvedPriceIdCache.set(interval, configuredValue);
-    return configuredValue;
+    if (configuredValue.startsWith("price_")) {
+      resolvedPriceIdCache.set(interval, configuredValue);
+      return configuredValue;
+    }
+    configuredAmountCents = parsePriceAmountCents(configuredValue);
+    if (configuredAmountCents === null) {
+      throw new Error(
+        interval === "monthly"
+          ? "Stripe monthly price must be a price id (price_...) or numeric amount (e.g. 29)."
+          : "Stripe yearly price must be a price id (price_...) or numeric amount (e.g. 290).",
+      );
+    }
   }
 
-  const fallbackConfig = FALLBACK_PRICING[interval];
   const stripe = getStripe();
   const prices = await stripe.prices.list({
     active: true,
@@ -101,23 +151,26 @@ async function resolvePriceId(interval: "monthly" | "yearly"): Promise<string> {
   const candidates = prices.data
     .filter((price) =>
       price.recurring?.interval === fallbackConfig.interval &&
-      price.unit_amount === fallbackConfig.unitAmountCents,
+      price.unit_amount === (configuredAmountCents ?? fallbackConfig.unitAmountCents),
     )
     .sort((a, b) => b.created - a.created);
+
+  const expectedAmountCents = configuredAmountCents ?? fallbackConfig.unitAmountCents;
+  const expectedAmount = (expectedAmountCents / 100).toFixed(2);
 
   if (candidates.length === 0) {
     throw new Error(
       interval === "monthly"
-        ? "Stripe monthly price id is missing. Set STRIPE_PRICE_MONTHLY_EUR or create one active recurring EUR 29.00/month price."
-        : "Stripe yearly price id is missing. Set STRIPE_PRICE_YEARLY_EUR or create one active recurring EUR 290.00/year price.",
+        ? `Stripe monthly price id is missing. Set STRIPE_PRICE_MONTHLY_EUR or create one active recurring EUR ${expectedAmount}/month price.`
+        : `Stripe yearly price id is missing. Set STRIPE_PRICE_YEARLY_EUR or create one active recurring EUR ${expectedAmount}/year price.`,
     );
   }
 
   if (candidates.length > 1) {
     throw new Error(
       interval === "monthly"
-        ? "Multiple active monthly EUR 29.00 prices found. Set STRIPE_PRICE_MONTHLY_EUR explicitly."
-        : "Multiple active yearly EUR 290.00 prices found. Set STRIPE_PRICE_YEARLY_EUR explicitly.",
+        ? `Multiple active monthly EUR ${expectedAmount} prices found. Set STRIPE_PRICE_MONTHLY_EUR explicitly.`
+        : `Multiple active yearly EUR ${expectedAmount} prices found. Set STRIPE_PRICE_YEARLY_EUR explicitly.`,
     );
   }
 
