@@ -606,8 +606,13 @@ export default function Landing() {
             </p>
             <div className="flex justify-center items-center gap-4 mb-8">
               <span className={`text-sm font-semibold ${!isYearly ? 'text-gray-900' : 'text-gray-500'}`}>Monthly</span>
-              <button onClick={() => setIsYearly(!isYearly)} className="w-12 h-6 bg-[#1877F2] rounded-full relative focus:outline-none shadow-md cursor-pointer">
-                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 shadow-sm ${isYearly ? 'translate-x-6' : 'translate-x-1'}`} />
+              <button
+                onClick={() => setIsYearly(!isYearly)}
+                className="w-12 h-6 bg-[#1877F2] rounded-full relative focus:outline-none shadow-md cursor-pointer overflow-hidden"
+              >
+                <span
+                  className={`absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 ease-out shadow-sm ${isYearly ? 'translate-x-6' : 'translate-x-0'}`}
+                />
               </button>
               <span className={`text-sm font-medium ${isYearly ? 'text-gray-900' : 'text-gray-500'}`}>Yearly <span className="text-[#1877F2] text-xs ml-1 font-bold">(2 months free)</span></span>
             </div>
