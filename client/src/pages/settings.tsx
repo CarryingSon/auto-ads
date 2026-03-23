@@ -1006,7 +1006,13 @@ export default function Settings() {
       {/* Section 2: Plan + Usage */}
       <section className="grid md:grid-cols-3 gap-4">
         {/* Current Plan */}
-        <div className="md:col-span-1 glass-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden group">
+        <div
+          className={`md:col-span-1 glass-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden group transition-all ${
+            isProPlan
+              ? "border border-[#1877F2]/60 shadow-[0_0_0_1px_rgba(24,119,242,0.2),0_14px_36px_rgba(24,119,242,0.18)]"
+              : ""
+          }`}
+        >
           <div className="absolute -top-12 -right-12 w-40 h-40 bg-[#1877F2]/20 rounded-full blur-3xl group-hover:bg-[#1877F2]/30 transition-colors pointer-events-none" />
           <div>
             <h3 className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Current Plan</h3>
