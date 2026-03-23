@@ -575,6 +575,27 @@ export async function registerRoutes(
       res.status(500).json({ error: error?.message || "Failed to open billing portal" });
     }
   });
+
+  // Direct redirect variant for portal access from simple links/buttons.
+  app.get("/api/billing/portal", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { portalReturnUrl } = resolveBillingUrls(req);
+      const portalUrl = await createPortalSessionForUser({
+        userId,
+        returnUrl: portalReturnUrl,
+      });
+
+      return res.redirect(303, portalUrl);
+    } catch (error: any) {
+      console.error("[Billing] Failed to redirect to portal:", error);
+      return res.status(500).json({ error: error?.message || "Failed to open billing portal" });
+    }
+  });
   
   // ===== Connection Routes =====
   

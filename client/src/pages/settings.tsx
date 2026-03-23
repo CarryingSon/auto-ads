@@ -678,23 +678,6 @@ export default function Settings() {
     },
   });
 
-  const portalMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/billing/portal");
-      return res.json() as Promise<{ url: string }>;
-    },
-    onSuccess: ({ url }) => {
-      window.location.href = url;
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Portal failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-  
   const handleSaveIdentity = () => {
     // Save the selected Instagram account ID directly
     updateSettingsMutation.mutate({
@@ -1070,12 +1053,14 @@ export default function Settings() {
             )}
             {isProPlan && !isLegacyPro ? (
               <button
+                type="button"
                 className="w-full py-2.5 px-3 bg-white/60 dark:bg-white/10 border border-white/40 dark:border-white/15 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60"
                 data-testid="button-manage-subscription"
-                onClick={() => portalMutation.mutate()}
-                disabled={portalMutation.isPending}
+                onClick={() => {
+                  window.location.href = "/api/billing/portal";
+                }}
               >
-                {portalMutation.isPending ? "Opening..." : "Manage subscription"}
+                Manage subscription
               </button>
             ) : (
               <button
