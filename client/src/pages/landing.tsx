@@ -346,7 +346,7 @@ export default function Landing() {
 
       {/* FEATURES */}
       <section className="py-24 relative z-10 overflow-visible bg-white" id="features">
-        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-20">
             <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
               Powerful Features
@@ -368,16 +368,16 @@ export default function Landing() {
               { icon: "fas fa-tag", title: "Auto-naming conventions", desc: "Your Google Drive file names become your ad names automatically. No more manual renaming in Ads Manager." },
               { icon: "fas fa-chart-line", title: "Performance insights", desc: "See which creatives perform best across all your accounts in one unified dashboard." },
             ].map((feature, index) => (
-              <motion.div key={index} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: index * 0.1 }} className="group bg-white border border-blue-100/50 shadow-sm hover:shadow-md hover:border-blue-200 hover:-translate-y-1 transition-all p-6 rounded-2xl" data-testid={`card-feature-${index}`}>
+              <div key={index} className="group bg-white border border-blue-100/50 shadow-sm hover:shadow-md hover:border-blue-200 hover:-translate-y-1 transition-[transform,box-shadow,border-color,color] duration-200 p-6 rounded-2xl" data-testid={`card-feature-${index}`}>
                 <div className="w-10 h-10 bg-blue-50 text-[#1877F2] rounded-xl flex items-center justify-center mb-4 text-lg shadow-inner ring-1 ring-blue-100/50">
                   <i className={feature.icon} />
                 </div>
                 <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#1877F2] transition-colors">{feature.title}</h3>
                 <p className="text-gray-500 text-sm leading-relaxed">{feature.desc}</p>
-              </motion.div>
+              </div>
             ))}
           </div>
-        </motion.div>
+        </div>
       </section>
 
       {/* BENEFITS */}
