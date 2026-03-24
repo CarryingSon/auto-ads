@@ -778,9 +778,11 @@ export default function Landing() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
             <div className="col-span-2 md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
-                <div className="bg-gradient-to-br from-[#1877F2] to-blue-600 text-white p-1 rounded shadow-md" style={{ border: "1px solid rgba(255,255,255,0.2)" }}>
-                  <i className="fas fa-sync-alt text-sm" />
-                </div>
+                <img
+                  src="/favicon.png"
+                  alt="Auto-ads logo"
+                  className="w-8 h-8 object-contain"
+                />
                 <span className="font-bold text-lg text-gray-900">Auto-ads</span>
               </div>
               <p className="text-sm text-gray-500 mb-4 leading-relaxed">

@@ -105,11 +105,7 @@ export default function LoginPage() {
           <div className="flex items-center gap-8 grayscale opacity-50">
             <i className="fab fa-instagram text-2xl text-black" />
             <i className="fab fa-facebook text-2xl text-black" />
-            <img
-              src="/favicon.png"
-              alt="Auto-ads logo"
-              className="w-7 h-7 object-contain"
-            />
+            <SiMeta className="text-2xl text-black" />
           </div>
         </div>
       </section>
