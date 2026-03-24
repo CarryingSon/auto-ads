@@ -191,7 +191,11 @@ export default function Landing() {
                     key={item.label}
                     href={item.href}
                     onClick={(e) => item.href !== "#" ? handleSmoothScroll(e, item.href.slice(1)) : undefined}
-                    className="text-sm font-medium text-gray-800 hover:text-[#1877F2] transition-colors"
+                    className={`text-sm transition-colors ${
+                      item.label === "Calculator"
+                        ? "font-semibold text-[#1877F2]"
+                        : "font-medium text-gray-800 hover:text-[#1877F2]"
+                    }`}
                     data-testid={`link-nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                   >
                     {item.label}
