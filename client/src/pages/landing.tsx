@@ -54,6 +54,20 @@ function DemoVideoPlaceholder() {
 
 export default function Landing() {
   const [isYearly, setIsYearly] = useState(false);
+  const [weeklyImageAds, setWeeklyImageAds] = useState(40);
+  const [weeklyVideoAds, setWeeklyVideoAds] = useState(20);
+  const [manualMinutesPerAd, setManualMinutesPerAd] = useState(2.8);
+
+  const totalWeeklyAds = weeklyImageAds + weeklyVideoAds;
+  const autoMinutesPerAd = 0.35;
+  const autoSetupMinutesPerWeek = 2;
+  const manualWeeklyMinutes = totalWeeklyAds * manualMinutesPerAd;
+  const autoWeeklyMinutes = totalWeeklyAds * autoMinutesPerAd + autoSetupMinutesPerWeek;
+  const savedWeeklyMinutes = Math.max(0, manualWeeklyMinutes - autoWeeklyMinutes);
+  const manualMonthlyHours = (manualWeeklyMinutes * 4.33) / 60;
+  const autoMonthlyHours = (autoWeeklyMinutes * 4.33) / 60;
+  const savedMonthlyHours = (savedWeeklyMinutes * 4.33) / 60;
+  const savedPercent = manualWeeklyMinutes > 0 ? Math.round((savedWeeklyMinutes / manualWeeklyMinutes) * 100) : 0;
 
   const handleSmoothScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault();
@@ -333,6 +347,146 @@ export default function Landing() {
                 <p className="text-gray-500 text-sm leading-relaxed">{feature.desc}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CALCULATOR */}
+      <section className="pb-24 relative z-10 bg-white" id="calculator">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="relative overflow-hidden rounded-3xl border border-blue-100/70 bg-gradient-to-br from-white via-blue-50/40 to-white p-6 md:p-10 shadow-[0_24px_50px_-28px_rgba(37,99,235,0.5)]">
+            <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-300/20 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-[#1877F2]/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative grid lg:grid-cols-2 gap-8 lg:gap-10 items-start">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 mb-4 rounded-full bg-white/80 border border-blue-100 text-[#1877F2] text-xs font-semibold uppercase tracking-wider">
+                  <i className="fas fa-calculator" />
+                  Time Savings Calculator
+                </div>
+                <h3 className="text-3xl sm:text-4xl font-extrabold text-gray-900 leading-tight mb-4">
+                  See how many hours you can save every month
+                </h3>
+                <p className="text-gray-500 text-lg leading-relaxed mb-6">
+                  Enter your weekly image/video volume and manual upload time. We&apos;ll estimate your manual workload vs. Auto-ads speed.
+                </p>
+
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <div className="rounded-2xl bg-white/80 border border-blue-100 p-4">
+                    <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold mb-1">Manual / Month</p>
+                    <p className="text-xl font-extrabold text-gray-900">{manualMonthlyHours.toFixed(1)}h</p>
+                  </div>
+                  <div className="rounded-2xl bg-white/80 border border-blue-100 p-4">
+                    <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold mb-1">Auto-ads / Month</p>
+                    <p className="text-xl font-extrabold text-gray-900">{autoMonthlyHours.toFixed(1)}h</p>
+                  </div>
+                  <div className="rounded-2xl bg-[#1877F2] text-white p-4 shadow-lg">
+                    <p className="text-xs uppercase tracking-wider text-blue-100 font-semibold mb-1">You Save</p>
+                    <p className="text-xl font-extrabold">{savedMonthlyHours.toFixed(1)}h</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl glass-heavy border border-white/60 p-5 md:p-6">
+                <div className="space-y-5">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700">Images per week</label>
+                    <div className="mt-2 flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0}
+                        max={300}
+                        step={1}
+                        value={weeklyImageAds}
+                        onChange={(e) => setWeeklyImageAds(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-full accent-[#1877F2]"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={300}
+                        value={weeklyImageAds}
+                        onChange={(e) => setWeeklyImageAds(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-20 h-10 rounded-lg border border-blue-100 bg-white/80 px-2 text-sm font-semibold text-gray-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700">Videos per week</label>
+                    <div className="mt-2 flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0}
+                        max={300}
+                        step={1}
+                        value={weeklyVideoAds}
+                        onChange={(e) => setWeeklyVideoAds(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-full accent-[#1877F2]"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={300}
+                        value={weeklyVideoAds}
+                        onChange={(e) => setWeeklyVideoAds(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-20 h-10 rounded-lg border border-blue-100 bg-white/80 px-2 text-sm font-semibold text-gray-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700">Manual upload time per ad (minutes)</label>
+                    <div className="mt-2 flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={12}
+                        step={0.1}
+                        value={manualMinutesPerAd}
+                        onChange={(e) => setManualMinutesPerAd(Math.max(0.5, Number(e.target.value) || 0.5))}
+                        className="w-full accent-[#1877F2]"
+                      />
+                      <input
+                        type="number"
+                        min={0.5}
+                        max={12}
+                        step={0.1}
+                        value={manualMinutesPerAd}
+                        onChange={(e) => setManualMinutesPerAd(Math.max(0.5, Number(e.target.value) || 0.5))}
+                        className="w-20 h-10 rounded-lg border border-blue-100 bg-white/80 px-2 text-sm font-semibold text-gray-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-xl bg-white/70 border border-blue-100 p-4">
+                  <div className="flex items-center justify-between text-sm text-gray-600">
+                    <span>Total ads / week</span>
+                    <span className="font-bold text-gray-900">{totalWeeklyAds}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm text-gray-600 mt-1.5">
+                    <span>Weekly time saved</span>
+                    <span className="font-bold text-[#1877F2]">{savedWeeklyMinutes.toFixed(0)} min</span>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-blue-100 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#1877F2] to-blue-500 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(5, Math.min(100, savedPercent))}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs font-semibold text-[#1877F2]">{savedPercent}% faster than manual uploads</p>
+                </div>
+
+                <div className="mt-5">
+                  <Link href="/login">
+                    <span className="w-full bg-[#1877F2] hover:bg-[#1461c7] text-white px-5 py-3 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 shadow-lg cursor-pointer">
+                      Start saving time <i className="fas fa-arrow-right" />
+                    </span>
+                  </Link>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
