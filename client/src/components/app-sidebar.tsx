@@ -427,13 +427,11 @@ export function AppSidebar() {
     <Sidebar className="sidebar-pane border-r-0">
       <div className="px-4 pt-4 pb-1 mb-1">
         <Link href="/dashboard" className="flex items-center space-x-2.5 cursor-pointer" data-testid="link-header-logo">
-          <div className="w-8 h-8 rounded-lg bg-white/80 dark:bg-white/10 flex items-center justify-center shadow-sm border border-white/50 dark:border-white/10">
-            <img
-              src="/favicon.png"
-              alt="Auto-ads favicon"
-              className="w-5 h-5 object-contain"
-            />
-          </div>
+          <img
+            src="/favicon.png"
+            alt="Auto-ads favicon"
+            className="w-8 h-8 object-contain"
+          />
           <span className="text-base font-bold tracking-tight text-foreground">Auto-ads</span>
         </Link>
       </div>

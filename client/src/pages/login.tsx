@@ -48,8 +48,15 @@ export default function LoginPage() {
         </div>
 
         <div className="mb-14">
-          <Link href="/" className="text-2xl font-extrabold tracking-tight text-slate-900">
-            Auto-ads
+          <Link href="/" className="inline-flex items-center gap-3 text-2xl font-extrabold tracking-tight text-slate-900">
+            <span className="w-10 h-10 rounded-2xl bg-[#f4f7fb] border border-slate-200/80 shadow-sm flex items-center justify-center">
+              <img
+                src="/favicon.png"
+                alt="Auto-ads logo"
+                className="w-6 h-6 object-contain"
+              />
+            </span>
+            <span>Auto-ads</span>
           </Link>
         </div>
 
