@@ -56,7 +56,7 @@ export default function Landing() {
   const [isYearly, setIsYearly] = useState(false);
   const [weeklyImageAds, setWeeklyImageAds] = useState(40);
   const [weeklyVideoAds, setWeeklyVideoAds] = useState(20);
-  const [manualMinutesPerAd, setManualMinutesPerAd] = useState(2.8);
+  const [manualMinutesPerAd, setManualMinutesPerAd] = useState(5);
 
   const totalWeeklyAds = weeklyImageAds + weeklyVideoAds;
   const autoMinutesPerAd = 0.35;
@@ -68,6 +68,9 @@ export default function Landing() {
   const autoMonthlyHours = (autoWeeklyMinutes * 4.33) / 60;
   const savedMonthlyHours = (savedWeeklyMinutes * 4.33) / 60;
   const savedPercent = manualWeeklyMinutes > 0 ? Math.round((savedWeeklyMinutes / manualWeeklyMinutes) * 100) : 0;
+  const savedYearlyHours = savedMonthlyHours * 12;
+  const savedWorkDaysPerMonth = savedMonthlyHours / 8;
+  const autoSecondsPerAd = Math.round(autoMinutesPerAd * 60);
 
   const handleSmoothScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault();
@@ -371,7 +374,15 @@ export default function Landing() {
                   Enter your weekly image/video volume and manual upload time. We&apos;ll estimate your manual workload vs. Auto-ads speed.
                 </p>
 
-                <div className="grid sm:grid-cols-3 gap-3">
+                <div className="rounded-2xl bg-gradient-to-r from-[#1877F2] to-blue-600 text-white p-5 shadow-[0_14px_30px_-18px_rgba(37,99,235,0.8)] mb-3">
+                  <p className="text-xs uppercase tracking-wider text-blue-100 font-semibold mb-1">Estimated Time Saved / Month</p>
+                  <p className="text-4xl font-extrabold leading-none">{savedMonthlyHours.toFixed(1)}h</p>
+                  <p className="text-sm text-blue-100 mt-2">
+                    ~{savedWorkDaysPerMonth.toFixed(1)} working days saved every month
+                  </p>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-3">
                   <div className="rounded-2xl bg-white/80 border border-blue-100 p-4">
                     <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold mb-1">Manual / Month</p>
                     <p className="text-xl font-extrabold text-gray-900">{manualMonthlyHours.toFixed(1)}h</p>
@@ -380,11 +391,10 @@ export default function Landing() {
                     <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold mb-1">Auto-ads / Month</p>
                     <p className="text-xl font-extrabold text-gray-900">{autoMonthlyHours.toFixed(1)}h</p>
                   </div>
-                  <div className="rounded-2xl bg-[#1877F2] text-white p-4 shadow-lg">
-                    <p className="text-xs uppercase tracking-wider text-blue-100 font-semibold mb-1">You Save</p>
-                    <p className="text-xl font-extrabold">{savedMonthlyHours.toFixed(1)}h</p>
-                  </div>
                 </div>
+                <p className="text-sm text-gray-500 mt-3">
+                  Auto-ads averages <span className="font-semibold text-[#1877F2]">~{autoSecondsPerAd}s per ad</span> after setup.
+                </p>
               </div>
 
               <div className="rounded-2xl glass-heavy border border-white/60 p-5 md:p-6">
@@ -399,7 +409,7 @@ export default function Landing() {
                         step={1}
                         value={weeklyImageAds}
                         onChange={(e) => setWeeklyImageAds(Math.max(0, Number(e.target.value) || 0))}
-                        className="w-full accent-[#1877F2]"
+                        className="w-full max-w-[280px] sm:max-w-[340px] accent-[#1877F2] h-1.5"
                       />
                       <input
                         type="number"
@@ -422,7 +432,7 @@ export default function Landing() {
                         step={1}
                         value={weeklyVideoAds}
                         onChange={(e) => setWeeklyVideoAds(Math.max(0, Number(e.target.value) || 0))}
-                        className="w-full accent-[#1877F2]"
+                        className="w-full max-w-[280px] sm:max-w-[340px] accent-[#1877F2] h-1.5"
                       />
                       <input
                         type="number"
@@ -445,7 +455,7 @@ export default function Landing() {
                         step={0.1}
                         value={manualMinutesPerAd}
                         onChange={(e) => setManualMinutesPerAd(Math.max(0.5, Number(e.target.value) || 0.5))}
-                        className="w-full accent-[#1877F2]"
+                        className="w-full max-w-[280px] sm:max-w-[340px] accent-[#1877F2] h-1.5"
                       />
                       <input
                         type="number"
@@ -457,6 +467,7 @@ export default function Landing() {
                         className="w-20 h-10 rounded-lg border border-blue-100 bg-white/80 px-2 text-sm font-semibold text-gray-900"
                       />
                     </div>
+                    <p className="text-xs text-gray-400 mt-1">Default set to 5 min per ad</p>
                   </div>
                 </div>
 
@@ -468,6 +479,10 @@ export default function Landing() {
                   <div className="flex items-center justify-between text-sm text-gray-600 mt-1.5">
                     <span>Weekly time saved</span>
                     <span className="font-bold text-[#1877F2]">{savedWeeklyMinutes.toFixed(0)} min</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm text-gray-600 mt-1.5">
+                    <span>Yearly time saved</span>
+                    <span className="font-bold text-[#1877F2]">{savedYearlyHours.toFixed(0)} h</span>
                   </div>
                   <div className="mt-3 h-2 rounded-full bg-blue-100 overflow-hidden">
                     <div
