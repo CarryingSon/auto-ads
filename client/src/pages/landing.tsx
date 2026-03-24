@@ -181,6 +181,7 @@ export default function Landing() {
                 {[
                   { label: "Home", href: "#" },
                   { label: "Features", href: "#features" },
+                  { label: "Calculator", href: "#calculator" },
                   { label: "Benefits", href: "#benefits" },
                   { label: "How It Works", href: "#how-it-works" },
                   { label: "Pricing", href: "#pricing" },
@@ -357,21 +358,29 @@ export default function Landing() {
       {/* CALCULATOR */}
       <section className="pb-24 relative z-10 bg-white" id="calculator">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-3xl mx-auto mb-10">
+            <div className="inline-block px-3 py-1 mb-4 text-xs font-semibold tracking-wider text-[#1877F2] uppercase bg-blue-50/50 rounded-full border border-blue-100/50 backdrop-blur-sm">
+              Smart Estimator
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4 drop-shadow-sm">
+              Time Savings <span className="text-[#1877F2]">Calculator</span>
+            </h2>
+            <p className="text-lg text-gray-500">
+              Quickly estimate how much manual upload time Auto-ads can save your team every week, month, and year.
+            </p>
+          </div>
+
           <div className="relative overflow-hidden rounded-3xl border border-blue-100/70 bg-gradient-to-br from-white via-blue-50/40 to-white p-6 md:p-10 shadow-[0_24px_50px_-28px_rgba(37,99,235,0.5)]">
             <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-300/20 rounded-full blur-3xl pointer-events-none" />
             <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-[#1877F2]/10 rounded-full blur-3xl pointer-events-none" />
 
             <div className="relative grid lg:grid-cols-2 gap-8 lg:gap-10 items-start">
               <div>
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 mb-4 rounded-full bg-white/80 border border-blue-100 text-[#1877F2] text-xs font-semibold uppercase tracking-wider">
-                  <i className="fas fa-calculator" />
-                  Time Savings Calculator
-                </div>
-                <h3 className="text-3xl sm:text-4xl font-extrabold text-gray-900 leading-tight mb-4">
-                  See how many hours you can save every month
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-gray-900 leading-tight mb-3">
+                  Your custom savings projection
                 </h3>
-                <p className="text-gray-500 text-lg leading-relaxed mb-6">
-                  Enter your weekly image/video volume and manual upload time. We&apos;ll estimate your manual workload vs. Auto-ads speed.
+                <p className="text-gray-500 text-base sm:text-lg leading-relaxed mb-6">
+                  Tune the values on the right to match your current workflow and see the estimated time gain instantly.
                 </p>
 
                 <div className="rounded-2xl bg-gradient-to-r from-[#1877F2] to-blue-600 text-white p-5 shadow-[0_14px_30px_-18px_rgba(37,99,235,0.8)] mb-3">
