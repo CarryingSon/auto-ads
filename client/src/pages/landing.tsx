@@ -71,13 +71,50 @@ export default function Landing() {
   const savedYearlyHours = savedMonthlyHours * 12;
   const savedWorkDaysPerMonth = savedMonthlyHours / 8;
   const autoSecondsPerAd = Math.round(autoMinutesPerAd * 60);
+  const headerOffsetPx = 96;
+  const scrollDurationMs = 1000;
+
+  const easeInOutCubic = (t: number) => {
+    return t < 0.5
+      ? 4 * t * t * t
+      : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  };
+
+  const animateScrollTo = (targetY: number, durationMs: number) => {
+    const startY = window.scrollY;
+    const deltaY = targetY - startY;
+
+    if (Math.abs(deltaY) < 1) return;
+
+    const startTime = performance.now();
+    const step = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      const easedProgress = easeInOutCubic(progress);
+      window.scrollTo(0, startY + deltaY * easedProgress);
+
+      if (progress < 1) {
+        window.requestAnimationFrame(step);
+      }
+    };
+
+    window.requestAnimationFrame(step);
+  };
 
   const handleSmoothScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault();
     const element = document.getElementById(targetId);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!element) return;
+
+    const targetY = Math.max(0, window.scrollY + element.getBoundingClientRect().top - headerOffsetPx);
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion) {
+      window.scrollTo({ top: targetY, behavior: "auto" });
+      return;
     }
+
+    animateScrollTo(targetY, scrollDurationMs);
   };
 
   return (
@@ -187,10 +224,25 @@ export default function Landing() {
                   { label: "Pricing", href: "#pricing" },
                   { label: "FAQ", href: "#faq" },
                 ].map((item) => (
-                  <a
+                  <motion.a
                     key={item.label}
                     href={item.href}
-                    onClick={(e) => item.href !== "#" ? handleSmoothScroll(e, item.href.slice(1)) : undefined}
+                    onClick={(e) => {
+                      if (item.href === "#") {
+                        e.preventDefault();
+                        const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                        if (prefersReducedMotion) {
+                          window.scrollTo({ top: 0, behavior: "auto" });
+                          return;
+                        }
+                        animateScrollTo(0, scrollDurationMs);
+                        return;
+                      }
+                      handleSmoothScroll(e, item.href.slice(1));
+                    }}
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 28, mass: 0.45 }}
                     className={`text-sm transition-colors ${
                       item.label === "Calculator"
                         ? "font-semibold text-[#1877F2]"
@@ -199,7 +251,7 @@ export default function Landing() {
                     data-testid={`link-nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                   >
                     {item.label}
-                  </a>
+                  </motion.a>
                 ))}
               </div>
               <div className="flex items-center space-x-4">
