@@ -164,6 +164,31 @@ async function upsertAccountCache(userId: string, adAccountId: string, field: st
   }
 }
 
+async function clearAccountPageCache(userId: string, adAccountId: string) {
+  try {
+    await db.insert(metaAccountCache)
+      .values({
+        userId,
+        adAccountId,
+        pagesJson: [],
+        pagesSelectedPageId: null,
+        instagramAccountsJson: [],
+      })
+      .onConflictDoUpdate({
+        target: [metaAccountCache.userId, metaAccountCache.adAccountId],
+        set: {
+          pagesJson: [],
+          pagesSelectedPageId: null,
+          instagramAccountsJson: [],
+          lastSyncedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+  } catch (e) {
+    console.error(`[AccountCache] Failed to clear pages cache for ${adAccountId}:`, e);
+  }
+}
+
 async function getAccountCache(userId: string, adAccountId: string): Promise<any | null> {
   try {
     for (const candidateId of getAdAccountIdVariants(adAccountId)) {
@@ -4551,12 +4576,13 @@ export async function registerRoutes(
       }
 
       const selectedAdAccountId = assets[0].selectedAdAccountId;
+      const forceRefresh = String(req.query.refresh || "").toLowerCase() === "true";
 
       // Always check DB cache first — pages/Instagram profiles rarely change
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
         const cachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
-        if (cachedPages) {
+        if (cachedPages && !forceRefresh) {
           const preferredPageId = cached?.pagesSelectedPageId || assets[0].selectedPageId || null;
           const selectedPageId = pickValidSelectedPageId(cachedPages, preferredPageId);
           const autoSelected = cachedPages.length === 1 || (!!selectedPageId && selectedPageId !== preferredPageId);
@@ -4628,6 +4654,13 @@ export async function registerRoutes(
             console.warn(
               `[Pages] promote_pages failed for ${selectedAdAccountId}. issue=${accessIssue}, code=${Number.isFinite(code) ? code : "unknown"}, message=${message}`,
             );
+
+            // Permission/auth mismatch can leave stale page cache visible.
+            // Clear account-scoped pages so UI doesn't show unusable pages.
+            await clearAccountPageCache(userId, selectedAdAccountId);
+            await db.update(metaAssets)
+              .set({ selectedPageId: null, updatedAt: new Date() })
+              .where(eq(metaAssets.userId, userId));
 
             return res.json({
               data: [],
@@ -4789,6 +4822,10 @@ export async function registerRoutes(
           });
         } catch (apiError) {
           console.error("Error fetching promote_pages, falling back to all pages:", apiError);
+          await clearAccountPageCache(userId, selectedAdAccountId);
+          await db.update(metaAssets)
+            .set({ selectedPageId: null, updatedAt: new Date() })
+            .where(eq(metaAssets.userId, userId));
           return res.json({
             data: [],
             selectedPageId: null,
@@ -4801,6 +4838,10 @@ export async function registerRoutes(
       }
 
       if (selectedAdAccountId && !accessToken) {
+        await clearAccountPageCache(userId, selectedAdAccountId);
+        await db.update(metaAssets)
+          .set({ selectedPageId: null, updatedAt: new Date() })
+          .where(eq(metaAssets.userId, userId));
         return res.json({
           data: [],
           selectedPageId: null,
@@ -4814,6 +4855,10 @@ export async function registerRoutes(
       // If ad account-scoped fetch fails, return empty instead of global pages
       // to avoid cross-account page/Instagram mismatch in the sidebar.
       if (selectedAdAccountId) {
+        await clearAccountPageCache(userId, selectedAdAccountId);
+        await db.update(metaAssets)
+          .set({ selectedPageId: null, updatedAt: new Date() })
+          .where(eq(metaAssets.userId, userId));
         return res.json({
           data: [],
           selectedPageId: null,
@@ -5219,22 +5264,30 @@ export async function registerRoutes(
       }
 
       const pendingAccounts = (assets[0] as any).pendingAdAccountsJson || [];
-      const selectedAccounts = pendingAccounts.filter((acc: any) => idsToSelect.includes(acc.id));
+      const selectablePendingAccounts = pendingAccounts.filter((acc: any) => acc?.access_verified !== false);
+      const selectedAccounts = selectablePendingAccounts.filter((acc: any) => idsToSelect.includes(acc.id));
 
       if (selectedAccounts.length === 0) {
         console.warn("[MetaOAuth][confirm-ad-account] No requested IDs matched pending list", {
           userId,
           requestedCount: idsToSelect.length,
           pendingCount: pendingAccounts.length,
+          selectablePendingCount: selectablePendingAccounts.length,
         });
-        return res.status(400).json({ error: "No valid accounts found in pending list" });
+        return res.status(400).json({ error: "No valid selectable accounts found in pending list" });
       }
 
       // Save selected accounts, set first one as primary selected, clear pending
-      const primarySelectedId = selectedAccounts[0].id;
+      const selectedAccountsForStorage = selectedAccounts.map((acc: any) => ({
+        id: String(acc.id),
+        name: String(acc.name || acc.id),
+        account_status: Number.isFinite(Number(acc.account_status)) ? Number(acc.account_status) : 0,
+      }));
+
+      const primarySelectedId = selectedAccountsForStorage[0].id;
       await db.update(metaAssets)
         .set({
-          adAccountsJson: selectedAccounts, // Save all selected
+          adAccountsJson: selectedAccountsForStorage, // Save all selected
           pendingAdAccountsJson: [], // Clear pending
           selectedAdAccountId: primarySelectedId, // First one is primary
           updatedAt: new Date(),
@@ -5243,10 +5296,10 @@ export async function registerRoutes(
 
       console.log("[MetaOAuth][confirm-ad-account] Selection saved", {
         userId,
-        savedCount: selectedAccounts.length,
+        savedCount: selectedAccountsForStorage.length,
         selectedAdAccountId: primarySelectedId,
       });
-      res.json({ success: true, selectedAdAccountId: primarySelectedId, adAccounts: selectedAccounts, savedCount: selectedAccounts.length });
+      res.json({ success: true, selectedAdAccountId: primarySelectedId, adAccounts: selectedAccountsForStorage, savedCount: selectedAccountsForStorage.length });
     } catch (error: any) {
       console.error("[MetaOAuth][confirm-ad-account] Failed", {
         error: error?.message || String(error),
@@ -5454,16 +5507,10 @@ export async function registerRoutes(
       }
 
       const selectedId = String(matchedAccount.id);
-      const cacheForSelectedAccount = await getAccountCache(userId, selectedId);
-      const cachedPages = Array.isArray(cacheForSelectedAccount?.pagesJson) ? cacheForSelectedAccount.pagesJson : [];
-      const preferredPageId = cacheForSelectedAccount?.pagesSelectedPageId || assetsRow.selectedPageId || null;
-      const resolvedPageId = pickValidSelectedPageId(cachedPages, preferredPageId);
-      // Never carry over selectedPageId from a previously selected ad account.
-      const selectedPageId = resolvedPageId || null;
-
-      if (selectedPageId && cacheForSelectedAccount?.pagesSelectedPageId !== selectedPageId) {
-        await upsertAccountCache(userId, selectedId, "pagesSelectedPageId", selectedPageId);
-      }
+      // Force page refresh after each ad-account switch so stale/no-permission pages
+      // are not shown from account cache.
+      await clearAccountPageCache(userId, selectedId);
+      const selectedPageId = null;
 
       const [updated] = await db.update(metaAssets)
         .set({ selectedAdAccountId: selectedId, selectedPageId, updatedAt: new Date() })

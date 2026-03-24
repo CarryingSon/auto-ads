@@ -25,6 +25,12 @@ interface AuthStatus {
   };
 }
 
+interface MetaPagesResponse {
+  data: Array<{ id: string; name: string }>;
+  selectedPageId?: string | null;
+  accessIssue?: "missing_ad_account_permission" | "meta_auth_error" | "meta_not_connected" | "meta_fetch_error" | null;
+}
+
 export default function Connections() {
   const { toast } = useToast();
   const search = useSearch();
@@ -75,19 +81,51 @@ export default function Connections() {
     },
   });
 
+  const selectedAdAccountId = authStatus?.meta?.selectedAdAccountId || "";
+  const metaConnected = authStatus?.meta?.status === "connected";
+  const metaExpired = authStatus?.meta?.status === "expired";
+
+  const {
+    data: pagesData,
+    refetch: refetchPages,
+  } = useQuery<MetaPagesResponse>({
+    queryKey: ["connections-meta-pages", selectedAdAccountId || "none"],
+    enabled: metaConnected && !!selectedAdAccountId,
+    queryFn: async () => {
+      const res = await fetch("/api/meta/pages?refresh=true", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch Meta pages");
+      return res.json();
+    },
+    staleTime: 0,
+  });
+
   const updateAssetsMutation = useMutation({
     mutationFn: async (data: { selectedAdAccountId?: string; selectedPageId?: string }) => {
-      const res = await apiRequest("PATCH", "/auth/meta/assets", data);
-      return res.json();
+      if (data.selectedAdAccountId) {
+        const res = await apiRequest("PATCH", "/api/meta/ad-accounts/selected", {
+          adAccountId: data.selectedAdAccountId,
+        });
+        return res.json();
+      }
+      if (data.selectedPageId) {
+        const res = await apiRequest("PATCH", "/api/meta/pages/selected", {
+          pageId: data.selectedPageId,
+        });
+        return res.json();
+      }
+      return { success: true };
     },
     onSuccess: () => {
       toast({ title: "Defaults updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/meta/pages"] });
       refetch();
+      refetchPages();
     },
   });
 
-  const metaConnected = authStatus?.meta?.status === "connected";
-  const metaExpired = authStatus?.meta?.status === "expired";
+  const pageOptions = pagesData?.data || [];
+  const selectedPageValue = pagesData?.selectedPageId || authStatus?.meta?.selectedPageId || "";
 
   if (isLoading) {
     return (
@@ -174,18 +212,18 @@ export default function Connections() {
                   </Select>
                 </div>
 
-                {authStatus.meta.pages && authStatus.meta.pages.length > 0 && (
+                {pageOptions.length > 0 && (
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Default Page</label>
                     <Select
-                      value={authStatus.meta.selectedPageId || ""}
+                      value={selectedPageValue}
                       onValueChange={(val) => updateAssetsMutation.mutate({ selectedPageId: val })}
                     >
                       <SelectTrigger data-testid="select-page">
                         <SelectValue placeholder="Select page" />
                       </SelectTrigger>
                       <SelectContent>
-                        {authStatus.meta.pages.map((page) => (
+                        {pageOptions.map((page) => (
                           <SelectItem key={page.id} value={page.id}>
                             {page.name}
                           </SelectItem>

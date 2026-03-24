@@ -30,6 +30,12 @@ import {
 } from "../shared/schema.js";
 import { inArray } from "drizzle-orm";
 import { eq, and, lt, or, sql } from "drizzle-orm";
+import {
+  type MetaAdAccount,
+  buildNoUsableAdAccountsMessage,
+  filterAccessibleAdAccounts,
+  normalizeMetaAdAccount,
+} from "./meta-oauth-access.js";
 
 const router = Router();
 
@@ -586,15 +592,36 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       .where(eq(metaAssets.userId, userId))
       .limit(1);
     
-    const adAccounts = adAccountsData.data || [];
+    const adAccountCandidates: unknown[] = Array.isArray(adAccountsData.data) ? adAccountsData.data : [];
+    const rawAdAccounts = adAccountCandidates
+      .map((account) => normalizeMetaAdAccount(account))
+      .filter((account): account is MetaAdAccount => account !== null);
+    const { pendingAccounts, allowedAccounts: adAccounts, blockedByIssue } = await filterAccessibleAdAccounts(
+      rawAdAccounts,
+      finalToken,
+      {
+        apiVersion: META_API_VERSION,
+        log: (message, details) => metaLog(traceId, message, details),
+      },
+    );
+    const noUsableAdAccountsMessage = adAccounts.length === 0
+      ? buildNoUsableAdAccountsMessage(rawAdAccounts.length, blockedByIssue)
+      : null;
+    const pendingAccountsForStorage = noUsableAdAccountsMessage ? [] : pendingAccounts;
     const pages = pagesData.data || [];
     
     // Always require ad account selection on each OAuth flow
+    // but only show ad accounts that are verified as usable for promote_pages.
     metaLog(traceId, "Preparing meta_assets update", {
       userId,
       hasExistingAssets: existingAssets.length > 0,
       adAccountsCount: adAccounts.length,
+      pendingAccountsCount: pendingAccounts.length,
+      pendingAccountsStoredCount: pendingAccountsForStorage.length,
+      rawAdAccountsCount: rawAdAccounts.length,
+      blockedByIssue,
       pagesCount: pages.length,
+      hasUsableAdAccounts: adAccounts.length > 0,
     });
     
     if (existingAssets.length > 0) {
@@ -603,7 +630,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         .set({
           metaUserId: meData.id,
           adAccountsJson: [], // Clear existing - user must select
-          pendingAdAccountsJson: adAccounts, // Store for selection
+          pendingAdAccountsJson: pendingAccountsForStorage, // Store for selection (includes excluded account diagnostics)
           pagesJson: pages,
           businessesJson: businesses,
           businessOwnedPagesJson: businessOwnedPages,
@@ -618,7 +645,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         userId,
         metaUserId: meData.id,
         adAccountsJson: [], // Empty until user selects
-        pendingAdAccountsJson: adAccounts, // Store for selection
+        pendingAdAccountsJson: pendingAccountsForStorage, // Store for selection (includes excluded account diagnostics)
         pagesJson: pages,
         businessesJson: businesses,
         businessOwnedPagesJson: businessOwnedPages,
@@ -627,11 +654,17 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       });
     }
     
-    // Save session and redirect to ad account selection page
+    const postAuthRedirect = noUsableAdAccountsMessage
+      ? metaErrorRedirect(noUsableAdAccountsMessage, traceId)
+      : "/select-ad-account";
+
+    // Save session and redirect either to selection or back to Connections with diagnostics.
     metaLog(traceId, "Saving session and finalizing OAuth", {
       userId,
       isPopup,
-      redirect: "/select-ad-account",
+      redirect: postAuthRedirect,
+      noUsableAdAccounts: !!noUsableAdAccountsMessage,
+      noUsableAdAccountsMessage,
     });
     req.session.save((err) => {
       if (err) {
@@ -641,15 +674,30 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         return sendMetaOauthError(res, isPopup, "Session save failed", traceId);
       }
       
+      if (noUsableAdAccountsMessage) {
+        if (isPopup) {
+          metaLog(traceId, "Popup OAuth completed with no usable ad accounts", {
+            redirect: postAuthRedirect,
+            message: noUsableAdAccountsMessage,
+          });
+          return res.send(popupResponse("oauth-error", noUsableAdAccountsMessage, postAuthRedirect, traceId));
+        }
+        metaLog(traceId, "OAuth completed with no usable ad accounts", {
+          redirect: postAuthRedirect,
+          message: noUsableAdAccountsMessage,
+        });
+        return res.redirect(postAuthRedirect);
+      }
+
       if (isPopup) {
         metaLog(traceId, "Popup OAuth success response sent", {
-          redirect: "/select-ad-account",
+          redirect: postAuthRedirect,
         });
-        return res.send(popupResponse("oauth-success", null, "/select-ad-account", traceId));
+        return res.send(popupResponse("oauth-success", null, postAuthRedirect, traceId));
       }
       
-      metaLog(traceId, "OAuth success redirect sent", { redirect: "/select-ad-account" });
-      res.redirect("/select-ad-account");
+      metaLog(traceId, "OAuth success redirect sent", { redirect: postAuthRedirect });
+      res.redirect(postAuthRedirect);
     });
     
   } catch (err) {

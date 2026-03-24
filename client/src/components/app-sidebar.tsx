@@ -200,27 +200,32 @@ export function AppSidebar() {
   } = useQuery<SidebarPagesResponse>({
     // Scope fallback pages cache to currently selected ad account so we never
     // reuse pages from a different account.
-    queryKey: ["/api/meta/pages", "sidebar", selectedAdAccountId || "none"],
+    queryKey: ["sidebar-meta-pages", selectedAdAccountId || "none"],
+    queryFn: async () => {
+      const res = await fetch("/api/meta/pages?refresh=true", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch pages");
+      return res.json();
+    },
     enabled: needsPagesFetch,
     staleTime: 60_000,
   });
 
   // When /api/meta/pages finishes fetching, refresh sidebar-data to pick up newly cached pages
   useEffect(() => {
-    if (fallbackPagesData?.data && fallbackPagesData.data.length > 0) {
+    if (isFallbackPagesFetched) {
       queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
     }
-  }, [fallbackPagesData]);
+  }, [isFallbackPagesFetched]);
 
   const adAccounts = sidebarData?.adAccounts || [];
   const hasPendingAccounts = sidebarData?.hasPendingAccounts || false;
   const fallbackPages = fallbackPagesData?.data || [];
-  const usingFallbackPages = needsPagesFetch && fallbackPages.length > 0;
+  const usingFallbackPages = needsPagesFetch && isFallbackPagesFetched;
   const metaPages = usingFallbackPages ? fallbackPages : (sidebarData?.pages || []);
   const selectedPageId = (usingFallbackPages
     ? (fallbackPagesData?.selectedPageId || sidebarData?.selectedPageId || "")
     : (sidebarData?.selectedPageId || "")) || "";
-  const isPageAutoSelected = sidebarData?.autoSelected || metaPages.length === 1;
+  const isPageAutoSelected = (usingFallbackPages ? fallbackPagesData?.autoSelected : sidebarData?.autoSelected) || metaPages.length === 1;
   const selectedPageFromList = metaPages.find((p) => p.id === selectedPageId) as MetaPage | undefined;
   const derivedInstagramAccounts = (selectedPageFromList?.instagram_accounts || []).map((a) => ({
     id: a.id,

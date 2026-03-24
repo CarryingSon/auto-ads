@@ -2,12 +2,15 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface AdAccount {
   id: string;
   name: string;
   account_status: number;
+  access_verified?: boolean;
+  access_issue?: "missing_ad_account_permission" | "meta_auth_error" | "meta_fetch_error" | "no_promotable_pages" | null;
+  promotable_pages_count?: number;
 }
 
 export default function SelectAdAccount() {
@@ -37,8 +40,20 @@ export default function SelectAdAccount() {
   });
 
   const accounts = pendingAccounts?.accounts || [];
+  const selectableAccounts = accounts.filter((account) => account.access_verified !== false);
+  const excludedAccounts = accounts.filter((account) => account.access_verified === false);
+  const selectableAccountIds = new Set(selectableAccounts.map((account) => account.id));
 
-  const toggleSelect = (accountId: string) => {
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => selectableAccountIds.has(id)));
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [accounts]);
+
+  const toggleSelect = (accountId: string, canSelect: boolean) => {
+    if (!canSelect) return;
     setSelectedIds(prev => {
       const newSet = new Set(prev);
       if (newSet.has(accountId)) {
@@ -51,10 +66,11 @@ export default function SelectAdAccount() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === accounts.length) {
+    if (selectableAccounts.length === 0) return;
+    if (selectedIds.size === selectableAccounts.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(accounts.map(a => a.id)));
+      setSelectedIds(new Set(selectableAccounts.map(a => a.id)));
     }
   };
 
@@ -69,6 +85,14 @@ export default function SelectAdAccount() {
     if (status === 3) return { text: "UNSETTLED", classes: "bg-orange-50 text-orange-600 border border-orange-200/60" };
     if (status === 2) return { text: "DISABLED", classes: "bg-red-50 text-red-600 border border-red-200/60" };
     return { text: "UNKNOWN", classes: "bg-slate-100 text-slate-500 border border-slate-200/60" };
+  };
+
+  const getAccessIssueBadge = (issue: AdAccount["access_issue"]) => {
+    if (issue === "missing_ad_account_permission") return { text: "MISSING PERMISSION", classes: "bg-red-50 text-red-600 border border-red-200/60" };
+    if (issue === "no_promotable_pages") return { text: "NO PROMOTABLE PAGES", classes: "bg-amber-50 text-amber-700 border border-amber-200/70" };
+    if (issue === "meta_auth_error") return { text: "AUTH ISSUE", classes: "bg-orange-50 text-orange-700 border border-orange-200/70" };
+    if (issue === "meta_fetch_error") return { text: "CHECK FAILED", classes: "bg-slate-100 text-slate-600 border border-slate-200/70" };
+    return null;
   };
 
   if (isLoading) {
@@ -121,7 +145,7 @@ export default function SelectAdAccount() {
           <div className="rounded-3xl p-8 flex flex-col gap-4 text-center" style={{ background: "rgba(255,255,255,0.65)", backdropFilter: "blur(24px) saturate(180%)", WebkitBackdropFilter: "blur(24px) saturate(180%)", border: "1px solid rgba(255,255,255,0.8)", boxShadow: "0 8px 32px rgba(24,119,242,0.06)" }}>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">No ad accounts found</h1>
             <p className="text-slate-500 text-sm leading-relaxed">
-              Meta did not return any ad accounts for this reconnect. You can try reconnecting or go back to Connections.
+              Meta did not return any usable ad accounts for this reconnect. This usually means missing permissions for ad account pages. You can reconnect and re-approve permissions, or go back to Connections.
             </p>
             <button
               onClick={() => { window.location.href = "/auth/meta/start"; }}
@@ -144,7 +168,7 @@ export default function SelectAdAccount() {
     );
   }
 
-  const allSelected = selectedIds.size === accounts.length && accounts.length > 0;
+  const allSelected = selectedIds.size === selectableAccounts.length && selectableAccounts.length > 0;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden" style={{ background: "linear-gradient(160deg, #e8f0fe 0%, #f5f8ff 25%, #ffffff 60%, #ffffff 100%)" }}>
@@ -167,13 +191,34 @@ export default function SelectAdAccount() {
             </p>
           </div>
 
+          {excludedAccounts.length > 0 && (
+            <div className="rounded-2xl p-4 flex gap-3 items-start bg-amber-50/65 border border-amber-200/70">
+              <span className="material-symbols-outlined text-amber-700 text-xl">info</span>
+              <p className="text-xs leading-normal text-amber-900">
+                <span className="font-semibold text-amber-800">{excludedAccounts.length} account(s)</span> are excluded because required permissions or promotable pages are missing.
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-col gap-3 max-h-[400px] overflow-y-auto pr-1" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(0,0,0,0.08) transparent" }}>
             <label
               className="rounded-2xl p-4 flex items-center gap-4 cursor-pointer transition-all"
               onClick={toggleSelectAll}
-              style={{ background: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.5)" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.9)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.7)"; e.currentTarget.style.transform = "translateY(0)"; }}
+              style={{
+                background: selectableAccounts.length > 0 ? "rgba(255,255,255,0.7)" : "rgba(248,250,252,0.75)",
+                border: "1px solid rgba(255,255,255,0.5)",
+                opacity: selectableAccounts.length > 0 ? 1 : 0.75,
+                cursor: selectableAccounts.length > 0 ? "pointer" : "not-allowed",
+              }}
+              onMouseEnter={(e) => {
+                if (selectableAccounts.length === 0) return;
+                e.currentTarget.style.background = "rgba(255,255,255,0.9)";
+                e.currentTarget.style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = selectableAccounts.length > 0 ? "rgba(255,255,255,0.7)" : "rgba(248,250,252,0.75)";
+                e.currentTarget.style.transform = "translateY(0)";
+              }}
               data-testid="checkbox-select-all"
             >
               <div
@@ -186,24 +231,50 @@ export default function SelectAdAccount() {
               >
                 {allSelected && <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#fff" }}>check</span>}
               </div>
-              <span className="text-slate-700 font-medium">{allSelected ? "Deselect all" : "Select all accounts"}</span>
+              <span className="text-slate-700 font-medium">
+                {selectableAccounts.length === 0
+                  ? "No selectable accounts"
+                  : allSelected
+                    ? "Deselect all"
+                    : `Select all (${selectableAccounts.length})`}
+              </span>
             </label>
 
             {accounts.map((account) => {
-              const isSelected = selectedIds.has(account.id);
+              const isSelectable = account.access_verified !== false;
+              const isSelected = isSelectable && selectedIds.has(account.id);
               const badge = getStatusBadge(account.account_status);
+              const issueBadge = getAccessIssueBadge(account.access_issue);
 
               return (
                 <div
                   key={account.id}
-                  className="rounded-2xl p-4 flex items-center justify-between gap-3 cursor-pointer transition-all group"
+                  className="rounded-2xl p-4 flex items-center justify-between gap-3 transition-all group"
                   style={{
-                    background: isSelected ? "rgba(24,119,242,0.06)" : "rgba(255,255,255,0.7)",
-                    border: isSelected ? "1px solid rgba(24,119,242,0.3)" : "1px solid rgba(255,255,255,0.5)",
+                    background: !isSelectable
+                      ? "rgba(248,113,113,0.06)"
+                      : isSelected
+                        ? "rgba(24,119,242,0.06)"
+                        : "rgba(255,255,255,0.7)",
+                    border: !isSelectable
+                      ? "1px solid rgba(248,113,113,0.25)"
+                      : isSelected
+                        ? "1px solid rgba(24,119,242,0.3)"
+                        : "1px solid rgba(255,255,255,0.5)",
+                    opacity: isSelectable ? 1 : 0.85,
+                    cursor: isSelectable ? "pointer" : "not-allowed",
                   }}
-                  onClick={() => toggleSelect(account.id)}
-                  onMouseEnter={(e) => { if (!isSelected) { e.currentTarget.style.background = "rgba(255,255,255,0.9)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-                  onMouseLeave={(e) => { if (!isSelected) { e.currentTarget.style.background = "rgba(255,255,255,0.7)"; e.currentTarget.style.transform = "translateY(0)"; } }}
+                  onClick={() => toggleSelect(account.id, isSelectable)}
+                  onMouseEnter={(e) => {
+                    if (!isSelectable || isSelected) return;
+                    e.currentTarget.style.background = "rgba(255,255,255,0.9)";
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelectable || isSelected) return;
+                    e.currentTarget.style.background = "rgba(255,255,255,0.7)";
+                    e.currentTarget.style.transform = "translateY(0)";
+                  }}
                   data-testid={`card-account-${account.id}`}
                 >
                   <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -211,11 +282,16 @@ export default function SelectAdAccount() {
                       className="flex items-center justify-center shrink-0 transition-all"
                       style={{
                         width: 24, height: 24, borderRadius: "50%",
-                        border: isSelected ? "2px solid #1877F2" : "2px solid rgba(148,163,184,0.4)",
-                        background: isSelected ? "#1877F2" : "rgba(255,255,255,0.8)",
+                        border: isSelectable
+                          ? (isSelected ? "2px solid #1877F2" : "2px solid rgba(148,163,184,0.4)")
+                          : "2px solid rgba(248,113,113,0.4)",
+                        background: isSelectable
+                          ? (isSelected ? "#1877F2" : "rgba(255,255,255,0.8)")
+                          : "rgba(255,255,255,0.8)",
                       }}
                     >
                       {isSelected && <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#fff" }}>check</span>}
+                      {!isSelectable && <span className="material-symbols-outlined" style={{ fontSize: 14, color: "#dc2626" }}>block</span>}
                     </div>
                     <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-slate-100 border border-slate-200/60">
                       <span className="material-symbols-outlined text-slate-500">business</span>
@@ -223,11 +299,23 @@ export default function SelectAdAccount() {
                     <div className="flex-1 min-w-0">
                       <p className="text-slate-800 font-semibold text-sm truncate">{account.name}</p>
                       <p className="text-slate-400 text-[11px] font-mono truncate">{account.id}</p>
+                      {isSelectable && Number.isFinite(Number(account.promotable_pages_count)) && (
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Promotable pages: {Number(account.promotable_pages_count)}
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider shrink-0 ${badge.classes}`}>
-                    {badge.text}
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${badge.classes}`}>
+                      {badge.text}
+                    </span>
+                    {issueBadge && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${issueBadge.classes}`}>
+                        {issueBadge.text}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}
