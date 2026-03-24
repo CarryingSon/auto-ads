@@ -33,66 +33,20 @@ const freePlanFeatures = ["3 launches / month", "Dashboard overview", "Google Dr
 const paidPlanFeatures = ["Unlimited launches", "Unlimited Drive syncs", "Auto-disable enhancements", "Google Drive integration", "Auto-naming from filenames", "Saved ad copy templates"];
 
 function DemoVideoPlaceholder() {
-  const [isHovered, setIsHovered] = useState(false);
-
   return (
-    <div
-      className="w-full max-w-4xl mx-auto mt-12 relative group cursor-pointer"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      data-testid="demo-video-placeholder"
-    >
-      <div className="absolute -inset-2 bg-gradient-to-r from-[#1877F2]/20 via-blue-400/20 to-[#1877F2]/20 rounded-3xl blur-xl opacity-40 group-hover:opacity-70 transition duration-1000 group-hover:duration-200" />
+    <div className="w-full max-w-4xl mx-auto mt-12 relative" data-testid="demo-video-placeholder">
+      <div className="absolute -inset-2 bg-gradient-to-r from-[#1877F2]/20 via-blue-400/20 to-[#1877F2]/20 rounded-3xl blur-xl opacity-40" />
       <div className="relative bg-white rounded-xl overflow-hidden shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] border border-slate-200 aspect-video ring-1 ring-slate-900/5">
-        <div className="bg-slate-50/80 border-b border-slate-200 p-3 flex items-center gap-2 backdrop-blur-sm z-10 relative">
-          <div className="flex gap-1.5 ml-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-slate-300 group-hover:bg-red-400 transition-colors" />
-            <div className="w-2.5 h-2.5 rounded-full bg-slate-300 group-hover:bg-yellow-400 transition-colors" />
-            <div className="w-2.5 h-2.5 rounded-full bg-slate-300 group-hover:bg-green-400 transition-colors" />
-          </div>
-          <div className="mx-auto bg-white px-3 py-1 rounded-md text-[10px] text-slate-400 font-mono border border-slate-200 flex items-center gap-2 shadow-sm">
-            <i className="fas fa-lock text-[8px] text-slate-300" />
-            <span className="text-slate-600">app.auto-ads.io/demo</span>
-          </div>
-        </div>
-        <div className="absolute inset-0 top-10 bg-white flex">
-          <div className="w-48 h-full border-r border-slate-100 bg-slate-50/50 p-4 hidden sm:block">
-            <div className="h-6 w-24 bg-slate-200 rounded-md mb-6" />
-            <div className="space-y-3">
-              <div className="h-3 w-full bg-blue-50 rounded" />
-              <div className="h-3 w-3/4 bg-slate-100 rounded" />
-              <div className="h-3 w-5/6 bg-slate-100 rounded" />
-            </div>
-          </div>
-          <div className="flex-1 p-6 relative">
-            <div className="flex justify-between mb-8 flex-wrap gap-2">
-              <div className="h-8 w-32 bg-slate-100 rounded-lg" />
-              <div className="h-8 w-8 rounded-full bg-slate-100" />
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="aspect-video bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl border border-slate-100 shadow-sm" />
-              <div className="aspect-video bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl border border-slate-100 shadow-sm" />
-              <div className="aspect-video bg-gradient-to-br from-blue-50/50 to-white rounded-xl border border-blue-100 shadow-sm" />
-            </div>
-            <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px]" />
-          </div>
-        </div>
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
-          <div className={`relative transition-transform duration-500 ${isHovered ? "scale-110" : "scale-100"}`}>
-            <div className={`absolute inset-0 bg-[#1877F2] rounded-full opacity-20 ${isHovered ? "animate-ping" : ""}`} />
-            <div className="relative w-20 h-20 md:w-24 md:h-24 bg-gradient-to-br from-[#1877F2] to-blue-600 rounded-full flex items-center justify-center shadow-[0_20px_40px_rgba(24,119,242,0.35)] border-4 border-white ring-1 ring-slate-100 group-hover:shadow-[0_25px_50px_rgba(24,119,242,0.5)] transition-all">
-              <i className="fas fa-play text-white text-2xl md:text-3xl ml-1.5 drop-shadow-md" />
-            </div>
-          </div>
-          <div className="mt-6 text-center">
-            <h3 className="text-slate-900 font-extrabold text-lg md:text-xl tracking-tight mb-1">
-              See how it works
-            </h3>
-            <p className="text-slate-500 font-medium text-sm flex items-center justify-center gap-2">
-              <i className="far fa-clock text-[#1877F2]" /> 1 min demo
-            </p>
-          </div>
-        </div>
+        <video
+          className="w-full h-full object-cover"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+        >
+          <source src="/auto-ads-hero.mp4" type="video/mp4" />
+        </video>
       </div>
     </div>
   );
