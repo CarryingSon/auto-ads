@@ -61,6 +61,15 @@ interface SidebarData {
   drive: { email: string | null; connected: boolean };
 }
 
+interface SidebarPagesResponse {
+  data: MetaPage[];
+  selectedPageId: string | null;
+  filteredByAdAccount?: boolean;
+  autoSelected?: boolean;
+  source?: string;
+  accessIssue?: "missing_ad_account_permission" | "meta_auth_error" | "meta_not_connected" | "meta_fetch_error" | null;
+}
+
 interface BillingStatusSummary {
   planType: "free" | "pro";
   uploadsUsed: number;
@@ -181,18 +190,19 @@ export function AppSidebar() {
     hasSelectedAdAccount &&
     (
       !isAccountScopeResolved ||
-      (sidebarPageCount > 0 && !hasSelectedPage)
+      !hasSelectedPage
     );
 
   const {
     data: fallbackPagesData,
     isFetching: isFallbackPagesFetching,
     isFetched: isFallbackPagesFetched,
-  } = useQuery<{ data: MetaPage[]; selectedPageId: string | null }>({
+  } = useQuery<SidebarPagesResponse>({
     // Scope fallback pages cache to currently selected ad account so we never
     // reuse pages from a different account.
     queryKey: ["/api/meta/pages", "sidebar", selectedAdAccountId || "none"],
     enabled: needsPagesFetch,
+    staleTime: 60_000,
   });
 
   // When /api/meta/pages finishes fetching, refresh sidebar-data to pick up newly cached pages
@@ -422,6 +432,14 @@ export function AppSidebar() {
       isPagesLoading
     );
   const areBothAccountsReady = !showAccountScopedSkeleton;
+  const pageAccessIssue = fallbackPagesData?.accessIssue || null;
+  const pagesMissingPermission = pageAccessIssue === "missing_ad_account_permission";
+  const facebookPagesEmptyMessage = pagesMissingPermission
+    ? "This ad account is missing Facebook Page permissions. Reconnect Meta and include this account."
+    : "No pages found for this ad account";
+  const instagramDependencyMessage = pagesMissingPermission
+    ? "Missing Facebook Page permissions for this ad account"
+    : "Select a Facebook Page first";
 
   return (
     <Sidebar className="sidebar-pane border-r-0">
@@ -570,7 +588,7 @@ export function AppSidebar() {
                 {!selectedAdAccountId ? (
                   <span className="text-[10px] text-muted-foreground">Select ad account first</span>
                 ) : metaPages.length === 0 ? (
-                  <span className="text-[10px] text-muted-foreground">No pages found for this ad account</span>
+                  <span className="text-[10px] text-muted-foreground">{facebookPagesEmptyMessage}</span>
                 ) : isPageAutoSelected ? (
                   <div className="flex items-center gap-2">
                     <div className="w-5 h-5 rounded-full bg-[#1877F2] flex items-center justify-center text-white shrink-0">
@@ -628,7 +646,7 @@ export function AppSidebar() {
                 {!selectedAdAccountId ? (
                   <span className="text-[10px] text-muted-foreground">Select ad account first</span>
                 ) : metaPages.length === 0 ? (
-                  <span className="text-[10px] text-muted-foreground">Select a Facebook Page first</span>
+                  <span className="text-[10px] text-muted-foreground">{instagramDependencyMessage}</span>
                 ) : instagramAccounts.length > 1 ? (
                   <Tooltip>
                     <TooltipTrigger asChild>

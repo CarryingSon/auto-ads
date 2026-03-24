@@ -4547,7 +4547,7 @@ export async function registerRoutes(
         .limit(1);
 
       if (!assets.length) {
-        return res.json({ data: [], selectedPageId: null });
+        return res.json({ data: [], selectedPageId: null, accessIssue: null });
       }
 
       const selectedAdAccountId = assets[0].selectedAdAccountId;
@@ -4577,6 +4577,7 @@ export async function registerRoutes(
             filteredByAdAccount: true,
             autoSelected,
             source: "cache",
+            accessIssue: null,
           });
         }
       }
@@ -4601,6 +4602,42 @@ export async function registerRoutes(
           const promoteUrl = `https://graph.facebook.com/v21.0/${selectedAdAccountId}/promote_pages?fields=id,name,access_token&access_token=${accessToken}`;
           console.log(`[Pages] Fetching promote_pages for ad account: ${selectedAdAccountId}`);
           const promoteData = await cachedMetaFetch(promoteUrl, `promote_pages_${selectedAdAccountId}`);
+
+          if (promoteData?.error) {
+            const rawCode = (promoteData.error as any)?.code;
+            const code = typeof rawCode === "number" ? rawCode : Number(rawCode);
+            const message = String((promoteData.error as any)?.message || "");
+            const lowerMessage = message.toLowerCase();
+            const isPermissionError =
+              code === 10 ||
+              code === 200 ||
+              lowerMessage.includes("permission") ||
+              lowerMessage.includes("not authorized") ||
+              lowerMessage.includes("not have access") ||
+              lowerMessage.includes("insufficient");
+            const isAuthError =
+              code === 190 ||
+              lowerMessage.includes("access token") ||
+              lowerMessage.includes("oauth");
+            const accessIssue = isPermissionError
+              ? "missing_ad_account_permission"
+              : isAuthError
+                ? "meta_auth_error"
+                : "meta_fetch_error";
+
+            console.warn(
+              `[Pages] promote_pages failed for ${selectedAdAccountId}. issue=${accessIssue}, code=${Number.isFinite(code) ? code : "unknown"}, message=${message}`,
+            );
+
+            return res.json({
+              data: [],
+              selectedPageId: null,
+              filteredByAdAccount: true,
+              autoSelected: false,
+              source: "fallback-empty",
+              accessIssue,
+            });
+          }
           
           if (promoteData.data && Array.isArray(promoteData.data)) {
             const filteredPages = promoteData.data.map((p: { id: string; name: string; access_token?: string }) => ({
@@ -4738,12 +4775,40 @@ export async function registerRoutes(
               filteredByAdAccount: true,
               autoSelected: filteredPages.length === 1 || (filteredPages.length > 0 && !currentSelectionInList),
               source: "live",
+              accessIssue: null,
             });
           }
+
+          return res.json({
+            data: [],
+            selectedPageId: null,
+            filteredByAdAccount: true,
+            autoSelected: false,
+            source: "fallback-empty",
+            accessIssue: "meta_fetch_error",
+          });
         } catch (apiError) {
           console.error("Error fetching promote_pages, falling back to all pages:", apiError);
-          // Fall through to return all pages
+          return res.json({
+            data: [],
+            selectedPageId: null,
+            filteredByAdAccount: true,
+            autoSelected: false,
+            source: "fallback-empty",
+            accessIssue: "meta_fetch_error",
+          });
         }
+      }
+
+      if (selectedAdAccountId && !accessToken) {
+        return res.json({
+          data: [],
+          selectedPageId: null,
+          filteredByAdAccount: true,
+          autoSelected: false,
+          source: "fallback-empty",
+          accessIssue: "meta_not_connected",
+        });
       }
 
       // If ad account-scoped fetch fails, return empty instead of global pages
@@ -4755,6 +4820,7 @@ export async function registerRoutes(
           filteredByAdAccount: true,
           autoSelected: false,
           source: "fallback-empty",
+          accessIssue: "meta_fetch_error",
         });
       }
 
@@ -4780,7 +4846,8 @@ export async function registerRoutes(
       res.json({
         data: allPages, 
         selectedPageId: assets[0].selectedPageId,
-        filteredByAdAccount: false
+        filteredByAdAccount: false,
+        accessIssue: null,
       });
     } catch (error: any) {
       console.error("Error fetching pages:", error);
