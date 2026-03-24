@@ -14,6 +14,12 @@ const VALID_OBJECTIVES = [
 
 const VALID_BUDGET_TYPES = ["DAILY", "LIFETIME"];
 const VALID_GENDERS = ["ALL", "MALE", "FEMALE"];
+const VALID_CONVERSION_EVENTS = [
+  "PURCHASE", "LEAD", "COMPLETE_REGISTRATION", "ADD_TO_CART", "INITIATE_CHECKOUT",
+  "VIEW_CONTENT", "SEARCH", "ADD_PAYMENT_INFO", "CONTACT", "SUBSCRIBE",
+  "START_TRIAL", "CUSTOMIZE_PRODUCT", "ADD_TO_WISHLIST", "DONATE", "SCHEDULE",
+  "SUBMIT_APPLICATION",
+];
 
 const SUPPORTED_VIDEO_MIMES = [
   "video/mp4", "video/quicktime", "video/x-msvideo", "video/x-ms-wmv",
@@ -67,6 +73,7 @@ interface LaunchDataParams {
     objective?: string;
     budgetType?: string;
     budgetAmount?: number;
+    conversionEvent?: string;
     isCBO?: boolean;
     startDate?: string;
     startTime?: string;
@@ -82,6 +89,7 @@ interface LaunchDataParams {
     pixelId?: string;
     audienceType?: string;
     audienceId?: string;
+    optimizationGoal?: string;
     dailyMinSpendTarget?: number;
     dailySpendCap?: number;
     lifetimeSpendCap?: number;
@@ -125,6 +133,16 @@ function isValidUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isPlaceholderUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return host === "example.com" || host === "www.example.com";
   } catch {
     return false;
   }
@@ -389,6 +407,40 @@ export function validateMetaLaunchData(params: LaunchDataParams): ValidationResu
     });
   }
 
+  // Objective/optimization alignment for conversion campaigns
+  const effectiveObjective = cs.objective || "OUTCOME_SALES";
+  const requiresConversionSignals =
+    effectiveObjective === "OUTCOME_SALES" ||
+    as.optimizationGoal === "OFFSITE_CONVERSIONS";
+
+  if (requiresConversionSignals) {
+    if (!as.pixelId || as.pixelId.trim().length === 0) {
+      errors.push({
+        field: "pixelId",
+        message: `Campaign objective "${effectiveObjective}" requires a Meta Pixel ID.`,
+        severity: "error",
+      });
+    }
+
+    const rawConversionEvent = cs.conversionEvent?.trim() || "";
+    if (!rawConversionEvent) {
+      errors.push({
+        field: "conversionEvent",
+        message: `Campaign objective "${effectiveObjective}" requires a conversion event (e.g. PURCHASE).`,
+        severity: "error",
+      });
+    } else {
+      const normalizedConversionEvent = rawConversionEvent.toUpperCase();
+      if (!VALID_CONVERSION_EVENTS.includes(normalizedConversionEvent)) {
+        errors.push({
+          field: "conversionEvent",
+          message: `Invalid conversion event "${rawConversionEvent}". Use a valid Meta custom_event_type (e.g. PURCHASE, LEAD, ADD_TO_CART, COMPLETE_REGISTRATION).`,
+          severity: "error",
+        });
+      }
+    }
+  }
+
   // ===== 4. AD SETTINGS =====
   const ads = params.adSettings;
 
@@ -418,12 +470,24 @@ export function validateMetaLaunchData(params: LaunchDataParams): ValidationResu
       message: `Invalid default URL "${ads.defaultUrl}". Must be a valid http:// or https:// URL.`,
       severity: "error",
     });
+  } else if (isPlaceholderUrl(ads.defaultUrl)) {
+    errors.push({
+      field: "defaultUrl",
+      message: `Default URL "${ads.defaultUrl}" is a placeholder. Set a real landing URL before launch.`,
+      severity: "error",
+    });
   }
 
   if (ads.websiteUrl && !isValidUrl(ads.websiteUrl)) {
     errors.push({
       field: "websiteUrl",
       message: `Invalid website URL "${ads.websiteUrl}". Must be a valid http:// or https:// URL.`,
+      severity: "error",
+    });
+  } else if (ads.websiteUrl && isPlaceholderUrl(ads.websiteUrl)) {
+    errors.push({
+      field: "websiteUrl",
+      message: `Website URL "${ads.websiteUrl}" is a placeholder. Set a real landing URL before launch.`,
       severity: "error",
     });
   }
@@ -647,12 +711,20 @@ export function validateMetaLaunchData(params: LaunchDataParams): ValidationResu
     }
 
     const overrideUrl = override?.url;
-    if (overrideUrl && !isValidUrl(overrideUrl)) {
-      errors.push({
-        field: `adset_${adset.name}_url`,
-        message: `Ad set "${adset.name}" has invalid URL "${overrideUrl}".`,
-        severity: "error",
-      });
+    if (overrideUrl) {
+      if (!isValidUrl(overrideUrl)) {
+        errors.push({
+          field: `adset_${adset.name}_url`,
+          message: `Ad set "${adset.name}" has invalid URL "${overrideUrl}".`,
+          severity: "error",
+        });
+      } else if (isPlaceholderUrl(overrideUrl)) {
+        errors.push({
+          field: `adset_${adset.name}_url`,
+          message: `Ad set "${adset.name}" uses placeholder URL "${overrideUrl}". Set a real landing URL.`,
+          severity: "error",
+        });
+      }
     }
   }
 
@@ -703,6 +775,12 @@ export function validateAdSetBeforeCreation(params: {
   if (!params.finalUrl || !isValidUrl(params.finalUrl)) {
     const urlDisplay = params.finalUrl || "(empty)";
     errors.push({ field: "finalUrl", message: `Ad set "${params.adSetName}" has invalid destination URL: ${urlDisplay}`, severity: "error" });
+  } else if (isPlaceholderUrl(params.finalUrl)) {
+    errors.push({
+      field: "finalUrl",
+      message: `Ad set "${params.adSetName}" uses placeholder URL "${params.finalUrl}". Set a real landing URL before launch.`,
+      severity: "error",
+    });
   }
 
   if (!params.finalCta || !VALID_CTA_TYPES.includes(params.finalCta)) {
