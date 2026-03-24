@@ -245,9 +245,12 @@ export default function Landing() {
             <div className="space-y-8">
               <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-gray-900 leading-[1.15]">
                 Auto-launch ads from{" "}
-                <span className="text-[#1877F2] relative inline-block">
-                  Google Drive
-                  <span className="absolute bottom-1 left-0 w-full h-3 bg-blue-200/50 -z-10 rounded-full blur-sm" />
+                <span className="text-[#1877F2] inline-flex items-center gap-2">
+                  <i className="fab fa-google-drive text-[0.9em]" />
+                  <span className="relative inline-block">
+                    Google Drive
+                    <span className="absolute bottom-1 left-0 w-full h-3 bg-blue-200/50 -z-10 rounded-full blur-sm" />
+                  </span>
                 </span>
                 <br />
                 directly to{" "}

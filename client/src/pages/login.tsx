@@ -52,7 +52,7 @@ export default function LoginPage() {
             <img
               src="/favicon.png"
               alt="Auto-ads logo"
-              className="w-8 h-8 object-contain"
+              className="h-8 w-auto object-contain shrink-0"
             />
             <span>Auto-ads</span>
           </Link>
