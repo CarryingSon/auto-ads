@@ -34,7 +34,7 @@ const paidPlanFeatures = ["Unlimited launches", "Unlimited Drive syncs", "Auto-d
 
 function DemoVideoPlaceholder() {
   return (
-    <div className="w-full max-w-4xl mx-auto mt-12 relative" data-testid="demo-video-placeholder">
+    <div className="w-full max-w-none mx-auto mt-8 lg:mt-0 lg:w-[112%] relative" data-testid="demo-video-placeholder">
       <div className="absolute -inset-2 bg-gradient-to-r from-[#1877F2]/20 via-blue-400/20 to-[#1877F2]/20 rounded-3xl blur-xl opacity-40" />
       <div className="relative bg-white rounded-xl overflow-hidden shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] border border-slate-200 aspect-video ring-1 ring-slate-900/5">
         <video
@@ -195,7 +195,7 @@ export default function Landing() {
       {/* HERO */}
       <section className="relative pt-32 pb-16 overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
+          <div className="grid lg:grid-cols-2 gap-8 xl:gap-12 items-center">
             <div className="space-y-8">
               <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-gray-900 leading-[1.15]">
                 Auto-launch ads from{" "}
@@ -274,7 +274,7 @@ export default function Landing() {
             </div>
 
             {/* HERO RIGHT - Demo Video */}
-            <div className="relative lg:ml-10">
+            <div className="relative">
               <DemoVideoPlaceholder />
               <div className="flex justify-center mt-4">
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/30 backdrop-blur-xl border border-white/50 shadow-[0_4px_16px_rgba(0,0,0,0.04)] ring-1 ring-black/5 transition-all hover:scale-[1.02]">
