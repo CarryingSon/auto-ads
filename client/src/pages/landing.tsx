@@ -72,33 +72,13 @@ export default function Landing() {
   const savedWorkDaysPerMonth = savedMonthlyHours / 8;
   const autoSecondsPerAd = Math.round(autoMinutesPerAd * 60);
   const headerOffsetPx = 96;
-  const scrollDurationMs = 1000;
 
-  const easeInOutCubic = (t: number) => {
-    return t < 0.5
-      ? 4 * t * t * t
-      : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  };
-
-  const animateScrollTo = (targetY: number, durationMs: number) => {
-    const startY = window.scrollY;
-    const deltaY = targetY - startY;
-
-    if (Math.abs(deltaY) < 1) return;
-
-    const startTime = performance.now();
-    const step = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const progress = Math.min(1, elapsed / durationMs);
-      const easedProgress = easeInOutCubic(progress);
-      window.scrollTo(0, startY + deltaY * easedProgress);
-
-      if (progress < 1) {
-        window.requestAnimationFrame(step);
-      }
-    };
-
-    window.requestAnimationFrame(step);
+  const scrollToY = (targetY: number) => {
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({
+      top: Math.max(0, targetY),
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+    });
   };
 
   const handleSmoothScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
@@ -106,19 +86,12 @@ export default function Landing() {
     const element = document.getElementById(targetId);
     if (!element) return;
 
-    const targetY = Math.max(0, window.scrollY + element.getBoundingClientRect().top - headerOffsetPx);
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    if (prefersReducedMotion) {
-      window.scrollTo({ top: targetY, behavior: "auto" });
-      return;
-    }
-
-    animateScrollTo(targetY, scrollDurationMs);
+    const targetY = window.scrollY + element.getBoundingClientRect().top - headerOffsetPx;
+    scrollToY(targetY);
   };
 
   return (
-    <div className="min-h-screen scroll-smooth overflow-x-hidden relative" style={{ fontFamily: "'Inter', sans-serif", background: "#f8f9ff", color: "#1e293b" }}>
+    <div className="min-h-screen overflow-x-hidden relative" style={{ fontFamily: "'Inter', sans-serif", background: "#f8f9ff", color: "#1e293b" }}>
       <style>{`
         .gradient-text {
           background: linear-gradient(90deg, #1877F2 0%, #3b82f6 100%);
@@ -176,7 +149,6 @@ export default function Landing() {
         }
         details summary::-webkit-details-marker { display: none; }
         details summary { list-style: none; }
-        html { scroll-behavior: smooth; }
         @media (max-width: 1024px) {
           .blob-bg { display: none; }
           .glass-card, .glass-heavy {
@@ -186,7 +158,6 @@ export default function Landing() {
           .glass-card::before { display: none; }
         }
         @media (prefers-reduced-motion: reduce) {
-          html { scroll-behavior: auto; }
           .glass-card, .glass-card::before, .glass-heavy {
             transition: none !important;
           }
@@ -230,12 +201,7 @@ export default function Landing() {
                     onClick={(e) => {
                       if (item.href === "#") {
                         e.preventDefault();
-                        const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-                        if (prefersReducedMotion) {
-                          window.scrollTo({ top: 0, behavior: "auto" });
-                          return;
-                        }
-                        animateScrollTo(0, scrollDurationMs);
+                        scrollToY(0);
                         return;
                       }
                       handleSmoothScroll(e, item.href.slice(1));
