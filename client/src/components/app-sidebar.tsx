@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -72,7 +72,6 @@ interface SidebarPagesResponse {
     | "meta_auth_error"
     | "meta_not_connected"
     | "meta_fetch_error"
-    | "no_matching_page_for_ad_account"
     | null;
 }
 
@@ -83,7 +82,7 @@ interface BillingStatusSummary {
   uploadsRemaining: number | null;
 }
 
-const SIDEBAR_CACHE_PREFIX = "auto_ads_sidebar_cache_v1";
+const SIDEBAR_CACHE_PREFIX = "auto_ads_sidebar_cache_v3";
 const SIDEBAR_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 
 interface SidebarCacheEntry {
@@ -289,25 +288,6 @@ export function AppSidebar() {
         job.status === "launched",
     );
 
-  const lastAutoSelectedForAdAccount = useRef<string | null>(null);
-  const [hasManualPageOverride, setHasManualPageOverride] = useState(false);
-
-  const normalizeName = (name: string): string => {
-    return name.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
-  };
-
-  const findMatchingPage = (adAccountName: string): MetaPage | undefined => {
-    const normalizedAdName = normalizeName(adAccountName);
-    let match = metaPages.find(page => normalizeName(page.name) === normalizedAdName);
-    if (!match) {
-      match = metaPages.find(page =>
-        normalizeName(page.name).includes(normalizedAdName) ||
-        normalizedAdName.includes(normalizeName(page.name))
-      );
-    }
-    return match;
-  };
-
   const updatePageMutation = useMutation({
     mutationFn: async (pageId: string) => {
       const res = await apiRequest("PATCH", "/api/meta/pages/selected", { pageId });
@@ -328,8 +308,6 @@ export function AppSidebar() {
     },
     onMutate: async (adAccountId: string) => {
       setIsAdAccountSwitching(true);
-      setHasManualPageOverride(false);
-      lastAutoSelectedForAdAccount.current = null;
 
       await queryClient.cancelQueries({ queryKey: ["/api/sidebar-data"] });
       const previousData = queryClient.getQueryData(["/api/sidebar-data"]);
@@ -371,30 +349,6 @@ export function AppSidebar() {
     },
   });
 
-  // Auto-select page by name match when ad account changes
-  useEffect(() => {
-    if (!selectedAdAccountId || metaPages.length === 0 || updatePageMutation.isPending) {
-      return;
-    }
-    if (lastAutoSelectedForAdAccount.current === selectedAdAccountId) {
-      return;
-    }
-    if (hasManualPageOverride) {
-      return;
-    }
-    const selectedAdAccount = adAccounts.find(a => a.id === selectedAdAccountId);
-    if (!selectedAdAccount) {
-      return;
-    }
-    const matchingPage = findMatchingPage(selectedAdAccount.name);
-    if (matchingPage && matchingPage.id !== selectedPageId) {
-      lastAutoSelectedForAdAccount.current = selectedAdAccountId;
-      updatePageMutation.mutate(matchingPage.id);
-    } else {
-      lastAutoSelectedForAdAccount.current = selectedAdAccountId;
-    }
-  }, [selectedAdAccountId, metaPages, adAccounts, selectedPageId, hasManualPageOverride]);
-
   const updateInstagramMutation = useMutation({
     mutationFn: async ({ instagramPageId, instagramPageName }: { instagramPageId: string; instagramPageName: string }) => {
       const res = await apiRequest("PATCH", "/api/settings", { instagramPageId, instagramPageName });
@@ -429,11 +383,6 @@ export function AppSidebar() {
     }
   };
 
-  const handleManualPageChange = (pageId: string) => {
-    setHasManualPageOverride(true);
-    updatePageMutation.mutate(pageId);
-  };
-
   const handleAdAccountChange = (adAccountId: string) => {
     updateAdAccountMutation.mutate(adAccountId);
   };
@@ -465,17 +414,12 @@ export function AppSidebar() {
   const areBothAccountsReady = !showAccountScopedSkeleton;
   const pageAccessIssue = fallbackPagesData?.accessIssue || null;
   const pagesMissingPermission = pageAccessIssue === "missing_ad_account_permission";
-  const pagesNoNameMatch = pageAccessIssue === "no_matching_page_for_ad_account";
   const facebookPagesEmptyMessage = pagesMissingPermission
     ? "This ad account is missing Facebook Page permissions. Reconnect Meta and include this account."
-    : pagesNoNameMatch
-      ? "No matching Facebook Page found for this ad account."
-      : "No pages found for this ad account";
+    : "No pages found for this ad account";
   const instagramDependencyMessage = pagesMissingPermission
     ? "Missing Facebook Page permissions for this ad account"
-    : pagesNoNameMatch
-      ? "No matching Facebook/Instagram profile for this ad account"
-      : "Select a Facebook Page first";
+    : "Select a Facebook Page first";
 
   return (
     <Sidebar className="sidebar-pane border-r-0">
@@ -640,7 +584,7 @@ export function AppSidebar() {
                       <div>
                         <Select
                           value={selectedPageId}
-                          onValueChange={handleManualPageChange}
+                          onValueChange={(pageId) => updatePageMutation.mutate(pageId)}
                           disabled={hasActiveJob}
                         >
                           <SelectTrigger className="w-full h-8 text-xs carved-input" data-testid="select-facebook-page">

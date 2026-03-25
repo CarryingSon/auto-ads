@@ -73,59 +73,6 @@ function getAdAccountIdVariants(adAccountId: string): string[] {
   return variants;
 }
 
-function normalizeEntityName(value: string): string {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "")
-    .trim();
-}
-
-function getSelectedAdAccountNameFromList(
-  adAccounts: Array<{ id?: unknown; name?: unknown }> | undefined | null,
-  selectedAdAccountId: string | null | undefined,
-): string | null {
-  if (!Array.isArray(adAccounts) || !selectedAdAccountId) return null;
-  const selectedNormalized = normalizeAdAccountId(selectedAdAccountId);
-  const matched = adAccounts.find(
-    (account) => normalizeAdAccountId(String(account?.id || "")) === selectedNormalized,
-  );
-  if (!matched) return null;
-  const resolved = String(matched.name || matched.id || "").trim();
-  return resolved || null;
-}
-
-function pageNameMatchesAdAccountName(pageName: string, adAccountName: string): boolean {
-  const normalizedPage = normalizeEntityName(pageName);
-  const normalizedAd = normalizeEntityName(adAccountName);
-  if (!normalizedPage || !normalizedAd) return false;
-  if (normalizedPage === normalizedAd) return true;
-  const minContainsLength = 4;
-  if (normalizedPage.length >= minContainsLength && normalizedAd.includes(normalizedPage)) return true;
-  if (normalizedAd.length >= minContainsLength && normalizedPage.includes(normalizedAd)) return true;
-  return false;
-}
-
-function filterPagesForAdAccountName<T extends { id?: string; name?: unknown }>(
-  pages: T[],
-  adAccountName: string | null,
-): { pages: T[]; mode: "not_applied" | "matched" | "no_match" } {
-  if (!Array.isArray(pages) || pages.length === 0) {
-    return { pages: [], mode: "not_applied" };
-  }
-  if (!adAccountName) {
-    return { pages, mode: "not_applied" };
-  }
-  const matched = pages.filter(
-    (page) => typeof page?.name === "string" && pageNameMatchesAdAccountName(page.name, adAccountName),
-  );
-  if (matched.length > 0) {
-    return { pages: matched, mode: "matched" };
-  }
-  return { pages: [], mode: "no_match" };
-}
-
 function resolveScopedSelectedPageId(
   pages: Array<{ id?: string }> | undefined | null,
   preferredPageId?: string | null,
@@ -4646,10 +4593,6 @@ export async function registerRoutes(
       }
 
       const selectedAdAccountId = assets[0].selectedAdAccountId;
-      const adAccountsForUser = Array.isArray(assets[0].adAccountsJson)
-        ? (assets[0].adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
-        : [];
-      const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
       const forceRefresh = String(req.query.refresh || "").toLowerCase() === "true";
 
       // Always check DB cache first — pages/Instagram profiles rarely change
@@ -4657,30 +4600,7 @@ export async function registerRoutes(
         const cached = await getAccountCache(userId, selectedAdAccountId);
         const rawCachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
         if (rawCachedPages && !forceRefresh) {
-          const nameScoped = filterPagesForAdAccountName(rawCachedPages, selectedAdAccountName);
-          const cachedPages = nameScoped.pages;
-
-          if (nameScoped.mode === "matched" && cachedPages.length !== rawCachedPages.length) {
-            await upsertAccountCache(userId, selectedAdAccountId, "pagesJson", cachedPages);
-          }
-
-          if (nameScoped.mode === "no_match" && rawCachedPages.length > 0) {
-            console.warn(
-              `[Pages] No name-matching pages found in cache for ad account ${selectedAdAccountId} (${selectedAdAccountName || "unknown"}).`,
-            );
-            await clearAccountPageCache(userId, selectedAdAccountId);
-            await db.update(metaAssets)
-              .set({ selectedPageId: null, updatedAt: new Date() })
-              .where(eq(metaAssets.userId, userId));
-            return res.json({
-              data: [],
-              selectedPageId: null,
-              filteredByAdAccount: true,
-              autoSelected: false,
-              source: "cache-no-match",
-              accessIssue: "no_matching_page_for_ad_account",
-            });
-          }
+          const cachedPages = rawCachedPages;
 
           const preferredPageId = cached?.pagesSelectedPageId || assets[0].selectedPageId || null;
           const { selectedPageId, autoSelected } = resolveScopedSelectedPageId(cachedPages, preferredPageId);
@@ -4771,32 +4691,12 @@ export async function registerRoutes(
           }
           
           if (promoteData.data && Array.isArray(promoteData.data)) {
-            let filteredPages = promoteData.data.map((p: { id: string; name: string; access_token?: string }) => ({
+            const filteredPages = promoteData.data.map((p: { id: string; name: string; access_token?: string }) => ({
               id: p.id,
               name: p.name,
               access_token: p.access_token,
               source: 'ad_account'
             }));
-
-            const nameScoped = filterPagesForAdAccountName(filteredPages, selectedAdAccountName);
-            if (nameScoped.mode === "no_match" && filteredPages.length > 0) {
-              console.warn(
-                `[Pages] No name-matching promote_pages result for ad account ${selectedAdAccountId} (${selectedAdAccountName || "unknown"}).`,
-              );
-              await clearAccountPageCache(userId, selectedAdAccountId);
-              await db.update(metaAssets)
-                .set({ selectedPageId: null, updatedAt: new Date() })
-                .where(eq(metaAssets.userId, userId));
-              return res.json({
-                data: [],
-                selectedPageId: null,
-                filteredByAdAccount: true,
-                autoSelected: false,
-                source: "live-no-match",
-                accessIssue: "no_matching_page_for_ad_account",
-              });
-            }
-            filteredPages = nameScoped.pages;
             
             // Re-fetch Instagram accounts for each page with valid access token
             // This ensures IG data is always fresh when switching ad accounts
@@ -5038,25 +4938,17 @@ export async function registerRoutes(
       const selectedAdAccountId = assetsRow.selectedAdAccountId;
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
-        const rawAccountPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : [];
-        const adAccountsForUser = Array.isArray(assetsRow.adAccountsJson)
-          ? (assetsRow.adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
-          : [];
-        const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
-        const scoped = filterPagesForAdAccountName(rawAccountPages, selectedAdAccountName);
-        const accountPages = scoped.pages;
-        if (rawAccountPages.length > 0 && scoped.mode === "no_match") {
+        const accountPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : [];
+        if (accountPages.length === 0) {
           return res.status(400).json({
-            error: "No matching Facebook Page is available for the selected ad account",
+            error: "No Facebook Page is available for the selected ad account",
           });
         }
-        if (accountPages.length > 0) {
-          const pageInScope = accountPages.some((p: any) => p?.id === pageId);
-          if (!pageInScope) {
-            return res.status(400).json({
-              error: "Selected page does not belong to current ad account",
-            });
-          }
+        const pageInScope = accountPages.some((p: any) => p?.id === pageId);
+        if (!pageInScope) {
+          return res.status(400).json({
+            error: "Selected page does not belong to current ad account",
+          });
         }
       }
 
@@ -5102,21 +4994,17 @@ export async function registerRoutes(
       // Prefer metaAccountCache pages (most up-to-date with IG data) over metaAssets.pagesJson
       let pagesJson: Array<{ id: string; name: string; access_token?: string }> = [];
       const selectedAdAccountId = assets[0].selectedAdAccountId;
-      const adAccountsForUser = Array.isArray(assets[0].adAccountsJson)
-        ? (assets[0].adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
-        : [];
-      const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
-        if (cached?.pagesJson && cached.pagesJson.length > 0) {
+        if (Array.isArray(cached?.pagesJson)) {
           pagesJson = cached.pagesJson;
         }
       }
       if (pagesJson.length === 0) {
+        if (selectedAdAccountId) {
+          return res.json({ data: [] });
+        }
         pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
-      }
-      if (selectedAdAccountId && pagesJson.length > 0) {
-        pagesJson = filterPagesForAdAccountName(pagesJson, selectedAdAccountName).pages;
       }
       
       // Find the page's access token
@@ -5290,13 +5178,12 @@ export async function registerRoutes(
       }
 
       const selectedPageId = assets[0].selectedPageId;
-      const adAccountsForUser = Array.isArray(assets[0].adAccountsJson)
-        ? (assets[0].adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
-        : [];
-      const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
-      let pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
-      if (selectedAdAccountId && pagesJson.length > 0) {
-        pagesJson = filterPagesForAdAccountName(pagesJson, selectedAdAccountName).pages;
+      let pagesJson: Array<{ id: string; name: string; access_token?: string }> = [];
+      if (selectedAdAccountId) {
+        const cached = await getAccountCache(userId, selectedAdAccountId);
+        pagesJson = Array.isArray(cached?.pagesJson) ? cached.pagesJson : [];
+      } else {
+        pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
       }
       
       // Find the page's access token
@@ -5468,7 +5355,6 @@ export async function registerRoutes(
       // --- Ad Accounts ---
       const rawAdAccounts = assets.length > 0 ? (assets[0].adAccountsJson || []) : [];
       const selectedAdAccountId = assets.length > 0 ? assets[0].selectedAdAccountId : null;
-      const selectedAdAccountName = getSelectedAdAccountNameFromList(rawAdAccounts as Array<{ id?: unknown; name?: unknown }>, selectedAdAccountId);
       const pendingAccounts = assets.length > 0 ? ((assets[0] as any).pendingAdAccountsJson || []) : [];
       const hasPendingAccounts = pendingAccounts.length > 0 && rawAdAccounts.length === 0;
 
@@ -5489,21 +5375,7 @@ export async function registerRoutes(
         const cached = await getAccountCache(userId, selectedAdAccountId);
         const cachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
         if (cachedPages) {
-          const nameScoped = filterPagesForAdAccountName(cachedPages, selectedAdAccountName);
-          pages = nameScoped.pages;
-          if (nameScoped.mode === "matched" && pages.length !== cachedPages.length) {
-            await upsertAccountCache(userId, selectedAdAccountId, "pagesJson", pages);
-          }
-          if (nameScoped.mode === "no_match" && cachedPages.length > 0) {
-            await clearAccountPageCache(userId, selectedAdAccountId);
-            if (assets.length > 0 && assets[0].selectedPageId !== null) {
-              await db.update(metaAssets)
-                .set({ selectedPageId: null, updatedAt: new Date() })
-                .where(eq(metaAssets.userId, userId));
-            }
-            pages = [];
-            selectedPageId = null;
-          }
+          pages = cachedPages;
 
           const preferredPageId = cached?.pagesSelectedPageId || selectedPageId || null;
           const scopedSelection = resolveScopedSelectedPageId(pages, preferredPageId);

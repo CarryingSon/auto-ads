@@ -244,12 +244,16 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     oauthUrl.searchParams.set("state", state);
     oauthUrl.searchParams.set("scope", scopeRaw);
     oauthUrl.searchParams.set("response_type", "code");
+    // Force full-page Meta OAuth UI (not embedded dialog) to avoid scroll lock
+    // issues on long Instagram asset lists.
+    oauthUrl.searchParams.set("display", isPopup ? "popup" : "page");
     
     metaLog(traceId, "Redirecting to Facebook OAuth dialog", {
       redirectUri,
       scope: scopeRaw,
       hasClientId: Boolean(META_APP_ID),
       isPopup,
+      display: isPopup ? "popup" : "page",
       reminder: "If Facebook shows redirect_uri error, verify this exact redirectUri in Valid OAuth Redirect URIs.",
     });
     

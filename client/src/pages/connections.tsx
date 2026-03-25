@@ -33,7 +33,6 @@ interface MetaPagesResponse {
     | "meta_auth_error"
     | "meta_not_connected"
     | "meta_fetch_error"
-    | "no_matching_page_for_ad_account"
     | null;
 }
 
