@@ -36,6 +36,13 @@
       "when": 1775508000000,
       "tag": "0004_stripe_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774426896346,
+      "tag": "0005_supabase_rls_lockdown",
+      "breakpoints": true
     }
   ]
 }
