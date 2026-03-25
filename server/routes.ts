@@ -73,12 +73,58 @@ function getAdAccountIdVariants(adAccountId: string): string[] {
   return variants;
 }
 
+function normalizeEntityName(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function getSelectedAdAccountNameFromList(
+  adAccounts: Array<{ id?: unknown; name?: unknown }> | undefined | null,
+  selectedAdAccountId: string | null | undefined,
+): string | null {
+  if (!Array.isArray(adAccounts) || !selectedAdAccountId) return null;
+  const selectedNormalized = normalizeAdAccountId(selectedAdAccountId);
+  const matched = adAccounts.find(
+    (account) => normalizeAdAccountId(String(account?.id || "")) === selectedNormalized,
+  );
+  if (!matched) return null;
+  const resolved = String(matched.name || matched.id || "").trim();
+  return resolved || null;
+}
+
+function findExactPageMatchForAdAccountName(
+  pages: Array<{ id?: string; name?: unknown }> | undefined | null,
+  selectedAdAccountName: string | null | undefined,
+): string | null {
+  if (!Array.isArray(pages) || pages.length === 0 || !selectedAdAccountName) return null;
+  const normalizedAdAccountName = normalizeEntityName(selectedAdAccountName);
+  if (!normalizedAdAccountName) return null;
+
+  const exactMatches = pages.filter((page) => {
+    if (!page?.id || typeof page.id !== "string") return false;
+    const pageName = normalizeEntityName(page.name);
+    return pageName.length > 0 && pageName === normalizedAdAccountName;
+  });
+
+  if (exactMatches.length !== 1) return null;
+  return exactMatches[0].id || null;
+}
+
 function resolveScopedSelectedPageId(
-  pages: Array<{ id?: string }> | undefined | null,
+  pages: Array<{ id?: string; name?: unknown }> | undefined | null,
   preferredPageId?: string | null,
+  selectedAdAccountName?: string | null,
 ): { selectedPageId: string | null; autoSelected: boolean } {
   if (!Array.isArray(pages) || pages.length === 0) {
     return { selectedPageId: null, autoSelected: false };
+  }
+  const exactNameMatchPageId = findExactPageMatchForAdAccountName(pages, selectedAdAccountName);
+  if (exactNameMatchPageId) {
+    return { selectedPageId: exactNameMatchPageId, autoSelected: true };
   }
   if (preferredPageId && pages.some((p) => p?.id === preferredPageId)) {
     return { selectedPageId: preferredPageId, autoSelected: false };
@@ -4593,6 +4639,10 @@ export async function registerRoutes(
       }
 
       const selectedAdAccountId = assets[0].selectedAdAccountId;
+      const adAccountsForUser = Array.isArray(assets[0].adAccountsJson)
+        ? (assets[0].adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
+        : [];
+      const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
       const forceRefresh = String(req.query.refresh || "").toLowerCase() === "true";
 
       // Always check DB cache first — pages/Instagram profiles rarely change
@@ -4603,7 +4653,11 @@ export async function registerRoutes(
           const cachedPages = rawCachedPages;
 
           const preferredPageId = cached?.pagesSelectedPageId || assets[0].selectedPageId || null;
-          const { selectedPageId, autoSelected } = resolveScopedSelectedPageId(cachedPages, preferredPageId);
+          const { selectedPageId, autoSelected } = resolveScopedSelectedPageId(
+            cachedPages,
+            preferredPageId,
+            selectedAdAccountName,
+          );
 
           if (assets[0].selectedPageId !== selectedPageId) {
             await db.update(metaAssets)
@@ -4789,7 +4843,11 @@ export async function registerRoutes(
             
             // Resolve selected page strictly from filtered pages for this ad account.
             const preferredPageId = assets[0].selectedPageId || null;
-            const { selectedPageId, autoSelected } = resolveScopedSelectedPageId(filteredPages, preferredPageId);
+            const { selectedPageId, autoSelected } = resolveScopedSelectedPageId(
+              filteredPages,
+              preferredPageId,
+              selectedAdAccountName,
+            );
 
             if (autoSelected && selectedPageId) {
               console.log(`[Pages] Auto-selecting the only available page: ${selectedPageId}`);
@@ -5355,6 +5413,10 @@ export async function registerRoutes(
       // --- Ad Accounts ---
       const rawAdAccounts = assets.length > 0 ? (assets[0].adAccountsJson || []) : [];
       const selectedAdAccountId = assets.length > 0 ? assets[0].selectedAdAccountId : null;
+      const selectedAdAccountName = getSelectedAdAccountNameFromList(
+        rawAdAccounts as Array<{ id?: unknown; name?: unknown }>,
+        selectedAdAccountId,
+      );
       const pendingAccounts = assets.length > 0 ? ((assets[0] as any).pendingAdAccountsJson || []) : [];
       const hasPendingAccounts = pendingAccounts.length > 0 && rawAdAccounts.length === 0;
 
@@ -5378,7 +5440,11 @@ export async function registerRoutes(
           pages = cachedPages;
 
           const preferredPageId = cached?.pagesSelectedPageId || selectedPageId || null;
-          const scopedSelection = resolveScopedSelectedPageId(pages, preferredPageId);
+          const scopedSelection = resolveScopedSelectedPageId(
+            pages,
+            preferredPageId,
+            selectedAdAccountName,
+          );
           selectedPageId = scopedSelection.selectedPageId;
 
           if ((cached?.pagesSelectedPageId || null) !== selectedPageId) {
