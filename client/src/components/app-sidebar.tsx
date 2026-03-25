@@ -217,13 +217,15 @@ export function AppSidebar() {
   // Fallback: if account-scoped pages are missing/unresolved, fetch /api/meta/pages to refresh cache
   const hasSelectedAdAccount = !!sidebarData?.selectedAdAccountId;
   const isAccountScopeResolved = sidebarData?.filteredByAdAccount === true;
-  const sidebarPageCount = sidebarData?.pages?.length ?? 0;
-  const hasSelectedPage = !!sidebarData?.selectedPageId;
+  const sidebarPages = sidebarData?.pages || [];
+  const sidebarSelectedPageId = sidebarData?.selectedPageId || "";
+  const hasSelectedPageInSidebarPages =
+    !!sidebarSelectedPageId && sidebarPages.some((page) => page.id === sidebarSelectedPageId);
   const needsPagesFetch = !isSidebarFetching &&
     hasSelectedAdAccount &&
     (
       !isAccountScopeResolved ||
-      !hasSelectedPage
+      !hasSelectedPageInSidebarPages
     );
 
   const {
@@ -253,10 +255,10 @@ export function AppSidebar() {
   const adAccounts = sidebarData?.adAccounts || [];
   const fallbackPages = fallbackPagesData?.data || [];
   const usingFallbackPages = needsPagesFetch && isFallbackPagesFetched;
-  const metaPages = usingFallbackPages ? fallbackPages : (sidebarData?.pages || []);
-  const selectedPageId = (usingFallbackPages
-    ? (fallbackPagesData?.selectedPageId || sidebarData?.selectedPageId || "")
-    : (sidebarData?.selectedPageId || "")) || "";
+  const metaPages = usingFallbackPages ? fallbackPages : sidebarPages;
+  const selectedPageId = usingFallbackPages
+    ? (fallbackPagesData?.selectedPageId || "")
+    : sidebarSelectedPageId;
   const isPageAutoSelected = (usingFallbackPages ? fallbackPagesData?.autoSelected : sidebarData?.autoSelected) || metaPages.length === 1;
   const selectedPageFromList = metaPages.find((p) => p.id === selectedPageId) as MetaPage | undefined;
   const derivedInstagramAccounts = (selectedPageFromList?.instagram_accounts || []).map((a) => ({
@@ -265,9 +267,11 @@ export function AppSidebar() {
     name: a.name,
     profile_picture_url: a.profile_picture_url,
   }));
-  const instagramAccounts = (sidebarData?.instagramAccounts && sidebarData.instagramAccounts.length > 0)
-    ? sidebarData.instagramAccounts
-    : derivedInstagramAccounts;
+  const instagramAccounts = usingFallbackPages
+    ? derivedInstagramAccounts
+    : ((sidebarData?.instagramAccounts && sidebarData.instagramAccounts.length > 0)
+      ? sidebarData.instagramAccounts
+      : derivedInstagramAccounts);
   const settings = sidebarData?.settings;
   const savedInstagramId = settings?.instagramPageId || "";
   const selectedInstagram = instagramAccounts.find(a => a.id === savedInstagramId) ||
