@@ -73,6 +73,76 @@ function getAdAccountIdVariants(adAccountId: string): string[] {
   return variants;
 }
 
+function normalizeEntityName(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function getSelectedAdAccountNameFromList(
+  adAccounts: Array<{ id?: unknown; name?: unknown }> | undefined | null,
+  selectedAdAccountId: string | null | undefined,
+): string | null {
+  if (!Array.isArray(adAccounts) || !selectedAdAccountId) return null;
+  const selectedNormalized = normalizeAdAccountId(selectedAdAccountId);
+  const matched = adAccounts.find(
+    (account) => normalizeAdAccountId(String(account?.id || "")) === selectedNormalized,
+  );
+  if (!matched) return null;
+  const resolved = String(matched.name || matched.id || "").trim();
+  return resolved || null;
+}
+
+function pageNameMatchesAdAccountName(pageName: string, adAccountName: string): boolean {
+  const normalizedPage = normalizeEntityName(pageName);
+  const normalizedAd = normalizeEntityName(adAccountName);
+  if (!normalizedPage || !normalizedAd) return false;
+  if (normalizedPage === normalizedAd) return true;
+  const minContainsLength = 4;
+  if (normalizedPage.length >= minContainsLength && normalizedAd.includes(normalizedPage)) return true;
+  if (normalizedAd.length >= minContainsLength && normalizedPage.includes(normalizedAd)) return true;
+  return false;
+}
+
+function filterPagesForAdAccountName<T extends { id?: string; name?: unknown }>(
+  pages: T[],
+  adAccountName: string | null,
+): { pages: T[]; mode: "not_applied" | "matched" | "no_match" } {
+  if (!Array.isArray(pages) || pages.length === 0) {
+    return { pages: [], mode: "not_applied" };
+  }
+  if (!adAccountName) {
+    return { pages, mode: "not_applied" };
+  }
+  const matched = pages.filter(
+    (page) => typeof page?.name === "string" && pageNameMatchesAdAccountName(page.name, adAccountName),
+  );
+  if (matched.length > 0) {
+    return { pages: matched, mode: "matched" };
+  }
+  return { pages: [], mode: "no_match" };
+}
+
+function resolveScopedSelectedPageId(
+  pages: Array<{ id?: string }> | undefined | null,
+  preferredPageId?: string | null,
+): { selectedPageId: string | null; autoSelected: boolean } {
+  if (!Array.isArray(pages) || pages.length === 0) {
+    return { selectedPageId: null, autoSelected: false };
+  }
+  if (preferredPageId && pages.some((p) => p?.id === preferredPageId)) {
+    return { selectedPageId: preferredPageId, autoSelected: false };
+  }
+  if (pages.length === 1) {
+    const onlyPage = pages.find((p) => typeof p?.id === "string" && p.id.length > 0);
+    return { selectedPageId: onlyPage?.id || null, autoSelected: !!onlyPage?.id };
+  }
+  return { selectedPageId: null, autoSelected: false };
+}
+
 function pickValidSelectedPageId(
   pages: Array<{ id?: string }> | undefined | null,
   preferredPageId?: string | null,
@@ -4576,27 +4646,55 @@ export async function registerRoutes(
       }
 
       const selectedAdAccountId = assets[0].selectedAdAccountId;
+      const adAccountsForUser = Array.isArray(assets[0].adAccountsJson)
+        ? (assets[0].adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
+        : [];
+      const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
       const forceRefresh = String(req.query.refresh || "").toLowerCase() === "true";
 
       // Always check DB cache first — pages/Instagram profiles rarely change
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
-        const cachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
-        if (cachedPages && !forceRefresh) {
-          const preferredPageId = cached?.pagesSelectedPageId || assets[0].selectedPageId || null;
-          const selectedPageId = pickValidSelectedPageId(cachedPages, preferredPageId);
-          const autoSelected = cachedPages.length === 1 || (!!selectedPageId && selectedPageId !== preferredPageId);
+        const rawCachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
+        if (rawCachedPages && !forceRefresh) {
+          const nameScoped = filterPagesForAdAccountName(rawCachedPages, selectedAdAccountName);
+          const cachedPages = nameScoped.pages;
 
-          if (selectedPageId && selectedPageId !== preferredPageId) {
-            if (assets[0].selectedPageId !== selectedPageId) {
-              await db.update(metaAssets)
-                .set({ selectedPageId, updatedAt: new Date() })
-                .where(eq(metaAssets.userId, userId));
-            }
+          if (nameScoped.mode === "matched" && cachedPages.length !== rawCachedPages.length) {
+            await upsertAccountCache(userId, selectedAdAccountId, "pagesJson", cachedPages);
+          }
+
+          if (nameScoped.mode === "no_match" && rawCachedPages.length > 0) {
+            console.warn(
+              `[Pages] No name-matching pages found in cache for ad account ${selectedAdAccountId} (${selectedAdAccountName || "unknown"}).`,
+            );
+            await clearAccountPageCache(userId, selectedAdAccountId);
+            await db.update(metaAssets)
+              .set({ selectedPageId: null, updatedAt: new Date() })
+              .where(eq(metaAssets.userId, userId));
+            return res.json({
+              data: [],
+              selectedPageId: null,
+              filteredByAdAccount: true,
+              autoSelected: false,
+              source: "cache-no-match",
+              accessIssue: "no_matching_page_for_ad_account",
+            });
+          }
+
+          const preferredPageId = cached?.pagesSelectedPageId || assets[0].selectedPageId || null;
+          const { selectedPageId, autoSelected } = resolveScopedSelectedPageId(cachedPages, preferredPageId);
+
+          if (assets[0].selectedPageId !== selectedPageId) {
+            await db.update(metaAssets)
+              .set({ selectedPageId, updatedAt: new Date() })
+              .where(eq(metaAssets.userId, userId));
+          }
+          if ((cached?.pagesSelectedPageId || null) !== selectedPageId) {
             await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);
           }
 
-          console.log(`[Pages] Serving ${cachedPages.length} pages from DB cache for ad account ${selectedAdAccountId}`);
+          console.log(`[Pages] Serving ${cachedPages.length} scoped pages from DB cache for ad account ${selectedAdAccountId}`);
           return res.json({
             data: sanitizePagesForClient(cachedPages),
             selectedPageId,
@@ -4673,12 +4771,32 @@ export async function registerRoutes(
           }
           
           if (promoteData.data && Array.isArray(promoteData.data)) {
-            const filteredPages = promoteData.data.map((p: { id: string; name: string; access_token?: string }) => ({
+            let filteredPages = promoteData.data.map((p: { id: string; name: string; access_token?: string }) => ({
               id: p.id,
               name: p.name,
               access_token: p.access_token,
               source: 'ad_account'
             }));
+
+            const nameScoped = filterPagesForAdAccountName(filteredPages, selectedAdAccountName);
+            if (nameScoped.mode === "no_match" && filteredPages.length > 0) {
+              console.warn(
+                `[Pages] No name-matching promote_pages result for ad account ${selectedAdAccountId} (${selectedAdAccountName || "unknown"}).`,
+              );
+              await clearAccountPageCache(userId, selectedAdAccountId);
+              await db.update(metaAssets)
+                .set({ selectedPageId: null, updatedAt: new Date() })
+                .where(eq(metaAssets.userId, userId));
+              return res.json({
+                data: [],
+                selectedPageId: null,
+                filteredByAdAccount: true,
+                autoSelected: false,
+                source: "live-no-match",
+                accessIssue: "no_matching_page_for_ad_account",
+              });
+            }
+            filteredPages = nameScoped.pages;
             
             // Re-fetch Instagram accounts for each page with valid access token
             // This ensures IG data is always fresh when switching ad accounts
@@ -4770,20 +4888,15 @@ export async function registerRoutes(
             });
             
             // Resolve selected page strictly from filtered pages for this ad account.
-            let selectedPageId = assets[0].selectedPageId;
-            const currentSelectionInList = filteredPages.some((p: any) => p.id === selectedPageId);
-            
-            if (filteredPages.length === 0) {
-              // No promotable pages for this ad account: clear selected page.
-              selectedPageId = null;
-            } else if (filteredPages.length === 1) {
-              // Only one page available - auto-select it.
-              selectedPageId = filteredPages[0].id;
+            const preferredPageId = assets[0].selectedPageId || null;
+            const { selectedPageId, autoSelected } = resolveScopedSelectedPageId(filteredPages, preferredPageId);
+
+            if (autoSelected && selectedPageId) {
               console.log(`[Pages] Auto-selecting the only available page: ${selectedPageId}`);
-            } else if (!currentSelectionInList) {
-              // Current selection not in filtered list - select first.
-              selectedPageId = filteredPages[0].id;
-              console.log(`[Pages] Current page not in ad account's pages, auto-selecting: ${selectedPageId}`);
+            } else if (!selectedPageId && filteredPages.length > 1) {
+              console.log(
+                `[Pages] Multiple scoped pages found for ${selectedAdAccountId}; waiting for explicit page selection.`,
+              );
             }
             
             // Update database with fresh tokens and auto-selected page
@@ -4806,7 +4919,7 @@ export async function registerRoutes(
               data: sanitizePagesForClient(filteredPages), 
               selectedPageId: selectedPageId,
               filteredByAdAccount: true,
-              autoSelected: filteredPages.length === 1 || (filteredPages.length > 0 && !currentSelectionInList),
+              autoSelected,
               source: "live",
               accessIssue: null,
             });
@@ -4925,7 +5038,18 @@ export async function registerRoutes(
       const selectedAdAccountId = assetsRow.selectedAdAccountId;
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
-        const accountPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : [];
+        const rawAccountPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : [];
+        const adAccountsForUser = Array.isArray(assetsRow.adAccountsJson)
+          ? (assetsRow.adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
+          : [];
+        const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
+        const scoped = filterPagesForAdAccountName(rawAccountPages, selectedAdAccountName);
+        const accountPages = scoped.pages;
+        if (rawAccountPages.length > 0 && scoped.mode === "no_match") {
+          return res.status(400).json({
+            error: "No matching Facebook Page is available for the selected ad account",
+          });
+        }
         if (accountPages.length > 0) {
           const pageInScope = accountPages.some((p: any) => p?.id === pageId);
           if (!pageInScope) {
@@ -4978,6 +5102,10 @@ export async function registerRoutes(
       // Prefer metaAccountCache pages (most up-to-date with IG data) over metaAssets.pagesJson
       let pagesJson: Array<{ id: string; name: string; access_token?: string }> = [];
       const selectedAdAccountId = assets[0].selectedAdAccountId;
+      const adAccountsForUser = Array.isArray(assets[0].adAccountsJson)
+        ? (assets[0].adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
+        : [];
+      const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
       if (selectedAdAccountId) {
         const cached = await getAccountCache(userId, selectedAdAccountId);
         if (cached?.pagesJson && cached.pagesJson.length > 0) {
@@ -4986,6 +5114,9 @@ export async function registerRoutes(
       }
       if (pagesJson.length === 0) {
         pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
+      }
+      if (selectedAdAccountId && pagesJson.length > 0) {
+        pagesJson = filterPagesForAdAccountName(pagesJson, selectedAdAccountName).pages;
       }
       
       // Find the page's access token
@@ -5159,7 +5290,14 @@ export async function registerRoutes(
       }
 
       const selectedPageId = assets[0].selectedPageId;
-      const pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
+      const adAccountsForUser = Array.isArray(assets[0].adAccountsJson)
+        ? (assets[0].adAccountsJson as Array<{ id?: unknown; name?: unknown }>)
+        : [];
+      const selectedAdAccountName = getSelectedAdAccountNameFromList(adAccountsForUser, selectedAdAccountId);
+      let pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
+      if (selectedAdAccountId && pagesJson.length > 0) {
+        pagesJson = filterPagesForAdAccountName(pagesJson, selectedAdAccountName).pages;
+      }
       
       // Find the page's access token
       const selectedPage = pagesJson.find((p) => p.id === selectedPageId);
@@ -5285,11 +5423,13 @@ export async function registerRoutes(
       }));
 
       const primarySelectedId = selectedAccountsForStorage[0].id;
+      await clearAccountPageCache(userId, primarySelectedId);
       await db.update(metaAssets)
         .set({
           adAccountsJson: selectedAccountsForStorage, // Save all selected
           pendingAdAccountsJson: [], // Clear pending
           selectedAdAccountId: primarySelectedId, // First one is primary
+          selectedPageId: null, // Force account-scoped page refresh/selection for new primary account
           updatedAt: new Date(),
         })
         .where(eq(metaAssets.userId, userId));
@@ -5328,6 +5468,7 @@ export async function registerRoutes(
       // --- Ad Accounts ---
       const rawAdAccounts = assets.length > 0 ? (assets[0].adAccountsJson || []) : [];
       const selectedAdAccountId = assets.length > 0 ? assets[0].selectedAdAccountId : null;
+      const selectedAdAccountName = getSelectedAdAccountNameFromList(rawAdAccounts as Array<{ id?: unknown; name?: unknown }>, selectedAdAccountId);
       const pendingAccounts = assets.length > 0 ? ((assets[0] as any).pendingAdAccountsJson || []) : [];
       const hasPendingAccounts = pendingAccounts.length > 0 && rawAdAccounts.length === 0;
 
@@ -5348,19 +5489,36 @@ export async function registerRoutes(
         const cached = await getAccountCache(userId, selectedAdAccountId);
         const cachedPages = Array.isArray(cached?.pagesJson) ? cached.pagesJson : null;
         if (cachedPages) {
-          pages = cachedPages;
-          const preferredPageId = cached?.pagesSelectedPageId || selectedPageId || null;
-          selectedPageId = pickValidSelectedPageId(pages, preferredPageId);
-          if (selectedPageId && selectedPageId !== preferredPageId) {
-            await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);
-            if (assets.length > 0 && assets[0].selectedPageId !== selectedPageId) {
+          const nameScoped = filterPagesForAdAccountName(cachedPages, selectedAdAccountName);
+          pages = nameScoped.pages;
+          if (nameScoped.mode === "matched" && pages.length !== cachedPages.length) {
+            await upsertAccountCache(userId, selectedAdAccountId, "pagesJson", pages);
+          }
+          if (nameScoped.mode === "no_match" && cachedPages.length > 0) {
+            await clearAccountPageCache(userId, selectedAdAccountId);
+            if (assets.length > 0 && assets[0].selectedPageId !== null) {
               await db.update(metaAssets)
-                .set({ selectedPageId, updatedAt: new Date() })
+                .set({ selectedPageId: null, updatedAt: new Date() })
                 .where(eq(metaAssets.userId, userId));
             }
+            pages = [];
+            selectedPageId = null;
+          }
+
+          const preferredPageId = cached?.pagesSelectedPageId || selectedPageId || null;
+          const scopedSelection = resolveScopedSelectedPageId(pages, preferredPageId);
+          selectedPageId = scopedSelection.selectedPageId;
+
+          if ((cached?.pagesSelectedPageId || null) !== selectedPageId) {
+            await upsertAccountCache(userId, selectedAdAccountId, "pagesSelectedPageId", selectedPageId);
+          }
+          if (assets.length > 0 && assets[0].selectedPageId !== selectedPageId) {
+            await db.update(metaAssets)
+              .set({ selectedPageId, updatedAt: new Date() })
+              .where(eq(metaAssets.userId, userId));
           }
           filteredByAdAccount = true;
-          autoSelected = pages.length === 1 || (!!selectedPageId && selectedPageId !== preferredPageId);
+          autoSelected = scopedSelection.autoSelected;
         }
       }
 

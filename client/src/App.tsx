@@ -23,7 +23,6 @@ const Login = lazy(() => import("@/pages/login"));
 const Privacy = lazy(() => import("@/pages/privacy"));
 const Terms = lazy(() => import("@/pages/terms"));
 const DataDeletion = lazy(() => import("@/pages/data-deletion"));
-const SelectAdAccount = lazy(() => import("@/pages/select-ad-account"));
 
 function PageLoader({ label = "Loading..." }: { label?: string }) {
   return (
@@ -130,8 +129,13 @@ function AppContent() {
   const isPrivacyRoute = location === "/privacy-policy";
   const isTermsRoute = location === "/terms";
   const isDataDeletionRoute = location === "/data-deletion";
-  const isSelectAdAccountRoute = location === "/select-ad-account";
-  const isDashboard = !isLandingRoute && !isLoginRoute && !isPrivacyRoute && !isTermsRoute && !isDataDeletionRoute && !isSelectAdAccountRoute;
+  const isLegacySelectAdAccountRoute = location === "/select-ad-account";
+  const isDashboard = !isLandingRoute && !isLoginRoute && !isPrivacyRoute && !isTermsRoute && !isDataDeletionRoute;
+
+  useEffect(() => {
+    if (!isLegacySelectAdAccountRoute) return;
+    setLocation("/dashboard", { replace: true });
+  }, [isLegacySelectAdAccountRoute, setLocation]);
 
   useEffect(() => {
     if (!isDashboard) {
@@ -182,14 +186,6 @@ function AppContent() {
     return (
       <Suspense fallback={<PageLoader label="Loading page..." />}>
         <DataDeletion />
-      </Suspense>
-    );
-  }
-
-  if (isSelectAdAccountRoute) {
-    return (
-      <Suspense fallback={<PageLoader label="Loading accounts..." />}>
-        <SelectAdAccount />
       </Suspense>
     );
   }

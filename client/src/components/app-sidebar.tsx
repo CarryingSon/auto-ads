@@ -67,7 +67,13 @@ interface SidebarPagesResponse {
   filteredByAdAccount?: boolean;
   autoSelected?: boolean;
   source?: string;
-  accessIssue?: "missing_ad_account_permission" | "meta_auth_error" | "meta_not_connected" | "meta_fetch_error" | null;
+  accessIssue?:
+    | "missing_ad_account_permission"
+    | "meta_auth_error"
+    | "meta_not_connected"
+    | "meta_fetch_error"
+    | "no_matching_page_for_ad_account"
+    | null;
 }
 
 interface BillingStatusSummary {
@@ -177,7 +183,7 @@ interface ActiveJob {
 }
 
 export function AppSidebar() {
-  const [location, setLocation] = useLocation();
+  const [location] = useLocation();
   const { user } = useAuth();
   const userId = user?.id;
 
@@ -246,7 +252,6 @@ export function AppSidebar() {
   }, [isFallbackPagesFetched]);
 
   const adAccounts = sidebarData?.adAccounts || [];
-  const hasPendingAccounts = sidebarData?.hasPendingAccounts || false;
   const fallbackPages = fallbackPagesData?.data || [];
   const usingFallbackPages = needsPagesFetch && isFallbackPagesFetched;
   const metaPages = usingFallbackPages ? fallbackPages : (sidebarData?.pages || []);
@@ -268,13 +273,6 @@ export function AppSidebar() {
   const savedInstagramId = settings?.instagramPageId || "";
   const selectedInstagram = instagramAccounts.find(a => a.id === savedInstagramId) ||
     (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
-
-  // Redirect to ad account selection if pending
-  useEffect(() => {
-    if (!isSidebarFetching && hasPendingAccounts && adAccounts.length === 0 && !location.startsWith("/select-ad-account")) {
-      setLocation("/select-ad-account");
-    }
-  }, [hasPendingAccounts, isSidebarFetching, adAccounts.length, location, setLocation]);
 
   const { data: activeJobs } = useQuery<ActiveJob[]>({
     queryKey: ["/api/bulk-ads/jobs"],
@@ -467,12 +465,17 @@ export function AppSidebar() {
   const areBothAccountsReady = !showAccountScopedSkeleton;
   const pageAccessIssue = fallbackPagesData?.accessIssue || null;
   const pagesMissingPermission = pageAccessIssue === "missing_ad_account_permission";
+  const pagesNoNameMatch = pageAccessIssue === "no_matching_page_for_ad_account";
   const facebookPagesEmptyMessage = pagesMissingPermission
     ? "This ad account is missing Facebook Page permissions. Reconnect Meta and include this account."
-    : "No pages found for this ad account";
+    : pagesNoNameMatch
+      ? "No matching Facebook Page found for this ad account."
+      : "No pages found for this ad account";
   const instagramDependencyMessage = pagesMissingPermission
     ? "Missing Facebook Page permissions for this ad account"
-    : "Select a Facebook Page first";
+    : pagesNoNameMatch
+      ? "No matching Facebook/Instagram profile for this ad account"
+      : "Select a Facebook Page first";
 
   return (
     <Sidebar className="sidebar-pane border-r-0">

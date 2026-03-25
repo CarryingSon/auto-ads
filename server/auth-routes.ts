@@ -604,38 +604,45 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         log: (message, details) => metaLog(traceId, message, details),
       },
     );
+    const selectedAccountsForStorage = adAccounts.map((acc) => ({
+      id: String(acc.id),
+      name: String(acc.name || acc.id),
+      account_status: Number.isFinite(Number(acc.account_status)) ? Number(acc.account_status) : 0,
+    }));
+    const primarySelectedAdAccountId = selectedAccountsForStorage.length > 0
+      ? selectedAccountsForStorage[0].id
+      : null;
     const noUsableAdAccountsMessage = adAccounts.length === 0
       ? buildNoUsableAdAccountsMessage(rawAdAccounts.length, blockedByIssue)
       : null;
-    const pendingAccountsForStorage = noUsableAdAccountsMessage ? [] : pendingAccounts;
     const pages = pagesData.data || [];
     
-    // Always require ad account selection on each OAuth flow
-    // but only show ad accounts that are verified as usable for promote_pages.
+    // Auto-select all usable ad accounts from OAuth and set the first as primary.
     metaLog(traceId, "Preparing meta_assets update", {
       userId,
       hasExistingAssets: existingAssets.length > 0,
       adAccountsCount: adAccounts.length,
-      pendingAccountsCount: pendingAccounts.length,
-      pendingAccountsStoredCount: pendingAccountsForStorage.length,
+      selectedAccountsStoredCount: selectedAccountsForStorage.length,
       rawAdAccountsCount: rawAdAccounts.length,
       blockedByIssue,
       pagesCount: pages.length,
       hasUsableAdAccounts: adAccounts.length > 0,
+      primarySelectedAdAccountId,
+      blockedAccountsCount: pendingAccounts.filter((acc) => acc.access_verified === false).length,
     });
     
     if (existingAssets.length > 0) {
-      // Update existing record - always require ad account selection
+      // Update existing record with auto-selected usable accounts.
       await db.update(metaAssets)
         .set({
           metaUserId: meData.id,
-          adAccountsJson: [], // Clear existing - user must select
-          pendingAdAccountsJson: pendingAccountsForStorage, // Store for selection (includes excluded account diagnostics)
+          adAccountsJson: selectedAccountsForStorage,
+          pendingAdAccountsJson: [],
           pagesJson: pages,
           businessesJson: businesses,
           businessOwnedPagesJson: businessOwnedPages,
-          selectedAdAccountId: null, // Clear until user selects
-          selectedPageId: existingAssets[0].selectedPageId || pages[0]?.id || null,
+          selectedAdAccountId: primarySelectedAdAccountId,
+          selectedPageId: null, // Re-resolve from account-scoped pages to prevent cross-account mismatch.
           updatedAt: new Date(),
         })
         .where(eq(metaAssets.id, existingAssets[0].id));
@@ -644,21 +651,21 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       await db.insert(metaAssets).values({
         userId,
         metaUserId: meData.id,
-        adAccountsJson: [], // Empty until user selects
-        pendingAdAccountsJson: pendingAccountsForStorage, // Store for selection (includes excluded account diagnostics)
+        adAccountsJson: selectedAccountsForStorage,
+        pendingAdAccountsJson: [],
         pagesJson: pages,
         businessesJson: businesses,
         businessOwnedPagesJson: businessOwnedPages,
-        selectedAdAccountId: null,
-        selectedPageId: pages[0]?.id || null,
+        selectedAdAccountId: primarySelectedAdAccountId,
+        selectedPageId: null,
       });
     }
     
     const postAuthRedirect = noUsableAdAccountsMessage
       ? metaErrorRedirect(noUsableAdAccountsMessage, traceId)
-      : "/select-ad-account";
+      : "/dashboard";
 
-    // Save session and redirect either to selection or back to Connections with diagnostics.
+    // Save session and redirect either to dashboard or back to Connections with diagnostics.
     metaLog(traceId, "Saving session and finalizing OAuth", {
       userId,
       isPopup,

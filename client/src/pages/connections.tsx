@@ -28,7 +28,13 @@ interface AuthStatus {
 interface MetaPagesResponse {
   data: Array<{ id: string; name: string }>;
   selectedPageId?: string | null;
-  accessIssue?: "missing_ad_account_permission" | "meta_auth_error" | "meta_not_connected" | "meta_fetch_error" | null;
+  accessIssue?:
+    | "missing_ad_account_permission"
+    | "meta_auth_error"
+    | "meta_not_connected"
+    | "meta_fetch_error"
+    | "no_matching_page_for_ad_account"
+    | null;
 }
 
 export default function Connections() {
