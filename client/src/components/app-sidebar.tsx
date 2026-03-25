@@ -78,7 +78,7 @@ interface BillingStatusSummary {
 }
 
 const SIDEBAR_CACHE_PREFIX = "auto_ads_sidebar_cache_v1";
-const SIDEBAR_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const SIDEBAR_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 
 interface SidebarCacheEntry {
   cachedAt: number;
@@ -99,9 +99,31 @@ function readSidebarCache(userId?: string): SidebarData | undefined {
       return undefined;
     }
 
-    return parsed.data;
+    const data = parsed.data;
+    const adAccounts = Array.isArray(data.adAccounts) ? data.adAccounts : [];
+    const pages = Array.isArray(data.pages) ? data.pages : [];
+    const hasValidSelectedAdAccount =
+      !data.selectedAdAccountId || adAccounts.some((a) => a?.id === data.selectedAdAccountId);
+    const hasValidSelectedPage =
+      !data.selectedPageId || pages.some((p) => p?.id === data.selectedPageId);
+
+    if (!hasValidSelectedAdAccount || !hasValidSelectedPage) {
+      window.localStorage.removeItem(`${SIDEBAR_CACHE_PREFIX}:${userId}`);
+      return undefined;
+    }
+
+    return data;
   } catch {
     return undefined;
+  }
+}
+
+function clearSidebarCache(userId?: string): void {
+  if (typeof window === "undefined" || !userId) return;
+  try {
+    window.localStorage.removeItem(`${SIDEBAR_CACHE_PREFIX}:${userId}`);
+  } catch {
+    // Ignore localStorage failures.
   }
 }
 
@@ -163,12 +185,13 @@ export function AppSidebar() {
   const cachedSidebarData = useMemo(() => readSidebarCache(userId), [userId]);
 
   // Single combined query — render instantly from local cache, then refresh in background.
-  const { data: sidebarData, isFetching: isSidebarFetching } = useQuery<SidebarData>({
+  const { data: sidebarDataRaw, isFetching: isSidebarFetching, isError: isSidebarError } = useQuery<SidebarData>({
     queryKey: ["/api/sidebar-data"],
     placeholderData: cachedSidebarData,
     staleTime: 30_000,
     refetchOnMount: "always",
   });
+  const sidebarData = isSidebarError ? undefined : sidebarDataRaw;
 
   const { data: billingStatus } = useQuery<BillingStatusSummary>({
     queryKey: ["/api/billing/status"],
@@ -179,6 +202,11 @@ export function AppSidebar() {
     if (!userId || !sidebarData) return;
     writeSidebarCache(userId, sidebarData);
   }, [userId, sidebarData]);
+
+  useEffect(() => {
+    if (!isSidebarError || !userId) return;
+    clearSidebarCache(userId);
+  }, [isSidebarError, userId]);
   const selectedAdAccountId = sidebarData?.selectedAdAccountId || "";
 
   // Fallback: if account-scoped pages are missing/unresolved, fetch /api/meta/pages to refresh cache
