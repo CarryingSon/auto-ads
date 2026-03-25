@@ -413,10 +413,17 @@ export function AppSidebar() {
   const isPagesLoading = !!selectedAdAccountId &&
     needsPagesFetch &&
     (!isFallbackPagesFetched || isFallbackPagesFetching);
+  const isSidebarDataRefreshing = !!selectedAdAccountId &&
+    isSidebarFetching &&
+    (
+      !isAccountScopeResolved ||
+      !hasSelectedPageInSidebarPages
+    );
   const showAccountScopedSkeleton = !!selectedAdAccountId &&
     (
       isAdAccountSwitching ||
       updateAdAccountMutation.isPending ||
+      isSidebarDataRefreshing ||
       isPagesLoading
     );
   const areBothAccountsReady = !showAccountScopedSkeleton;
