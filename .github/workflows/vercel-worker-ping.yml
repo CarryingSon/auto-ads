@@ -2,28 +2,43 @@ name: Trigger Vercel Launch Worker
 
 on:
   schedule:
-    - cron: "* * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
   ping-worker:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger worker endpoint
+      - name: Check required secrets
+        id: preflight
         env:
           WORKER_TRIGGER_URL: ${{ secrets.WORKER_TRIGGER_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
+          missing=0
           if [ -z "$WORKER_TRIGGER_URL" ]; then
-            echo "Missing secret: WORKER_TRIGGER_URL"
-            exit 1
+            echo "::warning::Missing secret: WORKER_TRIGGER_URL"
+            missing=1
           fi
 
           if [ -z "$CRON_SECRET" ]; then
-            echo "Missing secret: CRON_SECRET"
-            exit 1
+            echo "::warning::Missing secret: CRON_SECRET"
+            missing=1
           fi
 
+          if [ "$missing" -eq 1 ]; then
+            echo "::notice::Skipping worker ping until required secrets are configured."
+            echo "should_trigger=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_trigger=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger worker endpoint
+        if: steps.preflight.outputs.should_trigger == 'true'
+        env:
+          WORKER_TRIGGER_URL: ${{ secrets.WORKER_TRIGGER_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
           curl --fail --show-error --silent \
             -X POST "$WORKER_TRIGGER_URL" \
             -H "x-cron-secret: $CRON_SECRET" \
