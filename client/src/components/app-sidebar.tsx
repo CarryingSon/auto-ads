@@ -222,6 +222,7 @@ export function AppSidebar() {
   const hasSelectedPageInSidebarPages =
     !!sidebarSelectedPageId && sidebarPages.some((page) => page.id === sidebarSelectedPageId);
   const needsPagesFetch = !isSidebarFetching &&
+    !isAdAccountSwitching &&
     hasSelectedAdAccount &&
     (
       !isAccountScopeResolved ||
@@ -312,6 +313,7 @@ export function AppSidebar() {
     },
     onMutate: async (adAccountId: string) => {
       setIsAdAccountSwitching(true);
+      clearSidebarCache(userId);
 
       await queryClient.cancelQueries({ queryKey: ["/api/sidebar-data"] });
       const previousData = queryClient.getQueryData(["/api/sidebar-data"]);
@@ -333,12 +335,14 @@ export function AppSidebar() {
       // Also clear individual query caches
       queryClient.removeQueries({ queryKey: ["/api/meta/pages"] });
       queryClient.removeQueries({ queryKey: ["/api/meta/instagram-accounts"], exact: false });
+      queryClient.removeQueries({ queryKey: ["sidebar-meta-pages"] });
 
       return { previousData };
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, adAccountId) => {
       try {
         // Keep this lightweight to avoid request bursts during account switch.
+        queryClient.removeQueries({ queryKey: ["sidebar-meta-pages", adAccountId], exact: true });
         await queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
         queryClient.invalidateQueries({ queryKey: ["/api/meta/ad-accounts"] });
       } finally {
