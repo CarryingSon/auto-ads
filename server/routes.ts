@@ -1342,7 +1342,7 @@ export async function registerRoutes(
       }
       
       const { 
-        jobId, adAccountId, campaignName, campaignId, adSetName, 
+        jobId, adAccountId: requestedAdAccountId, campaignName, campaignId, adSetName, 
         copyOverrides, launchMode, scheduledAt, adUploadMode, creativeEnhancements,
         disabledAdSetIds 
       } = parseResult.data;
@@ -1352,6 +1352,49 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
+
+      const [metaAssetRow] = await db.select()
+        .from(metaAssets)
+        .where(eq(metaAssets.userId, userId))
+        .limit(1);
+      const metaAssetRecord = metaAssetRow ? [metaAssetRow] : [];
+      const allowedAdAccounts = Array.isArray(metaAssetRow?.adAccountsJson)
+        ? (metaAssetRow!.adAccountsJson as Array<{ id?: unknown }>)
+        : [];
+      const selectedMetaAdAccountId = metaAssetRow?.selectedAdAccountId
+        ? String(metaAssetRow.selectedAdAccountId)
+        : null;
+      const normalizedRequestedAdAccountId = normalizeAdAccountId(requestedAdAccountId);
+      const requestedAdAccountRecord = allowedAdAccounts.find((account) =>
+        normalizeAdAccountId(String(account?.id || "")) === normalizedRequestedAdAccountId,
+      );
+      const adAccountRequiredResponse = {
+        code: "ad_account_required",
+        error: "ad_account_required: No usable Meta ad account is selected for launch.",
+        details: [
+          "Reconnect Meta in Connections and ensure at least one ad account has promotable Pages.",
+          "Select the ad account in the sidebar (or Connections), then retry launch.",
+        ],
+      };
+
+      if (!metaAssetRow || allowedAdAccounts.length === 0 || !selectedMetaAdAccountId) {
+        return res.status(400).json(adAccountRequiredResponse);
+      }
+
+      if (
+        !requestedAdAccountRecord ||
+        normalizeAdAccountId(selectedMetaAdAccountId) !== normalizedRequestedAdAccountId
+      ) {
+        return res.status(400).json({
+          ...adAccountRequiredResponse,
+          details: [
+            ...adAccountRequiredResponse.details,
+            "Refresh the Launch page after selecting the ad account to clear stale launch data.",
+          ],
+        });
+      }
+
+      const adAccountId = String(requestedAdAccountRecord.id || requestedAdAccountId);
 
       // Get ad account settings - STRICT validation required before launch
       const adAccountSettingsRecord = await storage.getAdAccountSettings(userId, adAccountId);
@@ -1394,10 +1437,6 @@ export async function registerRoutes(
       const validationErrors: string[] = [];
       
       // Check Facebook Page (required) - read from metaAssets.selectedPageId (set when user picks ad account)
-      const metaAssetRecord = await db.select()
-        .from(metaAssets)
-        .where(eq(metaAssets.userId, userId))
-        .limit(1);
       const hasSelectedPage = metaAssetRecord.length > 0 && !!metaAssetRecord[0].selectedPageId;
       if (!hasSelectedPage) {
         validationErrors.push("Facebook Page not configured");
@@ -6056,6 +6095,9 @@ export async function registerRoutes(
 
       const assets = await db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1);
       const adAccountId = assets[0]?.selectedAdAccountId;
+      if (!adAccountId) {
+        return res.json({ data: [], source: "no_ad_account" });
+      }
 
       const forceLive = req.query.live === "true" || req.query.refresh === "true";
       if (adAccountId && !forceLive) {
@@ -6075,7 +6117,28 @@ export async function registerRoutes(
         return res.json({ data: mockPixels });
       }
 
-      const pixels = await api.getPixels();
+      let pixels: Array<{ id: string; name: string; creation_time?: string }> = [];
+      try {
+        pixels = await api.getPixels();
+      } catch (apiError: any) {
+        const message = String(apiError?.message || "");
+        const lowerMessage = message.toLowerCase();
+        const isNoAdAccount = lowerMessage.includes("no ad account selected");
+        const isPermissionIssue =
+          lowerMessage.includes("permission") ||
+          lowerMessage.includes("not authorized") ||
+          lowerMessage.includes("insufficient") ||
+          lowerMessage.includes("unsupported get request");
+        if (isNoAdAccount || isPermissionIssue) {
+          console.warn("[Pixels] Returning empty list due to unavailable ad account access", {
+            userId,
+            adAccountId,
+            reason: message,
+          });
+          return res.json({ data: [], source: "fallback-empty" });
+        }
+        throw apiError;
+      }
       if (adAccountId) {
         await upsertAccountCache(userId, adAccountId, "pixelsJson", pixels);
       }

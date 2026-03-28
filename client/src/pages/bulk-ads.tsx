@@ -801,6 +801,12 @@ export default function BulkAds() {
   });
 
   const selectedAdAccountId = adAccountsData?.selectedAdAccountId || "";
+  const availableAdAccounts = adAccountsData?.data || [];
+  const normalizeAdAccountId = (value: string | null | undefined) => String(value || "").replace(/^act_/, "");
+  const hasUsableAdAccount = availableAdAccounts.length > 0;
+  const hasSelectedUsableAdAccount = Boolean(selectedAdAccountId) && availableAdAccounts.some(
+    (account) => normalizeAdAccountId(account.id) === normalizeAdAccountId(selectedAdAccountId),
+  );
   const connectionUpdatedAt = adAccountsData?.connectionUpdatedAt || null;
 
   // Load per-ad-account settings to check if configured
@@ -1000,7 +1006,22 @@ export default function BulkAds() {
     filteredByAdAccount?: boolean;
     autoSelected?: boolean;
   }>({
-    queryKey: ["/api/meta/pages"],
+    queryKey: ["/api/meta/pages", selectedAdAccountId || "none"],
+    queryFn: async () => {
+      const cachedRes = await fetch("/api/meta/pages", { credentials: "include" });
+      if (!cachedRes.ok) throw new Error("Failed to fetch Meta pages");
+      const cachedData = await cachedRes.json();
+      const hasPages = Array.isArray(cachedData?.data) && cachedData.data.length > 0;
+      const hasSelectedPage = Boolean(cachedData?.selectedPageId);
+      if (hasPages || hasSelectedPage) return cachedData;
+
+      const refreshRes = await fetch("/api/meta/pages?refresh=true", { credentials: "include" });
+      if (!refreshRes.ok) return cachedData;
+      return refreshRes.json();
+    },
+    enabled: !!selectedAdAccountId,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const selectedPageId = pagesData?.selectedPageId || "";
@@ -1240,8 +1261,9 @@ export default function BulkAds() {
 
   // Fetch available pixels from Meta
   const { data: pixelsData } = useQuery<{ data: Array<{ id: string; name: string }> }>({
-    queryKey: ["/api/meta/pixels", selectedAdAccountId],
+    queryKey: ["/api/meta/pixels", selectedAdAccountId || "none"],
     queryFn: async () => { const res = await fetch("/api/meta/pixels", { credentials: "include" }); if (!res.ok) throw new Error("Failed to fetch pixels"); return res.json(); },
+    enabled: !!selectedAdAccountId && hasSelectedUsableAdAccount,
   });
   const availablePixels = pixelsData?.data || [];
 
@@ -1830,10 +1852,10 @@ export default function BulkAds() {
     mutationFn: async () => {
       if (!jobId) throw new Error("No job ID");
       
-      // Get the actual ad account ID - never use fallbacks
-      const actualAdAccountId = selectedAdAccountId || defaultSettings.adAccountId;
-      if (!actualAdAccountId) {
-        throw new Error("No ad account selected. Please select an ad account first.");
+      // Launch must always use a currently selected and usable Meta ad account.
+      const actualAdAccountId = selectedAdAccountId;
+      if (!hasSelectedUsableAdAccount || !actualAdAccountId) {
+        throw new Error("ad_account_required: Select a valid Meta ad account before launching.");
       }
       
       // Initialize all enabled ad set statuses to pending
@@ -1906,7 +1928,11 @@ export default function BulkAds() {
       const isFreeLimitReached = mainError.includes("FREE_LIMIT_REACHED");
       const normalizedMainError = mainError.replace(/^FREE_LIMIT_REACHED:\s*/, "");
       const isInstagramRequired = /instagram_required/i.test(normalizedMainError);
-      const cleanedMainError = normalizedMainError.replace(/^instagram_required:\s*/i, "").trim();
+      const isAdAccountRequired = /ad_account_required/i.test(normalizedMainError);
+      const cleanedMainError = normalizedMainError
+        .replace(/^instagram_required:\s*/i, "")
+        .replace(/^ad_account_required:\s*/i, "")
+        .trim();
       const displayError = cleanedMainError || normalizedMainError;
       const errorLines = details ? details.split("\n") : [displayError];
       setLaunchLogs(prev => [
@@ -1938,6 +1964,16 @@ export default function BulkAds() {
       if (isInstagramRequired) {
         toast({
           title: "Instagram account required",
+          description: details || displayError,
+          variant: "destructive",
+          duration: 15000,
+        });
+        return;
+      }
+
+      if (isAdAccountRequired) {
+        toast({
+          title: "Ad account required",
           description: details || displayError,
           variant: "destructive",
           duration: 15000,
@@ -3809,6 +3845,16 @@ export default function BulkAds() {
                 Select a Facebook Page in the sidebar to enable launch.
               </div>
             )}
+            {!hasUsableAdAccount && (
+              <div className="rounded-md border border-red-300/60 bg-red-50/80 p-3 text-sm text-red-900 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-200">
+                No usable Meta ad account is available for this connection. Reconnect Meta in Connections and grant access to at least one ad account with promotable Pages.
+              </div>
+            )}
+            {hasUsableAdAccount && !hasSelectedUsableAdAccount && (
+              <div className="rounded-md border border-amber-400/40 bg-amber-50/70 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+                Select a valid Meta ad account in the sidebar before running Dry Run or Publish.
+              </div>
+            )}
             {selectedPageId && !isInstagramFetching && !hasLinkedInstagram && (
               <div className="rounded-md border border-amber-400/40 bg-amber-50/70 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
                 Instagram account is required for launch. Connect a Professional Instagram account to this Facebook Page in Meta, then refresh the page selection.
@@ -3821,7 +3867,7 @@ export default function BulkAds() {
                 variant="outline"
                 data-testid="button-dry-run"
                 className="flex-1 h-9 text-sm font-medium transition-all active:scale-[0.98]"
-                disabled={!metaConnected || dryRunMutation.isPending || !jobId}
+                disabled={!metaConnected || !hasSelectedUsableAdAccount || dryRunMutation.isPending || !jobId}
                 onClick={() => dryRunMutation.mutate()}
               >
                 {dryRunMutation.isPending ? (
@@ -3836,6 +3882,7 @@ export default function BulkAds() {
                 className="flex-1 h-9 text-sm font-medium transition-all active:scale-[0.98]"
                 disabled={
                   !metaConnected ||
+                  !hasSelectedUsableAdAccount ||
                   launchMutation.isPending ||
                   !jobId ||
                   !selectedPageId ||
@@ -4376,6 +4423,8 @@ export default function BulkAds() {
 
   const getStep3Errors = (): string[] => {
     const errors: string[] = [];
+    if (!hasUsableAdAccount) errors.push("No usable Meta ad account found");
+    else if (!hasSelectedUsableAdAccount) errors.push("Select a valid Meta ad account");
     if (!selectedPageId) errors.push("Facebook Page is required");
     const effectiveCta = defaultSettings.defaultCta || importedCta || adAccountSettingsData?.settings?.defaultCta;
     if (!effectiveCta) errors.push("CTA is required");

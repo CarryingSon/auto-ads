@@ -89,6 +89,8 @@ export default function Connections() {
   const selectedAdAccountId = authStatus?.meta?.selectedAdAccountId || "";
   const metaConnected = authStatus?.meta?.status === "connected";
   const metaExpired = authStatus?.meta?.status === "expired";
+  const usableMetaAdAccounts = authStatus?.meta?.adAccounts || [];
+  const metaNeedsAdAccount = metaConnected && usableMetaAdAccounts.length === 0;
 
   const {
     data: pagesData,
@@ -163,11 +165,16 @@ export default function Connections() {
                 </div>
               </div>
               <Badge
-                variant={metaConnected ? "default" : metaExpired ? "destructive" : "secondary"}
-                className={metaConnected ? "bg-green-500/10 text-green-600 dark:text-green-400" : ""}
+                variant={metaNeedsAdAccount ? "destructive" : metaConnected ? "default" : metaExpired ? "destructive" : "secondary"}
+                className={metaNeedsAdAccount ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : metaConnected ? "bg-green-500/10 text-green-600 dark:text-green-400" : ""}
                 data-testid="badge-meta-status"
               >
-                {metaConnected ? (
+                {metaNeedsAdAccount ? (
+                  <>
+                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    Action required
+                  </>
+                ) : metaConnected ? (
                   <>
                     <CheckCircle2 className="h-3 w-3 mr-1" />
                     Connected
@@ -196,7 +203,13 @@ export default function Connections() {
               </div>
             )}
 
-            {metaConnected && authStatus?.meta?.adAccounts && authStatus.meta.adAccounts.length > 0 && (
+            {metaNeedsAdAccount && (
+              <div className="rounded-md border border-amber-300/60 bg-amber-50/80 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+                Meta account is connected, but no usable ad accounts were found. Reconnect Meta and include an ad account that has promotable Facebook Pages.
+              </div>
+            )}
+
+            {metaConnected && usableMetaAdAccounts.length > 0 && (
               <div className="space-y-3">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Default Ad Account</label>
@@ -208,7 +221,7 @@ export default function Connections() {
                       <SelectValue placeholder="Select ad account" />
                     </SelectTrigger>
                     <SelectContent>
-                      {authStatus.meta.adAccounts.map((acc) => (
+                      {usableMetaAdAccounts.map((acc) => (
                         <SelectItem key={acc.id} value={acc.id}>
                           {acc.name || acc.id}
                         </SelectItem>

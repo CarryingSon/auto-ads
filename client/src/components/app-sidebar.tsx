@@ -303,6 +303,8 @@ export function AppSidebar() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/meta/pages"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["/api/meta/instagram-accounts"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["/api/meta/campaigns"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user/settings"] });
