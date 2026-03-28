@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { LoginGate } from "@/components/login-gate";
+import { Analytics } from "@vercel/analytics/react";
 import NotFound from "@/pages/not-found";
 import { usePrefetchMetaData } from "@/hooks/use-prefetch-meta";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -200,6 +201,7 @@ function App() {
         <TooltipProvider>
           <AppContent />
           <Toaster />
+          <Analytics />
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>

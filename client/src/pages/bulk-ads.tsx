@@ -4225,7 +4225,7 @@ export default function BulkAds() {
             {isRunning && (
               <div className="flex items-center justify-between gap-3 mt-3">
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  You can safely leave this page. The upload will continue in the background.
+                  Your upload will continue in the background even if you close this page.
                 </p>
                 <button
                   data-testid="button-cancel-upload"
