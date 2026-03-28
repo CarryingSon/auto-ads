@@ -4832,6 +4832,10 @@ export async function registerRoutes(
   // Get user's Facebook Pages (filtered by selected Ad Account)
   app.get("/api/meta/pages", async (req: Request, res: Response) => {
     try {
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.set("Pragma", "no-cache");
+      res.set("Expires", "0");
+
       const userId = (req.session as any)?.userId;
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
@@ -4959,6 +4963,26 @@ export async function registerRoutes(
               access_token: p.access_token,
               source: 'ad_account'
             }));
+
+            if (filteredPages.length === 0) {
+              console.warn(
+                `[Pages] promote_pages returned 0 pages for ${selectedAdAccountId}. Page access may exist, but no promotable pages are linked to this ad account.`,
+              );
+
+              await clearAccountPageCache(userId, selectedAdAccountId);
+              await db.update(metaAssets)
+                .set({ selectedPageId: null, updatedAt: new Date() })
+                .where(eq(metaAssets.userId, userId));
+
+              return res.json({
+                data: [],
+                selectedPageId: null,
+                filteredByAdAccount: true,
+                autoSelected: false,
+                source: "live-empty",
+                accessIssue: "no_promotable_pages",
+              });
+            }
             
             // Re-fetch Instagram accounts for each page with valid access token
             // This ensures IG data is always fresh when switching ad accounts.
@@ -5492,6 +5516,10 @@ export async function registerRoutes(
   // Combined sidebar data — returns everything the sidebar needs in one fast DB-only call
   app.get("/api/sidebar-data", async (req: Request, res: Response) => {
     try {
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.set("Pragma", "no-cache");
+      res.set("Expires", "0");
+
       const userId = (req.session as any)?.userId;
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
@@ -5619,6 +5647,10 @@ export async function registerRoutes(
   // Get ad accounts
   app.get("/api/meta/ad-accounts", async (req: Request, res: Response) => {
     try {
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.set("Pragma", "no-cache");
+      res.set("Expires", "0");
+
       const userId = (req.session as any)?.userId;
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });

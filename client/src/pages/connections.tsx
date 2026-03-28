@@ -30,6 +30,7 @@ interface MetaPagesResponse {
   selectedPageId?: string | null;
   accessIssue?:
     | "missing_ad_account_permission"
+    | "no_promotable_pages"
     | "meta_auth_error"
     | "meta_not_connected"
     | "meta_fetch_error"
@@ -133,6 +134,12 @@ export default function Connections() {
 
   const pageOptions = pagesData?.data || [];
   const selectedPageValue = pagesData?.selectedPageId || authStatus?.meta?.selectedPageId || "";
+  const pagesAccessIssue = pagesData?.accessIssue || null;
+  const pagesEmptyHint = pagesAccessIssue === "missing_ad_account_permission"
+    ? "This ad account is missing Facebook Page permissions. Reconnect Meta and include this ad account."
+    : pagesAccessIssue === "no_promotable_pages"
+      ? "Page access was granted, but this ad account has no promotable Pages. Assign the Page to this ad account in Business Manager or choose another ad account."
+      : "No Pages were found for this ad account.";
 
   if (isLoading) {
     return (
@@ -248,6 +255,12 @@ export default function Connections() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                )}
+
+                {selectedAdAccountId && pageOptions.length === 0 && (
+                  <div className="rounded-md border border-amber-300/60 bg-amber-50/80 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+                    {pagesEmptyHint}
                   </div>
                 )}
               </div>

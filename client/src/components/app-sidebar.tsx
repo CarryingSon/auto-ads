@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -70,6 +70,7 @@ interface SidebarPagesResponse {
   source?: string;
   accessIssue?:
     | "missing_ad_account_permission"
+    | "no_promotable_pages"
     | "meta_auth_error"
     | "meta_not_connected"
     | "meta_fetch_error"
@@ -188,12 +189,10 @@ export function AppSidebar() {
   const userId = user?.id;
 
   const [isAdAccountSwitching, setIsAdAccountSwitching] = useState(false);
-  const cachedSidebarData = useMemo(() => readSidebarCache(userId), [userId]);
 
-  // Single combined query — render instantly from local cache, then refresh in background.
+  // Single combined query - always use server as source of truth for reconnect permissions.
   const { data: sidebarDataRaw, isFetching: isSidebarFetching, isError: isSidebarError } = useQuery<SidebarData>({
     queryKey: ["/api/sidebar-data"],
-    placeholderData: cachedSidebarData,
     staleTime: 30_000,
     refetchOnMount: "always",
   });
@@ -204,15 +203,6 @@ export function AppSidebar() {
     staleTime: 30_000,
   });
 
-  useEffect(() => {
-    if (!userId || !sidebarData) return;
-    writeSidebarCache(userId, sidebarData);
-  }, [userId, sidebarData]);
-
-  useEffect(() => {
-    if (!isSidebarError || !userId) return;
-    clearSidebarCache(userId);
-  }, [isSidebarError, userId]);
   const selectedAdAccountId = sidebarData?.selectedAdAccountId || "";
 
   // Fallback: if account-scoped pages are missing/unresolved, fetch /api/meta/pages to refresh cache
@@ -435,11 +425,16 @@ export function AppSidebar() {
   const areBothAccountsReady = !showAccountScopedSkeleton;
   const pageAccessIssue = fallbackPagesData?.accessIssue || null;
   const pagesMissingPermission = pageAccessIssue === "missing_ad_account_permission";
+  const pagesNotPromotable = pageAccessIssue === "no_promotable_pages";
   const facebookPagesEmptyMessage = pagesMissingPermission
     ? "This ad account is missing Facebook Page permissions. Reconnect Meta and include this account."
+    : pagesNotPromotable
+      ? "Page access is granted, but this ad account has no promotable Facebook Pages yet."
     : "No pages found for this ad account";
   const instagramDependencyMessage = pagesMissingPermission
     ? "Missing Facebook Page permissions for this ad account"
+    : pagesNotPromotable
+      ? "No promotable Facebook Pages on this ad account"
     : "Select a Facebook Page first";
 
   return (
