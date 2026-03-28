@@ -1016,6 +1016,7 @@ export default function BulkAds() {
   const instagramAccounts = instagramAccountsData?.data || [];
   const savedIgId = globalSettings?.instagramPageId || "";
   const selectedInstagram = instagramAccounts.find(a => a.id === savedIgId) || (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
+  const hasLinkedInstagram = Boolean(selectedInstagram?.id);
 
   const { data: campaignsData, isLoading: campaignsLoading, isError: campaignsError } = useQuery<{
     data: Array<{ 
@@ -1903,10 +1904,13 @@ export default function BulkAds() {
       const details = parts.length > 1 ? parts.slice(1).join("\n\n") : undefined;
       const isFreeLimitReached = mainError.includes("FREE_LIMIT_REACHED");
       const normalizedMainError = mainError.replace(/^FREE_LIMIT_REACHED:\s*/, "");
-      const errorLines = details ? details.split("\n") : [normalizedMainError];
+      const isInstagramRequired = /instagram_required/i.test(normalizedMainError);
+      const cleanedMainError = normalizedMainError.replace(/^instagram_required:\s*/i, "").trim();
+      const displayError = cleanedMainError || normalizedMainError;
+      const errorLines = details ? details.split("\n") : [displayError];
       setLaunchLogs(prev => [
         ...prev,
-        { type: "error" as const, message: `Upload stopped: ${normalizedMainError}`, timestamp: new Date().toISOString() },
+        { type: "error" as const, message: `Upload stopped: ${displayError}`, timestamp: new Date().toISOString() },
         ...errorLines.map(line => ({ type: "error" as const, message: line, timestamp: new Date().toISOString() })),
       ]);
       if (isFreeLimitReached) {
@@ -1930,9 +1934,19 @@ export default function BulkAds() {
         return;
       }
 
+      if (isInstagramRequired) {
+        toast({
+          title: "Instagram account required",
+          description: details || displayError,
+          variant: "destructive",
+          duration: 15000,
+        });
+        return;
+      }
+
       toast({
         title: "Launch failed — upload stopped",
-        description: details || normalizedMainError,
+        description: details || displayError,
         variant: "destructive",
         duration: 15000,
       });
@@ -3385,7 +3399,7 @@ export default function BulkAds() {
                 </div>
               ) : (
                 <p className="text-sm font-medium truncate">
-                  {selectedInstagram?.username || selectedInstagram?.name || "Use FB Page"}
+                  {selectedInstagram?.username || selectedInstagram?.name || "Not connected"}
                 </p>
               )}
             </div>
@@ -3794,6 +3808,11 @@ export default function BulkAds() {
                 Select a Facebook Page in the sidebar to enable launch.
               </div>
             )}
+            {selectedPageId && !isInstagramFetching && !hasLinkedInstagram && (
+              <div className="rounded-md border border-amber-400/40 bg-amber-50/70 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+                Instagram account is required for launch. Connect a Professional Instagram account to this Facebook Page in Meta, then refresh the page selection.
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex gap-3">
@@ -3818,7 +3837,9 @@ export default function BulkAds() {
                   !metaConnected ||
                   launchMutation.isPending ||
                   !jobId ||
-                  !selectedPageId
+                  !selectedPageId ||
+                  isInstagramFetching ||
+                  !hasLinkedInstagram
                 }
                 onClick={() => {
                   setCurrentStep(5);

@@ -231,10 +231,9 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     // - public_profile: Always needed
     // - pages_show_list: For page selection
     // - pages_read_engagement: For promote_pages API
-    // - pages_manage_metadata: For accessing page_backed_instagram_accounts (critical for Instagram)
     // - instagram_basic: For reading connected Instagram accounts
     // - ads_management, ads_read: For creating and reading ads
-    const scopeArray = ["public_profile", "pages_show_list", "pages_read_engagement", "pages_manage_metadata", "instagram_basic", "ads_management", "ads_read"];
+    const scopeArray = ["public_profile", "pages_show_list", "pages_read_engagement", "instagram_basic", "ads_management", "ads_read"];
     const scopeRaw = scopeArray.join(",");
     
     // Build OAuth URL
@@ -498,28 +497,52 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       for (const page of pagesData.data) {
         if (!page.access_token) continue;
         try {
-          // Try connected instagram_accounts first
-          const igResp = await fetch(
-            `https://graph.facebook.com/${META_API_VERSION}/${page.id}/instagram_accounts?fields=id,username&access_token=${page.access_token}`
+          const accounts: Array<{ id: string; username?: string; name?: string }> = [];
+          const addAccount = (account: any, fallbackName?: string) => {
+            const id = String(account?.id || "");
+            if (!id) return;
+            accounts.push({
+              id,
+              username: typeof account?.username === "string" ? account.username : undefined,
+              name: typeof account?.name === "string" && account.name
+                ? account.name
+                : fallbackName,
+            });
+          };
+
+          const fieldsResp = await fetch(
+            `https://graph.facebook.com/${META_API_VERSION}/${page.id}?fields=instagram_business_account{id,username,name},connected_instagram_account{id,username,name},connected_page_backed_instagram_account{id,username,name}&access_token=${page.access_token}`
           );
-          const igData = await igResp.json();
-          if (igData.data && igData.data.length > 0) {
-            page.instagram_accounts = igData.data;
-            console.log(`Page ${page.name} (${page.id}): found ${igData.data.length} Instagram account(s): ${igData.data.map((a: any) => `${a.id} (@${a.username || '?'})`).join(', ')}`);
-          } else {
-            // Try page_backed_instagram_accounts
-            const igBackedResp = await fetch(
-              `https://graph.facebook.com/${META_API_VERSION}/${page.id}/page_backed_instagram_accounts?fields=id,username&access_token=${page.access_token}`
+          const fieldsData = await fieldsResp.json();
+          if (!fieldsData.error) {
+            addAccount(fieldsData.instagram_business_account);
+            addAccount(fieldsData.connected_instagram_account);
+            addAccount(fieldsData.connected_page_backed_instagram_account, page.name);
+          }
+
+          if (accounts.length === 0) {
+            const igResp = await fetch(
+              `https://graph.facebook.com/${META_API_VERSION}/${page.id}/instagram_accounts?fields=id,username,name&access_token=${page.access_token}`
             );
-            const igBackedData = await igBackedResp.json();
-            if (igBackedData.data && igBackedData.data.length > 0) {
-              page.instagram_accounts = igBackedData.data;
-              page.instagram_is_page_backed = true;
-              console.log(`Page ${page.name} (${page.id}): found page-backed IG: ${igBackedData.data[0].id}`);
-            } else {
-              page.instagram_accounts = [];
-              console.log(`Page ${page.name} (${page.id}): no Instagram accounts found`);
+            const igData = await igResp.json();
+            if (!igData.error && Array.isArray(igData.data)) {
+              for (const account of igData.data) {
+                addAccount(account);
+              }
             }
+          }
+
+          if (accounts.length > 0) {
+            const uniqueAccounts = accounts.filter(
+              (account, index) => accounts.findIndex((candidate) => candidate.id === account.id) === index,
+            );
+            page.instagram_accounts = uniqueAccounts;
+            console.log(
+              `Page ${page.name} (${page.id}): found ${uniqueAccounts.length} Instagram account(s): ${uniqueAccounts.map((a: any) => `${a.id} (@${a.username || "?"})`).join(", ")}`,
+            );
+          } else {
+            page.instagram_accounts = [];
+            console.log(`Page ${page.name} (${page.id}): no Instagram accounts found`);
           }
         } catch (err) {
           metaLog(traceId, `Failed to fetch Instagram for page ${page.id}`, {
@@ -555,7 +578,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       .limit(1);
     
     // Match the scopes requested in /meta/start - includes Instagram access
-    const scopes = ["public_profile", "pages_show_list", "pages_read_engagement", "pages_manage_metadata", "instagram_basic", "ads_management", "ads_read"];
+    const scopes = ["public_profile", "pages_show_list", "pages_read_engagement", "instagram_basic", "ads_management", "ads_read"];
     
     if (existingConnection.length > 0) {
       await db.update(oauthConnections)

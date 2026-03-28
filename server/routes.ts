@@ -338,6 +338,138 @@ async function cachedMetaFetch(url: string, cacheKey?: string): Promise<any> {
   return data;
 }
 
+type InstagramAccountRecord = {
+  id: string;
+  username?: string;
+  name?: string;
+  profile_picture_url?: string;
+};
+
+function normalizeInstagramAccount(
+  account: any,
+  fallbackName?: string,
+): InstagramAccountRecord | null {
+  const id = String(account?.id || "").trim();
+  if (!id) return null;
+  const username = typeof account?.username === "string" && account.username.trim()
+    ? account.username.trim()
+    : undefined;
+  const name = typeof account?.name === "string" && account.name.trim()
+    ? account.name.trim()
+    : fallbackName;
+  const profilePictureUrl = typeof account?.profile_picture_url === "string" && account.profile_picture_url.trim()
+    ? account.profile_picture_url.trim()
+    : undefined;
+  return {
+    id,
+    username,
+    name,
+    profile_picture_url: profilePictureUrl,
+  };
+}
+
+function dedupeInstagramAccounts(accounts: InstagramAccountRecord[]): InstagramAccountRecord[] {
+  const map = new Map<string, InstagramAccountRecord>();
+  for (const account of accounts) {
+    const existing = map.get(account.id);
+    if (!existing) {
+      map.set(account.id, account);
+      continue;
+    }
+    map.set(account.id, {
+      id: account.id,
+      username: existing.username || account.username,
+      name: existing.name || account.name,
+      profile_picture_url: existing.profile_picture_url || account.profile_picture_url,
+    });
+  }
+  return Array.from(map.values());
+}
+
+function extractInstagramAccountsFromPageRecord(page: any): InstagramAccountRecord[] {
+  const pageName = typeof page?.name === "string" ? page.name : undefined;
+  const accounts: InstagramAccountRecord[] = [];
+  if (Array.isArray(page?.instagram_accounts)) {
+    for (const account of page.instagram_accounts) {
+      const normalized = normalizeInstagramAccount(account, pageName);
+      if (normalized) accounts.push(normalized);
+    }
+  }
+  const fieldAccounts = [
+    normalizeInstagramAccount(page?.instagram_business_account, pageName),
+    normalizeInstagramAccount(page?.connected_instagram_account, pageName),
+    normalizeInstagramAccount(page?.connected_page_backed_instagram_account, pageName),
+  ].filter((account): account is InstagramAccountRecord => Boolean(account));
+  accounts.push(...fieldAccounts);
+  return dedupeInstagramAccounts(accounts);
+}
+
+async function fetchInstagramAccountsForPage(params: {
+  pageId: string;
+  pageAccessToken: string;
+  userAccessToken?: string | null;
+  pageName?: string;
+  apiVersion?: string;
+  cacheKeyPrefix?: string;
+}): Promise<InstagramAccountRecord[]> {
+  const {
+    pageId,
+    pageAccessToken,
+    userAccessToken = null,
+    pageName,
+    apiVersion = "v21.0",
+    cacheKeyPrefix,
+  } = params;
+  const tokenEntries = [
+    { token: pageAccessToken, source: "page" },
+    { token: userAccessToken || "", source: "user" },
+  ]
+    .filter((entry) => entry.token)
+    .filter((entry, index, arr) => arr.findIndex((candidate) => candidate.token === entry.token) === index);
+  const accounts: InstagramAccountRecord[] = [];
+  const fieldsQuery =
+    "instagram_business_account{id,username,profile_picture_url,name}," +
+    "connected_instagram_account{id,username,profile_picture_url,name}," +
+    "connected_page_backed_instagram_account{id,username,profile_picture_url,name}";
+  const cachePrefix = cacheKeyPrefix || `ig_page_${pageId}`;
+
+  for (const entry of tokenEntries) {
+    const data = await cachedMetaFetch(
+      `https://graph.facebook.com/${apiVersion}/${pageId}?fields=${fieldsQuery}&access_token=${entry.token}`,
+      `${cachePrefix}_fields_${entry.source}`,
+    );
+    if (data?.error) continue;
+    const fieldAccounts = [
+      normalizeInstagramAccount(data.instagram_business_account, pageName),
+      normalizeInstagramAccount(data.connected_instagram_account, pageName),
+      normalizeInstagramAccount(data.connected_page_backed_instagram_account, pageName),
+    ].filter((account): account is InstagramAccountRecord => Boolean(account));
+    accounts.push(...fieldAccounts);
+  }
+
+  if (accounts.length === 0) {
+    for (const entry of tokenEntries) {
+      const data = await cachedMetaFetch(
+        `https://graph.facebook.com/${apiVersion}/${pageId}/instagram_accounts?fields=id,username,profile_picture_url,name&access_token=${entry.token}`,
+        `${cachePrefix}_accounts_${entry.source}`,
+      );
+      if (data?.error || !Array.isArray(data?.data)) continue;
+      for (const account of data.data) {
+        const normalized = normalizeInstagramAccount(account, pageName);
+        if (normalized) accounts.push(normalized);
+      }
+      if (accounts.length > 0) break;
+    }
+  }
+
+  return dedupeInstagramAccounts(accounts);
+}
+
+function isInstagramRequiredError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message.toLowerCase().includes("instagram_required");
+}
+
 // Helper to emit log to a specific job
 function emitJobLog(jobId: string, message: string, type: "info" | "success" | "error" | "warning" = "info") {
   // Logs are persisted in DB (job.logs). We keep a console mirror for ops visibility.
@@ -1430,6 +1562,8 @@ export async function registerRoutes(
       // Resolve Facebook Page for current ad account (avoid cross-account page mismatch)
       let pageId: string | undefined;
       let pageName: string | undefined;
+      let selectedPageRecord: any = null;
+      let pageAccessToken: string | undefined;
       const assetRow = metaAssetRecord[0];
       const accountCache = await getAccountCache(userId, adAccountId);
       const accountPages = Array.isArray(accountCache?.pagesJson) ? accountCache.pagesJson : [];
@@ -1442,6 +1576,8 @@ export async function registerRoutes(
         if (resolvedPageId) {
           pageId = resolvedPageId;
           pageName = resolvedPage?.name;
+          selectedPageRecord = resolvedPage || null;
+          pageAccessToken = resolvedPage?.access_token;
 
           if (preferredPageId && preferredPageId !== resolvedPageId) {
             console.warn(
@@ -1466,11 +1602,13 @@ export async function registerRoutes(
         pageId = metaAssetRecord[0].selectedPageId || undefined;
 
         if (pageId) {
-          const pages = metaAssetRecord[0].pagesJson || [];
-          const businessOwnedPages = metaAssetRecord[0].businessOwnedPagesJson || [];
+          const pages = (metaAssetRecord[0].pagesJson || []) as any[];
+          const businessOwnedPages = (metaAssetRecord[0].businessOwnedPagesJson || []) as any[];
           const selectedPage = pages.find((p: any) => p.id === pageId);
           if (selectedPage) {
             pageName = selectedPage.name;
+            selectedPageRecord = selectedPage;
+            pageAccessToken = selectedPage.access_token;
           } else {
             for (const b of businessOwnedPages as any[]) {
               const bp = b.pages?.find((p: any) => p.id === pageId);
@@ -1497,10 +1635,114 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Meta connection not found or expired. Please reconnect." });
       }
 
+      const userAccessToken = metaApiCheck.getAccessToken();
+      if (!userAccessToken) {
+        return res.status(401).json({ error: "Meta connection token missing. Please reconnect." });
+      }
+
+      let resolvedInstagramAccounts = extractInstagramAccountsFromPageRecord(selectedPageRecord);
+
+      if (!pageAccessToken) {
+        const pagesData = await cachedMetaFetch(
+          `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token&access_token=${userAccessToken}`,
+          `me_accounts_launch_${userId}`,
+        );
+        if (Array.isArray(pagesData?.data)) {
+          const pageEntry = pagesData.data.find((p: any) => p.id === pageId);
+          if (pageEntry?.access_token) {
+            pageAccessToken = pageEntry.access_token;
+          }
+        }
+      }
+
+      if (!pageAccessToken) {
+        const promoteData = await cachedMetaFetch(
+          `https://graph.facebook.com/v21.0/${adAccountId}/promote_pages?fields=id,name,access_token&access_token=${userAccessToken}`,
+          `promote_pages_launch_${adAccountId}`,
+        );
+        if (Array.isArray(promoteData?.data)) {
+          const promotePage = promoteData.data.find((p: any) => p.id === pageId);
+          if (promotePage?.access_token) {
+            pageAccessToken = promotePage.access_token;
+          }
+        }
+      }
+
+      if (resolvedInstagramAccounts.length === 0 && pageAccessToken) {
+        resolvedInstagramAccounts = await fetchInstagramAccountsForPage({
+          pageId,
+          pageAccessToken,
+          userAccessToken,
+          pageName,
+          apiVersion: "v21.0",
+          cacheKeyPrefix: `ig_preflight_${jobId}_${pageId}`,
+        });
+      }
+
+      if (resolvedInstagramAccounts.length > 0) {
+        const patchPagesWithIg = (pages: any[]) =>
+          pages.map((page: any) =>
+            page?.id === pageId
+              ? {
+                  ...page,
+                  access_token: pageAccessToken || page.access_token,
+                  instagram_accounts: resolvedInstagramAccounts,
+                }
+              : page,
+          );
+
+        if (accountPages.length > 0 && accountPages.some((page: any) => page?.id === pageId)) {
+          const updatedAccountPages = patchPagesWithIg(accountPages);
+          await upsertAccountCache(userId, adAccountId, "pagesJson", updatedAccountPages);
+        }
+
+        const assetPages = Array.isArray(assetRow?.pagesJson) ? assetRow.pagesJson : [];
+        if (assetPages.length > 0 && assetPages.some((page: any) => page?.id === pageId)) {
+          const updatedAssetPages = patchPagesWithIg(assetPages);
+          await db.update(metaAssets)
+            .set({ pagesJson: updatedAssetPages, updatedAt: new Date() })
+            .where(eq(metaAssets.userId, userId));
+        }
+      }
+
+      const savedInstagramId = globalSettingsRecord?.instagramPageId || undefined;
+      const chosenInstagramAccount = savedInstagramId
+        ? resolvedInstagramAccounts.find((account) => account.id === savedInstagramId) || resolvedInstagramAccounts[0]
+        : resolvedInstagramAccounts[0];
+
+      if (!chosenInstagramAccount) {
+        return res.status(400).json({
+          code: "instagram_required",
+          error: `Instagram account is required for launch. Connect a Professional Instagram account to Facebook Page ${pageName || pageId} and retry.`,
+          details: [
+            "Select a Facebook Page that has a linked Professional Instagram account (Business or Creator).",
+            "If already linked, reconnect Meta and refresh pages to renew access.",
+          ],
+        });
+      }
+
+      const validateIgData = await cachedMetaFetch(
+        `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
+        `ig_adaccount_preflight_${adAccountId}`,
+      );
+      const authorizedIgIds = Array.isArray(validateIgData?.data)
+        ? validateIgData.data.map((ig: any) => ig.id)
+        : [];
+      if (authorizedIgIds.length > 0 && !authorizedIgIds.includes(chosenInstagramAccount.id)) {
+        return res.status(400).json({
+          code: "instagram_required",
+          error: `Instagram account ${chosenInstagramAccount.id} is not authorized for ad account ${adAccountId}.`,
+          details: [
+            "Grant this ad account access to the Instagram account in Meta Business settings.",
+            "Or choose a Facebook Page linked to an Instagram account already available to this ad account.",
+          ],
+        });
+      }
+
       // ===== PRE-FLIGHT VALIDATION =====
       // Validate ALL data locally before sending anything to Meta
       const preFlightResult = validateMetaLaunchData({
-        accessToken: metaApiCheck.getAccessToken() || "",
+        accessToken: userAccessToken,
         adAccountId,
         pageId,
         campaignId,
@@ -1992,206 +2234,130 @@ export async function registerRoutes(
           const isNewCampaign = !campaignId; // If no campaignId was provided, we created a new one
           const needsAdSetBudget = isNewCampaign || !campaignSettings.isCBO;
           
-          // ==========================================
-          // Fetch Instagram ID for the Page BEFORE creating AdSet
-          // This is needed so we can set appropriate placements in the AdSet
-          // Priority: 1) Connected instagram_accounts, 2) page_backed_instagram_accounts (Use Facebook Page)
-          // ==========================================
-          // Note: instagramAccountId is already declared outside the try block (line ~727)
-          
-          try {
-            log(`Finding Instagram account for Page ${pageId}...`);
-            
-            // Priority 0: Check user's saved Instagram selection in globalSettings
-            const userGlobalSettings = await db.select().from(globalSettings).where(eq(globalSettings.userId, userId)).limit(1);
-            const savedInstagramId = userGlobalSettings[0]?.instagramPageId;
-            
-            // Priority 1: Check stored pagesJson from OAuth (instagram_accounts fetched at login)
-            const metaAssetsForIg = await db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1);
-            const storedPages = (metaAssetsForIg[0] as any)?.pagesJson || [];
-            const storedPage = storedPages.find((p: any) => p.id === pageId);
-            
-            if (storedPage?.instagram_accounts && storedPage.instagram_accounts.length > 0) {
-              // Use saved selection if it matches one of the page's IG accounts, otherwise use first
-              if (savedInstagramId) {
-                const savedAccount = storedPage.instagram_accounts.find((a: any) => a.id === savedInstagramId);
-                if (savedAccount) {
-                  instagramAccountId = savedAccount.id;
-                  log(`Using saved Instagram account from settings: ${instagramAccountId} (@${savedAccount.username || 'unknown'})`, "success");
-                } else {
-                  const igAccount = storedPage.instagram_accounts[0];
-                  instagramAccountId = igAccount.id;
-                  log(`Saved IG account ${savedInstagramId} not found for this page, using first: ${instagramAccountId} (@${igAccount.username || 'unknown'})`, "info");
-                }
-              } else {
-                const igAccount = storedPage.instagram_accounts[0];
-                instagramAccountId = igAccount.id;
-                log(`No saved IG selection, using first: ${instagramAccountId} (@${igAccount.username || 'unknown'})`, "info");
-              }
-              if (storedPage.instagram_accounts.length > 1) {
-                log(`Page has ${storedPage.instagram_accounts.length} Instagram accounts: ${storedPage.instagram_accounts.map((a: any) => `${a.id} (@${a.username || '?'})`).join(', ')}`, "info");
+          // Resolve Instagram account for the selected Facebook Page.
+          log(`Finding Instagram account for Page ${pageId}...`);
+          const userGlobalSettings = await db.select().from(globalSettings).where(eq(globalSettings.userId, userId)).limit(1);
+          const savedInstagramId = userGlobalSettings[0]?.instagramPageId || undefined;
+          const metaAssetsForIg = await db.select().from(metaAssets).where(eq(metaAssets.userId, userId)).limit(1);
+          const storedPages = (metaAssetsForIg[0] as any)?.pagesJson || [];
+          const storedPage = storedPages.find((p: any) => p.id === pageId);
+          const userAccessToken = metaApi.getAccessToken();
+
+          let pageAccessToken: string | undefined = storedPage?.access_token;
+          if (!pageAccessToken) {
+            const pagesData = await cachedMetaFetch(
+              `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token&access_token=${userAccessToken}`,
+              `me_accounts_${userId}`,
+            );
+            if (Array.isArray(pagesData?.data)) {
+              const pageEntry = pagesData.data.find((p: any) => p.id === pageId);
+              if (pageEntry?.access_token) {
+                pageAccessToken = pageEntry.access_token;
+                log(`Got Page Access Token via me/accounts for Page ${pageId}`, "success");
               }
             }
-            
-            // Priority 2: If not found in stored data, try live API
-            if (!instagramAccountId) {
-              const userAccessToken = metaApi.getAccessToken();
-              
-              let pageAccessToken: string | undefined;
-              try {
-                const pagesData = await cachedMetaFetch(
-                  `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token&access_token=${userAccessToken}`,
-                  `me_accounts_${userId}`
-                );
-                const availablePages = pagesData.data?.map((p: any) => ({ id: p.id, name: p.name })) || [];
-                console.log(`[Launch] Available pages for user (me/accounts):`, availablePages);
-                
-                if (pagesData.data) {
-                  const pageEntry = pagesData.data.find((p: any) => p.id === pageId);
-                  if (pageEntry) {
-                    pageAccessToken = pageEntry.access_token;
-                  }
-                }
-              } catch (err) {
-                console.log(`[Launch] Error fetching me/accounts:`, err);
-              }
-              
-              // If not found in me/accounts, try promote_pages for the ad account
-              if (!pageAccessToken) {
-                try {
-                  log(`Page ${pageId} not in user's own pages, trying promote_pages for ad account...`);
-                  const promoteData = await cachedMetaFetch(
-                    `https://graph.facebook.com/v21.0/${adAccountId}/promote_pages?fields=id,name,access_token&access_token=${userAccessToken}`,
-                    `promote_pages_${adAccountId}`
-                  );
-                  if (promoteData.data) {
-                    const promotePage = promoteData.data.find((p: any) => p.id === pageId);
-                    if (promotePage?.access_token) {
-                      pageAccessToken = promotePage.access_token;
-                      log(`Got Page Access Token via promote_pages for Page ${pageId}`, "success");
-                    }
-                  }
-                } catch (err) {
-                  console.log(`[Launch] Error fetching promote_pages:`, err);
-                }
-              }
-              
-              // Also check stored access_token in pagesJson (may have been saved by pages endpoint)
-              if (!pageAccessToken && storedPage?.access_token) {
-                pageAccessToken = storedPage.access_token;
-                log(`Using stored Page Access Token from pagesJson`);
-              }
-              
-              if (pageAccessToken) {
-                try {
-                  const igData = await cachedMetaFetch(
-                    `https://graph.facebook.com/v21.0/${pageId}/instagram_accounts?fields=id,username&access_token=${pageAccessToken}`,
-                    `ig_accounts_${pageId}`
-                  );
-                  if (!igData.error && igData.data?.length > 0) {
-                    if (savedInstagramId) {
-                      const savedMatch = igData.data.find((a: any) => a.id === savedInstagramId);
-                      if (savedMatch) {
-                        instagramAccountId = savedMatch.id;
-                        log(`Found saved Instagram account via API: ${instagramAccountId} (@${savedMatch.username || 'unknown'})`, "success");
-                      } else {
-                        instagramAccountId = igData.data[0].id;
-                        log(`Saved IG ${savedInstagramId} not found via API, using first: ${instagramAccountId} (@${igData.data[0].username || 'unknown'})`, "info");
-                      }
-                    } else {
-                      instagramAccountId = igData.data[0].id;
-                      log(`Found Instagram account via API: ${instagramAccountId} (@${igData.data[0].username || 'unknown'})`, "success");
-                    }
-                  }
-                } catch (err) {
-                  console.log(`[Launch] Error fetching instagram_accounts:`, err);
-                }
-                
-                // Try page_backed_instagram_accounts
-                if (!instagramAccountId) {
-                  try {
-                    const igBackedData = await cachedMetaFetch(
-                      `https://graph.facebook.com/v21.0/${pageId}/page_backed_instagram_accounts?fields=id,username&access_token=${pageAccessToken}`,
-                      `ig_backed_${pageId}`
-                    );
-                    if (!igBackedData.error && igBackedData.data?.length > 0) {
-                      instagramAccountId = igBackedData.data[0].id;
-                      log(`Using page-backed Instagram: ${instagramAccountId}`, "success");
-                    } else if (!igBackedData.error) {
-                      try {
-                        const createResp = await fetch(
-                          `https://graph.facebook.com/v21.0/${pageId}/page_backed_instagram_accounts`,
-                          { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `access_token=${pageAccessToken}` }
-                        );
-                        const createData = await createResp.json();
-                        if (createData.id) {
-                          instagramAccountId = createData.id;
-                          log(`Created page-backed Instagram account: ${instagramAccountId}`, "success");
-                        }
-                      } catch (createErr) {
-                        console.log(`[Launch] Error creating page-backed IG:`, createErr);
-                      }
-                    }
-                  } catch (err) {
-                    console.log(`[Launch] Error fetching page_backed_instagram_accounts:`, err);
-                  }
-                }
-              } else {
-                log(`No Page Access Token available for Page ${pageId} - could not get token from me/accounts or promote_pages`, "warning");
-              }
-            }
-            
-            // Priority 3: Try ad account's own Instagram accounts
-            if (!instagramAccountId) {
-              try {
-                const userAccessToken = metaApi.getAccessToken();
-                log(`Trying ad account's own Instagram accounts (${adAccountId})...`);
-                const adAcctIgData = await cachedMetaFetch(
-                  `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
-                  `ig_adaccount_${adAccountId}`
-                );
-                if (!adAcctIgData.error && adAcctIgData.data?.length > 0) {
-                  instagramAccountId = adAcctIgData.data[0].id;
-                  log(`Using Instagram account from ad account: ${instagramAccountId} (@${adAcctIgData.data[0].username || 'unknown'})`, "success");
-                }
-              } catch (err) {
-                console.log(`[Launch] Error fetching ad account instagram_accounts:`, err);
-              }
-            }
-            
-            if (!instagramAccountId) {
-              log(`WARNING: No Instagram account found for Page ${pageId}.`, "warning");
-              log(`Ads will be shown on Facebook ONLY.`, "warning");
-              log(`To enable Instagram: reconnect Meta or ensure your ad account has access to this Page's Instagram.`, "warning");
-            }
-            
-            // Validate that ad account has access to the selected Instagram account
-            if (instagramAccountId) {
-              try {
-                const userAccessToken = metaApi.getAccessToken();
-                const validateData = await cachedMetaFetch(
-                  `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
-                  `ig_adaccount_${adAccountId}`
-                );
-                const authorizedIgIds = (validateData.data || []).map((ig: any) => ig.id);
-                
-                if (authorizedIgIds.length > 0 && !authorizedIgIds.includes(instagramAccountId)) {
-                  log(`WARNING: Instagram ${instagramAccountId} is NOT authorized for ad account ${adAccountId}`, "warning");
-                  log(`Authorized Instagram accounts: ${validateData.data.map((ig: any) => `${ig.id} (@${ig.username || '?'})`).join(', ')}`, "info");
-                  const oldId = instagramAccountId;
-                  instagramAccountId = authorizedIgIds[0];
-                  log(`Switched from ${oldId} to authorized account: ${instagramAccountId} (@${validateData.data[0].username || 'unknown'})`, "success");
-                } else if (authorizedIgIds.length > 0) {
-                  log(`Instagram ${instagramAccountId} is authorized for this ad account`, "success");
-                }
-              } catch (err) {
-                console.log(`[Launch] Error validating Instagram access:`, err);
-              }
-              log(`Instagram placement enabled with ID: ${instagramAccountId}`, "success");
-            }
-          } catch (err) {
-            log(`Error finding Instagram account: ${err instanceof Error ? err.message : 'Unknown error'}`);
           }
+          if (!pageAccessToken) {
+            const promoteData = await cachedMetaFetch(
+              `https://graph.facebook.com/v21.0/${adAccountId}/promote_pages?fields=id,name,access_token&access_token=${userAccessToken}`,
+              `promote_pages_${adAccountId}`,
+            );
+            if (Array.isArray(promoteData?.data)) {
+              const promotePage = promoteData.data.find((p: any) => p.id === pageId);
+              if (promotePage?.access_token) {
+                pageAccessToken = promotePage.access_token;
+                log(`Got Page Access Token via promote_pages for Page ${pageId}`, "success");
+              }
+            }
+          }
+
+          let resolvedAccounts = extractInstagramAccountsFromPageRecord(storedPage);
+          if (resolvedAccounts.length > 0) {
+            log(
+              `Using ${resolvedAccounts.length} cached Instagram account(s) from pagesJson`,
+              "info",
+            );
+          }
+
+          if (resolvedAccounts.length === 0 && pageAccessToken) {
+            resolvedAccounts = await fetchInstagramAccountsForPage({
+              pageId,
+              pageAccessToken,
+              userAccessToken,
+              pageName: storedPage?.name || pageName,
+              apiVersion: "v21.0",
+              cacheKeyPrefix: `ig_launch_${jobId}_${pageId}`,
+            });
+            if (resolvedAccounts.length > 0) {
+              const updatedPages = Array.isArray(storedPages)
+                ? storedPages.map((p: any) => {
+                    if (p?.id === pageId) {
+                      return {
+                        ...p,
+                        access_token: pageAccessToken || p.access_token,
+                        instagram_accounts: resolvedAccounts,
+                      };
+                    }
+                    return p;
+                  })
+                : [];
+              if (!updatedPages.some((p: any) => p?.id === pageId)) {
+                updatedPages.push({
+                  id: pageId,
+                  name: pageName || pageId,
+                  access_token: pageAccessToken,
+                  instagram_accounts: resolvedAccounts,
+                });
+              }
+              await db.update(metaAssets)
+                .set({ pagesJson: updatedPages, updatedAt: new Date() })
+                .where(eq(metaAssets.userId, userId));
+            }
+          }
+
+          if (!instagramAccountId && resolvedAccounts.length > 0) {
+            if (savedInstagramId) {
+              const savedAccount = resolvedAccounts.find((account) => account.id === savedInstagramId);
+              if (savedAccount) {
+                instagramAccountId = savedAccount.id;
+                log(`Using saved Instagram account from settings: ${instagramAccountId} (@${savedAccount.username || "unknown"})`, "success");
+              } else {
+                const first = resolvedAccounts[0];
+                instagramAccountId = first.id;
+                log(`Saved IG ${savedInstagramId} not found for this page, using first: ${instagramAccountId} (@${first.username || "unknown"})`, "info");
+              }
+            } else {
+              const first = resolvedAccounts[0];
+              instagramAccountId = first.id;
+              log(`No saved IG selection, using first: ${instagramAccountId} (@${first.username || "unknown"})`, "info");
+            }
+            if (resolvedAccounts.length > 1) {
+              log(
+                `Page has ${resolvedAccounts.length} Instagram accounts: ${resolvedAccounts.map((account) => `${account.id} (@${account.username || "?"})`).join(", ")}`,
+                "info",
+              );
+            }
+          }
+
+          if (!instagramAccountId) {
+            throw new Error(
+              `instagram_required: No Instagram account is linked to Facebook Page ${pageId}. Connect a Professional Instagram account and retry.`,
+            );
+          }
+
+          const validateData = await cachedMetaFetch(
+            `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
+            `ig_adaccount_${adAccountId}`,
+          );
+          const authorizedIgIds = Array.isArray(validateData?.data)
+            ? validateData.data.map((ig: any) => ig.id)
+            : [];
+          if (authorizedIgIds.length > 0 && !authorizedIgIds.includes(instagramAccountId)) {
+            throw new Error(
+              `instagram_required: Instagram account ${instagramAccountId} is not authorized for ad account ${adAccountId}.`,
+            );
+          }
+          log(`Instagram placement enabled with ID: ${instagramAccountId}`, "success");
           
           const adSetResult = await metaApi.createAdSet({
             campaignId: finalCampaignId!,
@@ -2216,9 +2382,8 @@ export async function registerRoutes(
             // Dynamic Creative zahteva asset_feed_spec kar omejuje na 1 ad per adset
             // Flexible format deluje na ad-level z object_story_spec, NE z asset_feed_spec
             isDynamicCreative: false,
-            // Pass Instagram status so createAdSet can set appropriate placements
-            // If no Instagram account, use Advantage+ placements (Facebook only)
-            hasInstagramAccount: !!instagramAccountId,
+            // Instagram is required for launch; keep Instagram placements enabled.
+            hasInstagramAccount: true,
           });
           metaAdSetId = adSetResult.id;
           adSetIds.push(metaAdSetId);
@@ -2234,7 +2399,11 @@ export async function registerRoutes(
             status: "creating",
           });
         } catch (err) {
-          log(`Error creating ad set ${adset.name}: ${err instanceof Error ? err.message : "Unknown error"}`);
+          const errorMessage = err instanceof Error ? err.message : "Unknown error";
+          log(`Error creating ad set ${adset.name}: ${errorMessage}`);
+          if (isInstagramRequiredError(err)) {
+            throw err instanceof Error ? err : new Error(errorMessage);
+          }
           continue;
         }
 
@@ -4753,7 +4922,7 @@ export async function registerRoutes(
             }));
             
             // Re-fetch Instagram accounts for each page with valid access token
-            // This ensures IG data is always fresh when switching ad accounts
+            // This ensures IG data is always fresh when switching ad accounts.
             for (const page of filteredPages) {
               const pageToken = page.access_token;
               if (!pageToken) {
@@ -4761,49 +4930,20 @@ export async function registerRoutes(
                 continue;
               }
               try {
-                let foundIg = false;
-                
-                // Try with page access token first
-                const igData = await cachedMetaFetch(
-                  `https://graph.facebook.com/v21.0/${page.id}/instagram_accounts?fields=id,username&access_token=${pageToken}`,
-                  `ig_accounts_${page.id}`
-                );
-                if (!igData.error && igData.data && igData.data.length > 0) {
-                  page.instagram_accounts = igData.data;
-                  foundIg = true;
-                  console.log(`[Pages] Page ${page.name} (${page.id}): found ${igData.data.length} IG account(s): ${igData.data.map((a: any) => `${a.id} (@${a.username || '?'})`).join(', ')}`);
-                } else if (igData.error) {
-                  console.log(`[Pages] IG API error for page ${page.id} (page token):`, igData.error.message, `(code: ${igData.error.code})`);
-                  try {
-                    const igDataUser = await cachedMetaFetch(
-                      `https://graph.facebook.com/v21.0/${page.id}/instagram_accounts?fields=id,username&access_token=${accessToken}`,
-                      `ig_accounts_user_${page.id}`
-                    );
-                    if (!igDataUser.error && igDataUser.data && igDataUser.data.length > 0) {
-                      page.instagram_accounts = igDataUser.data;
-                      foundIg = true;
-                      console.log(`[Pages] Page ${page.name} (${page.id}): found IG via user token: ${igDataUser.data.map((a: any) => `${a.id} (@${a.username || '?'})`).join(', ')}`);
-                    }
-                  } catch (userTokenErr) {
-                    console.log(`[Pages] User token fallback also failed for page ${page.id}`);
-                  }
-                }
-                
-                // Try page_backed_instagram_accounts
-                if (!foundIg) {
-                  const igBackedData = await cachedMetaFetch(
-                    `https://graph.facebook.com/v21.0/${page.id}/page_backed_instagram_accounts?fields=id,username&access_token=${pageToken}`,
-                    `ig_backed_${page.id}`
+                const igAccounts = await fetchInstagramAccountsForPage({
+                  pageId: page.id,
+                  pageAccessToken: pageToken,
+                  userAccessToken: accessToken,
+                  pageName: page.name,
+                  apiVersion: "v21.0",
+                  cacheKeyPrefix: `ig_prefetch_${selectedAdAccountId}_${page.id}`,
+                });
+                if (igAccounts.length > 0) {
+                  page.instagram_accounts = igAccounts;
+                  console.log(
+                    `[Pages] Page ${page.name} (${page.id}): found ${igAccounts.length} IG account(s): ${igAccounts.map((a: any) => `${a.id} (@${a.username || "?"})`).join(", ")}`,
                   );
-                  if (!igBackedData.error && igBackedData.data && igBackedData.data.length > 0) {
-                    page.instagram_accounts = igBackedData.data;
-                    page.instagram_is_page_backed = true;
-                    foundIg = true;
-                    console.log(`[Pages] Page ${page.name} (${page.id}): found page-backed IG: ${igBackedData.data[0].id}`);
-                  }
-                }
-                
-                if (!foundIg) {
+                } else {
                   console.log(`[Pages] Page ${page.name} (${page.id}): no Instagram accounts found`);
                 }
               } catch (err) {
@@ -4821,7 +4961,6 @@ export async function registerRoutes(
                   ...p, 
                   access_token: matchedPage.access_token || p.access_token,
                   instagram_accounts: hasNewIgData ? matchedPage.instagram_accounts : (p.instagram_accounts || []),
-                  instagram_is_page_backed: hasNewIgData ? (matchedPage.instagram_is_page_backed || false) : (p.instagram_is_page_backed || false),
                 };
               }
               return p;
@@ -4836,7 +4975,6 @@ export async function registerRoutes(
                   name: fp.name, 
                   access_token: fp.access_token,
                   instagram_accounts: hasIgData ? fp.instagram_accounts : [],
-                  instagram_is_page_backed: fp.instagram_is_page_backed || false,
                 });
               }
             });
@@ -5072,23 +5210,12 @@ export async function registerRoutes(
         return res.json({ data: [] });
       }
 
-      const accounts: Array<{ id: string; username: string; name?: string; profile_picture_url?: string }> = [];
-
       // First check if Instagram accounts were fetched during OAuth or page refresh (stored in pagesJson)
       const pageWithIg = selectedPage as any;
-      const isPageBacked = pageWithIg.instagram_is_page_backed || false;
-      if (pageWithIg.instagram_accounts && pageWithIg.instagram_accounts.length > 0) {
-        console.log(`[IG] Serving ${pageWithIg.instagram_accounts.length} IG account(s) from DB cache for page ${pageId}`);
-        const enriched = pageWithIg.instagram_accounts.map((a: any) => ({
-          ...a,
-          name: a.name || (isPageBacked && !a.username ? (selectedPage as any).name : undefined),
-        }));
-        accounts.push(...enriched);
-        return res.json({ data: accounts, source: "cache" });
-      } else if (pageWithIg.instagram_business_account) {
-        console.log(`[IG] Using cached instagram_business_account from pagesJson:`, pageWithIg.instagram_business_account);
-        accounts.push(pageWithIg.instagram_business_account);
-        return res.json({ data: accounts, source: "cache" });
+      const cachedAccounts = extractInstagramAccountsFromPageRecord(pageWithIg);
+      if (cachedAccounts.length > 0) {
+        console.log(`[IG] Serving ${cachedAccounts.length} IG account(s) from DB cache for page ${pageId}`);
+        return res.json({ data: cachedAccounts, source: "cache" });
       }
 
       // No cached IG data — need access token for live API call
@@ -5097,100 +5224,33 @@ export async function registerRoutes(
         return res.json({ data: [] });
       }
 
-      // If no cached account, try API calls
-      if (accounts.length === 0) {
-        console.log(`[IG] No cached IG data for page ${pageId}, fetching from API...`);
-        // Method 1: Try instagram_accounts endpoint (for pages connected to Instagram via Page settings)
+      console.log(`[IG] No cached IG data for page ${pageId}, fetching from API...`);
+      const accounts = await fetchInstagramAccountsForPage({
+        pageId,
+        pageAccessToken: selectedPage.access_token,
+        pageName: selectedPage.name,
+        apiVersion: "v21.0",
+        cacheKeyPrefix: `ig_endpoint_${pageId}`,
+      });
+
+      // If we found accounts via API, update both metaAssets and metaAccountCache
+      if (accounts.length > 0) {
         try {
-          const response = await fetch(
-            `https://graph.facebook.com/v21.0/${pageId}/instagram_accounts?fields=id,username,profile_picture_url,name&access_token=${selectedPage.access_token}`
-          );
-          const data = await response.json();
-          console.log(`instagram_accounts response:`, data);
-          if (data.error) {
-            console.log(`[IG] instagram_accounts API error for page ${pageId}:`, data.error.message, `(code: ${data.error.code}, type: ${data.error.type})`);
-          }
-          if (data.data && data.data.length > 0) {
-            accounts.push(...data.data);
-          }
-        } catch (err) {
-          console.log("instagram_accounts endpoint failed:", err);
-        }
-
-        // Method 2: Try page_backed_instagram_accounts (Use Facebook Page as Instagram)
-        if (accounts.length === 0) {
-          try {
-            const response = await fetch(
-              `https://graph.facebook.com/v21.0/${pageId}/page_backed_instagram_accounts?fields=id,username,profile_picture_url,name&access_token=${selectedPage.access_token}`
-            );
-            const data = await response.json();
-            console.log(`page_backed_instagram_accounts response:`, data);
-            if (data.error) {
-              console.log(`[IG] page_backed_instagram_accounts API error:`, data.error.message, `(code: ${data.error.code})`);
+          const updatedPagesJson = pagesJson.map((p: any) => {
+            if (p.id === pageId) {
+              return { ...p, instagram_accounts: accounts };
             }
-            if (data.data && data.data.length > 0) {
-              const enrichedPageBacked = data.data.map((a: any) => ({
-                ...a,
-                name: a.name || (!a.username ? (selectedPage as any).name : undefined),
-              }));
-              accounts.push(...enrichedPageBacked);
-            }
-          } catch (err) {
-            console.log("page_backed_instagram_accounts endpoint failed:", err);
+            return p;
+          });
+          await db.update(metaAssets)
+            .set({ pagesJson: updatedPagesJson, updatedAt: new Date() })
+            .where(eq(metaAssets.userId, userId));
+          if (selectedAdAccountId) {
+            await upsertAccountCache(userId, selectedAdAccountId, "pagesJson", updatedPagesJson);
           }
-        }
-
-        // Method 3: Try instagram_business_account endpoint (for Instagram Business accounts)
-        if (accounts.length === 0) {
-          try {
-            const response = await fetch(
-              `https://graph.facebook.com/v21.0/${pageId}?fields=instagram_business_account{id,username,profile_picture_url,name}&access_token=${selectedPage.access_token}`
-            );
-            const data = await response.json();
-            console.log(`instagram_business_account response:`, data);
-            if (data.instagram_business_account) {
-              accounts.push(data.instagram_business_account);
-            }
-          } catch (err) {
-            console.log("instagram_business_account endpoint failed:", err);
-          }
-        }
-
-        // Method 4: Try connected_instagram_account endpoint (for Creator accounts)
-        if (accounts.length === 0) {
-          try {
-            const response = await fetch(
-              `https://graph.facebook.com/v21.0/${pageId}?fields=connected_instagram_account{id,username,profile_picture_url,name}&access_token=${selectedPage.access_token}`
-            );
-            const data = await response.json();
-            console.log(`connected_instagram_account response:`, data);
-            if (data.connected_instagram_account) {
-              accounts.push(data.connected_instagram_account);
-            }
-          } catch (err) {
-            console.log("connected_instagram_account endpoint failed:", err);
-          }
-        }
-
-        // If we found accounts via API, update both metaAssets and metaAccountCache
-        if (accounts.length > 0) {
-          try {
-            const updatedPagesJson = pagesJson.map((p: any) => {
-              if (p.id === pageId) {
-                return { ...p, instagram_accounts: accounts.map(a => ({ id: a.id, username: a.username })) };
-              }
-              return p;
-            });
-            await db.update(metaAssets)
-              .set({ pagesJson: updatedPagesJson, updatedAt: new Date() })
-              .where(eq(metaAssets.userId, userId));
-            if (selectedAdAccountId) {
-              await upsertAccountCache(userId, selectedAdAccountId, "pagesJson", updatedPagesJson);
-            }
-            console.log(`[IG] Updated DB cache with ${accounts.length} IG account(s) for page ${pageId}`);
-          } catch (cacheErr) {
-            console.log(`[IG] Failed to update cache:`, cacheErr);
-          }
+          console.log(`[IG] Updated DB cache with ${accounts.length} IG account(s) for page ${pageId}`);
+        } catch (cacheErr) {
+          console.log(`[IG] Failed to update cache:`, cacheErr);
         }
       }
 
@@ -5250,18 +5310,14 @@ export async function registerRoutes(
         return res.json({ data: [] });
       }
 
-      // Fetch Instagram accounts connected to this page
-      const response = await fetch(
-        `https://graph.facebook.com/v21.0/${selectedPageId}/instagram_accounts?fields=id,username,profile_picture_url,name&access_token=${selectedPage.access_token}`
-      );
-      const data = await response.json();
-
-      if (data.error) {
-        console.error("Error fetching Instagram accounts:", data.error);
-        return res.status(500).json({ error: data.error.message || "Failed to fetch Instagram accounts" });
-      }
-
-      const igAccounts = data.data || [];
+      const igAccounts = await fetchInstagramAccountsForPage({
+        pageId: selectedPageId,
+        pageAccessToken: selectedPage.access_token,
+        userAccessToken: api.getAccessToken(),
+        pageName: selectedPage.name,
+        apiVersion: "v21.0",
+        cacheKeyPrefix: `ig_legacy_${selectedPageId}`,
+      });
       if (selectedAdAccountId && igAccounts.length > 0) {
         upsertAccountCache(userId, selectedAdAccountId, "instagramAccountsJson", igAccounts);
       }
@@ -5476,15 +5532,7 @@ export async function registerRoutes(
       let instagramAccounts: any[] = [];
       if (selectedPageId && pages.length > 0) {
         const selectedPage = pages.find((p: any) => p.id === selectedPageId) as any;
-        if (selectedPage?.instagram_accounts && selectedPage.instagram_accounts.length > 0) {
-          const isPageBacked = selectedPage.instagram_is_page_backed || false;
-          instagramAccounts = selectedPage.instagram_accounts.map((a: any) => ({
-            ...a,
-            name: a.name || (isPageBacked && !a.username ? selectedPage.name : undefined),
-          }));
-        } else if (selectedPage?.instagram_business_account) {
-          instagramAccounts = [selectedPage.instagram_business_account];
-        }
+        instagramAccounts = extractInstagramAccountsFromPageRecord(selectedPage);
       }
 
       // --- Global settings ---
