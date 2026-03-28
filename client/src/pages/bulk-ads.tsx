@@ -807,6 +807,9 @@ export default function BulkAds() {
   const hasSelectedUsableAdAccount = Boolean(selectedAdAccountId) && availableAdAccounts.some(
     (account) => normalizeAdAccountId(account.id) === normalizeAdAccountId(selectedAdAccountId),
   );
+  const selectedSessionAdAccount = availableAdAccounts.find(
+    (account) => normalizeAdAccountId(account.id) === normalizeAdAccountId(selectedAdAccountId),
+  );
   const connectionUpdatedAt = adAccountsData?.connectionUpdatedAt || null;
 
   // Load per-ad-account settings to check if configured
@@ -838,8 +841,13 @@ export default function BulkAds() {
     adAccountName: string | null;
     isConfigured: boolean;
   }>({
-    queryKey: ["/api/ad-account-settings"],
-    enabled: !!selectedAdAccountId,
+    queryKey: ["/api/ad-account-settings", selectedAdAccountId || "none"],
+    queryFn: async () => {
+      const res = await fetch("/api/ad-account-settings", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch ad account settings");
+      return res.json();
+    },
+    enabled: !!selectedAdAccountId && hasSelectedUsableAdAccount,
     staleTime: 0, // Always refetch to get fresh data
     refetchOnMount: "always", // Always refetch when component mounts
   });
@@ -3330,7 +3338,7 @@ export default function BulkAds() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Ad Account</p>
-              <p className="text-sm font-medium truncate">{adAccountSettingsData?.adAccountName || selectedAdAccountId || "Not selected"}</p>
+              <p className="text-sm font-medium truncate">{selectedSessionAdAccount?.name || adAccountSettingsData?.adAccountName || selectedAdAccountId || "Not selected"}</p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Budget</p>

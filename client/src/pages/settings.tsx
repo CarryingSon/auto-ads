@@ -203,8 +203,15 @@ export default function Settings() {
     adAccountName: string | null;
     isConfigured: boolean;
   }>({
-    queryKey: ["/api/ad-account-settings"],
+    queryKey: ["/api/ad-account-settings", selectedAdAccountId || "none"],
+    queryFn: async () => {
+      const res = await fetch("/api/ad-account-settings", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch ad account settings");
+      return res.json();
+    },
     enabled: !!metaConnection && !!selectedAdAccountId,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   
   // State for campaign import feature

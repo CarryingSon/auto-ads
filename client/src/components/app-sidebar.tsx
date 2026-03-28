@@ -350,6 +350,7 @@ export function AppSidebar() {
         queryClient.removeQueries({ queryKey: ["sidebar-meta-pages", adAccountId], exact: true });
         await queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
         queryClient.invalidateQueries({ queryKey: ["/api/meta/ad-accounts"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/ad-account-settings"], exact: false });
       } finally {
         setIsAdAccountSwitching(false);
       }
