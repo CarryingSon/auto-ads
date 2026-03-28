@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, getCsrfHeaders } from "@/lib/queryClient";
+import { filterDisplayableInstagramAccounts } from "@/lib/instagram-accounts";
 import {
   FolderOpen,
   FileVideo,
@@ -1013,7 +1014,7 @@ export default function BulkAds() {
     enabled: !!selectedPageId,
   });
   
-  const instagramAccounts = instagramAccountsData?.data || [];
+  const instagramAccounts = filterDisplayableInstagramAccounts(instagramAccountsData?.data || []);
   const savedIgId = globalSettings?.instagramPageId || "";
   const selectedInstagram = instagramAccounts.find(a => a.id === savedIgId) || (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
   const hasLinkedInstagram = Boolean(selectedInstagram?.id);

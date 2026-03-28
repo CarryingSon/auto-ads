@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { filterDisplayableInstagramAccounts } from "@/lib/instagram-accounts";
 import {
   Sidebar,
   SidebarContent,
@@ -268,11 +269,13 @@ export function AppSidebar() {
     name: a.name,
     profile_picture_url: a.profile_picture_url,
   }));
+  const visibleDerivedInstagramAccounts = filterDisplayableInstagramAccounts(derivedInstagramAccounts);
+  const visibleSidebarInstagramAccounts = filterDisplayableInstagramAccounts(sidebarData?.instagramAccounts || []);
   const instagramAccounts = usingFallbackPages
-    ? derivedInstagramAccounts
-    : ((sidebarData?.instagramAccounts && sidebarData.instagramAccounts.length > 0)
-      ? sidebarData.instagramAccounts
-      : derivedInstagramAccounts);
+    ? visibleDerivedInstagramAccounts
+    : (visibleSidebarInstagramAccounts.length > 0
+      ? visibleSidebarInstagramAccounts
+      : visibleDerivedInstagramAccounts);
   const settings = sidebarData?.settings;
   const savedInstagramId = settings?.instagramPageId || "";
   const selectedInstagram = instagramAccounts.find(a => a.id === savedInstagramId) ||

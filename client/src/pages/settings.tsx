@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { filterDisplayableInstagramAccounts } from "@/lib/instagram-accounts";
 import { Loader2 } from "lucide-react";
 import { SiFacebook } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
@@ -152,7 +153,7 @@ export default function Settings() {
     enabled: !!selectedPageIdFromMeta && !!metaConnection,
   });
   
-  const instagramAccounts = instagramAccountsData?.data || [];
+  const instagramAccounts = filterDisplayableInstagramAccounts(instagramAccountsData?.data || []);
   
   // Mutation to update selected page (syncs with sidebar)
   const updatePageMutation = useMutation({
