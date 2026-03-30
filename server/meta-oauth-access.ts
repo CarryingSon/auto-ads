@@ -131,16 +131,16 @@ export async function checkAdAccountPromotePagesAccess(
 
     const pageCount = Array.isArray(payload?.data) ? payload.data.length : 0;
     if (pageCount === 0) {
-      // Keep the ad account selectable even when no promotable pages are currently
-      // available. Page-level requirements are handled later in the flow.
-      log(options, "Ad account has no promotable pages yet, keeping it selectable", {
+      // Treat accounts without promotable pages as not currently accessible for this app.
+      // This guarantees reconnect returns only accounts that can immediately map to a Page.
+      log(options, "Ad account excluded because no promotable pages were returned", {
         adAccountId,
         accountName: account.name || null,
       });
       return {
         account,
-        allowed: true,
-        issue: null,
+        allowed: false,
+        issue: "no_promotable_pages",
         promotablePageCount: 0,
       };
     }

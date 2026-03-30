@@ -11,7 +11,7 @@ import {
   metaAds,
   metaInsights
 } from "../shared/schema.js";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { encrypt, decrypt } from "./auth-routes.js";
 import { 
   prepareVideoForMeta, 
@@ -147,6 +147,7 @@ export class MetaAdsApi {
         eq(oauthConnections.userId, this.userId),
         eq(oauthConnections.provider, "meta")
       ))
+      .orderBy(desc(oauthConnections.updatedAt), desc(oauthConnections.connectedAt))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -167,6 +168,7 @@ export class MetaAdsApi {
     const assets = await db.select()
       .from(metaAssets)
       .where(eq(metaAssets.userId, this.userId))
+      .orderBy(desc(metaAssets.updatedAt))
       .limit(1);
 
     if (assets.length && assets[0].selectedAdAccountId) {

@@ -15,6 +15,7 @@ import { getClearSessionCookieOptions } from "./session-config.js";
 import { 
   oauthConnections, 
   metaAssets, 
+  metaAccountCache,
   googleDriveLinks, 
   oauthStates,
   metaObjects,
@@ -569,55 +570,42 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     
     const tokenExpiresAt = finalExpires ? new Date(Date.now() + finalExpires * 1000) : null;
     
-    const existingConnection = await db.select()
+    // Match the scopes requested in /meta/start - includes Instagram access
+    const scopes = ["public_profile", "pages_show_list", "pages_read_engagement", "instagram_basic", "ads_management", "ads_read"];
+
+    // Hard-replace meta connection rows so reconnect always uses the newest token
+    // and we never keep stale duplicate rows for the same user/provider.
+    const existingMetaConnectionRows = await db.select({ id: oauthConnections.id })
       .from(oauthConnections)
       .where(and(
         eq(oauthConnections.userId, userId),
-        eq(oauthConnections.provider, "meta")
-      ))
-      .limit(1);
-    
-    // Match the scopes requested in /meta/start - includes Instagram access
-    const scopes = ["public_profile", "pages_show_list", "pages_read_engagement", "instagram_basic", "ads_management", "ads_read"];
-    
-    if (existingConnection.length > 0) {
-      await db.update(oauthConnections)
-        .set({
-          status: "connected",
-          accessToken: encrypt(finalToken),
-          tokenExpiresAt,
-          accountName: meData.name,
-          accountEmail: meData.email || null,
-          metaUserId: meData.id,
-          scopes,
-          connectedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(oauthConnections.id, existingConnection[0].id));
-      metaLog(traceId, "Updated existing oauth_connections row", {
+        eq(oauthConnections.provider, "meta"),
+      ));
+    if (existingMetaConnectionRows.length > 0) {
+      await db.delete(oauthConnections)
+        .where(and(
+          eq(oauthConnections.userId, userId),
+          eq(oauthConnections.provider, "meta"),
+        ));
+      metaLog(traceId, "Deleted previous oauth_connections rows before reconnect insert", {
         userId,
-        connectionId: existingConnection[0].id,
+        deletedCount: existingMetaConnectionRows.length,
       });
-    } else {
-      await db.insert(oauthConnections).values({
-        userId,
-        provider: "meta",
-        status: "connected",
-        accessToken: encrypt(finalToken),
-        tokenExpiresAt,
-        accountName: meData.name,
-        accountEmail: meData.email || null,
-        metaUserId: meData.id,
-        scopes,
-        connectedAt: new Date(),
-      });
-      metaLog(traceId, "Inserted new oauth_connections row", { userId });
     }
-    
-    const existingAssets = await db.select()
-      .from(metaAssets)
-      .where(eq(metaAssets.userId, userId))
-      .limit(1);
+    await db.insert(oauthConnections).values({
+      userId,
+      provider: "meta",
+      status: "connected",
+      accessToken: encrypt(finalToken),
+      tokenExpiresAt,
+      accountName: meData.name,
+      accountEmail: meData.email || null,
+      metaUserId: meData.id,
+      scopes,
+      connectedAt: new Date(),
+      updatedAt: new Date(),
+    });
+    metaLog(traceId, "Inserted fresh oauth_connections row for reconnect", { userId });
     
     const adAccountCandidates: unknown[] = Array.isArray(adAccountsData.data) ? adAccountsData.data : [];
     const rawAdAccounts = adAccountCandidates
@@ -645,9 +633,14 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     const pages = pagesData.data || [];
     
     // Auto-select all usable ad accounts from OAuth and set the first as primary.
-    metaLog(traceId, "Preparing meta_assets update", {
+    const existingAssetsRows = await db.select({ id: metaAssets.id })
+      .from(metaAssets)
+      .where(eq(metaAssets.userId, userId));
+
+    metaLog(traceId, "Preparing meta_assets overwrite", {
       userId,
-      hasExistingAssets: existingAssets.length > 0,
+      hasExistingAssets: existingAssetsRows.length > 0,
+      existingAssetsCount: existingAssetsRows.length,
       adAccountsCount: adAccounts.length,
       selectedAccountsStoredCount: selectedAccountsForStorage.length,
       rawAdAccountsCount: rawAdAccounts.length,
@@ -657,36 +650,24 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       primarySelectedAdAccountId,
       blockedAccountsCount: pendingAccounts.filter((acc) => acc.access_verified === false).length,
     });
-    
-    if (existingAssets.length > 0) {
-      // Update existing record with auto-selected usable accounts.
-      await db.update(metaAssets)
-        .set({
-          metaUserId: meData.id,
-          adAccountsJson: selectedAccountsForStorage,
-          pendingAdAccountsJson: [],
-          pagesJson: pages,
-          businessesJson: businesses,
-          businessOwnedPagesJson: businessOwnedPages,
-          selectedAdAccountId: primarySelectedAdAccountId,
-          selectedPageId: null, // Re-resolve from account-scoped pages to prevent cross-account mismatch.
-          updatedAt: new Date(),
-        })
-        .where(eq(metaAssets.id, existingAssets[0].id));
-    } else {
-      metaLog(traceId, "Creating new meta_assets row for user", { userId });
-      await db.insert(metaAssets).values({
-        userId,
-        metaUserId: meData.id,
-        adAccountsJson: selectedAccountsForStorage,
-        pendingAdAccountsJson: [],
-        pagesJson: pages,
-        businessesJson: businesses,
-        businessOwnedPagesJson: businessOwnedPages,
-        selectedAdAccountId: primarySelectedAdAccountId,
-        selectedPageId: null,
-      });
+
+    // Reconnect is authoritative: replace previous ad-account/page snapshot and clear cache.
+    if (existingAssetsRows.length > 0) {
+      await db.delete(metaAssets).where(eq(metaAssets.userId, userId));
     }
+    await db.delete(metaAccountCache).where(eq(metaAccountCache.userId, userId));
+    await db.insert(metaAssets).values({
+      userId,
+      metaUserId: meData.id,
+      adAccountsJson: selectedAccountsForStorage,
+      pendingAdAccountsJson: [],
+      pagesJson: pages,
+      businessesJson: businesses,
+      businessOwnedPagesJson: businessOwnedPages,
+      selectedAdAccountId: primarySelectedAdAccountId,
+      selectedPageId: null,
+      updatedAt: new Date(),
+    });
     
     const postAuthRedirect = noUsableAdAccountsMessage
       ? metaErrorRedirect(noUsableAdAccountsMessage, traceId)
@@ -757,6 +738,7 @@ router.get("/meta/test", async (req: Request, res: Response) => {
         eq(oauthConnections.userId, userId),
         eq(oauthConnections.provider, "meta")
       ))
+      .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
       .limit(1);
     
     if (!connection.length || !connection[0].accessToken) {
@@ -1100,8 +1082,17 @@ router.get("/status", async (req: Request, res: Response) => {
       .where(eq(metaAssets.userId, userId))
       .limit(1);
     
-    const metaConnection = connections.find(c => c.provider === "meta");
-    const googleConnection = connections.find(c => c.provider === "google");
+    const sortByMostRecent = (a: { updatedAt?: Date | null; connectedAt?: Date | null }, b: { updatedAt?: Date | null; connectedAt?: Date | null }) => {
+      const aTs = (a.updatedAt || a.connectedAt || new Date(0)).getTime();
+      const bTs = (b.updatedAt || b.connectedAt || new Date(0)).getTime();
+      return bTs - aTs;
+    };
+    const metaConnection = connections
+      .filter((c) => c.provider === "meta")
+      .sort(sortByMostRecent)[0];
+    const googleConnection = connections
+      .filter((c) => c.provider === "google")
+      .sort(sortByMostRecent)[0];
     
     res.json({
       meta: metaConnection ? {
@@ -1200,6 +1191,7 @@ router.post("/verify-login-token", async (req: Request, res: Response) => {
         eq(oauthConnections.userId, userId),
         eq(oauthConnections.provider, "meta")
       ))
+      .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
       .limit(1);
     
     if (connection.length === 0) {

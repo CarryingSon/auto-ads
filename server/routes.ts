@@ -858,6 +858,7 @@ export async function registerRoutes(
             eq(oauthConnections.provider, "meta"),
             eq(oauthConnections.status, "connected")
           ))
+          .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
           .limit(1);
         
         if (metaOAuth.length > 0) {
@@ -4900,6 +4901,7 @@ export async function registerRoutes(
           eq(oauthConnections.userId, userId),
           eq(oauthConnections.provider, "meta")
         ))
+        .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
         .limit(1);
       
       const encryptedToken = oauthConnection?.accessToken;
