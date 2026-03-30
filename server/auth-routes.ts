@@ -457,24 +457,61 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       accountName: meData.name,
     });
     
+    const fetchAdAccounts = async (token: string, source: "short_lived" | "long_lived") => {
+      const response = await fetch(
+        `https://graph.facebook.com/${META_API_VERSION}/me/adaccounts?fields=id,name,account_status&access_token=${token}`
+      );
+      metaLog(traceId, `Meta /adaccounts HTTP response (${source})`, {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+      });
+      const data = await response.json();
+      if (data?.error) {
+        metaLog(traceId, `Meta /adaccounts error (${source})`, { metaError: data.error });
+      } else {
+        metaLog(traceId, `Ad accounts fetched (${source})`, {
+          count: data?.data?.length || 0,
+        });
+      }
+      return data;
+    };
+
     metaLog(traceId, "Fetching ad accounts");
-    const adAccountsResponse = await fetch(
-      `https://graph.facebook.com/${META_API_VERSION}/me/adaccounts?fields=id,name,account_status&access_token=${finalToken}`
-    );
-    metaLog(traceId, "Meta /adaccounts HTTP response", {
-      status: adAccountsResponse.status,
-      statusText: adAccountsResponse.statusText,
-      ok: adAccountsResponse.ok,
-    });
-    const adAccountsData = await adAccountsResponse.json();
-    
-    if (adAccountsData.error) {
-      metaLog(traceId, "Meta /adaccounts error", { metaError: adAccountsData.error });
-      return sendMetaOauthError(res, isPopup, adAccountsData.error.message || "Failed to fetch ad accounts", traceId);
+    const longLivedAdAccountsData = await fetchAdAccounts(finalToken, "long_lived");
+    if (longLivedAdAccountsData?.error) {
+      return sendMetaOauthError(
+        res,
+        isPopup,
+        longLivedAdAccountsData.error.message || "Failed to fetch ad accounts",
+        traceId,
+      );
     }
-    metaLog(traceId, "Ad accounts fetched", {
-      count: adAccountsData.data?.length || 0,
-    });
+
+    // Some reconnects can yield a broader long-lived token than the immediate
+    // short-lived grant selection. Prefer the stricter set when available.
+    let adAccountsData = longLivedAdAccountsData;
+    if (accessToken && accessToken !== finalToken) {
+      const shortLivedAdAccountsData = await fetchAdAccounts(accessToken, "short_lived");
+      if (!shortLivedAdAccountsData?.error) {
+        const longSet = new Set(
+          (Array.isArray(longLivedAdAccountsData?.data) ? longLivedAdAccountsData.data : []).map((acc: any) => String(acc?.id || "")),
+        );
+        const shortList = Array.isArray(shortLivedAdAccountsData?.data) ? shortLivedAdAccountsData.data : [];
+        const shortSet = new Set(shortList.map((acc: any) => String(acc?.id || "")));
+        const shortIsStrictSubset =
+          shortSet.size > 0 &&
+          shortSet.size <= longSet.size &&
+          Array.from(shortSet).every((id) => longSet.has(id));
+        if (shortIsStrictSubset && shortSet.size < longSet.size) {
+          adAccountsData = shortLivedAdAccountsData;
+          metaLog(traceId, "Using short-lived ad account subset for reconnect", {
+            shortCount: shortSet.size,
+            longCount: longSet.size,
+          });
+        }
+      }
+    }
     
     const pagesResponse = await fetch(
       `https://graph.facebook.com/${META_API_VERSION}/me/accounts?fields=id,name,access_token&access_token=${finalToken}`
