@@ -36,6 +36,7 @@ export type PendingAdAccount = MetaAdAccount & {
 
 export type MetaOauthAccessOptions = {
   apiVersion: string;
+  allowedPageIds?: Iterable<string>;
   log?: (message: string, details?: Record<string, unknown>) => void;
   fetchFn?: typeof fetch;
 };
@@ -129,8 +130,12 @@ export async function checkAdAccountPromotePagesAccess(
       };
     }
 
-    const pageCount = Array.isArray(payload?.data) ? payload.data.length : 0;
-    if (pageCount === 0) {
+    const promotablePageIds = Array.isArray(payload?.data)
+      ? payload.data
+          .map((page) => String((page as Record<string, unknown>)?.id || "").trim())
+          .filter((id) => id.length > 0)
+      : [];
+    if (promotablePageIds.length === 0) {
       // Treat accounts without promotable pages as not currently accessible for this app.
       // This guarantees reconnect returns only accounts that can immediately map to a Page.
       log(options, "Ad account excluded because no promotable pages were returned", {
@@ -145,11 +150,39 @@ export async function checkAdAccountPromotePagesAccess(
       };
     }
 
+    const grantedPageSet = options.allowedPageIds
+      ? new Set(Array.from(options.allowedPageIds).map((id) => String(id).trim()).filter((id) => id.length > 0))
+      : null;
+    if (grantedPageSet && grantedPageSet.size > 0) {
+      const scopedPageCount = promotablePageIds.filter((id) => grantedPageSet.has(id)).length;
+      if (scopedPageCount === 0) {
+        log(options, "Ad account excluded because promotable pages are outside granted page scope", {
+          adAccountId,
+          accountName: account.name || null,
+          grantedPageCount: grantedPageSet.size,
+          promotablePageCount: promotablePageIds.length,
+        });
+        return {
+          account,
+          allowed: false,
+          issue: "no_promotable_pages",
+          promotablePageCount: 0,
+        };
+      }
+
+      return {
+        account,
+        allowed: true,
+        issue: null,
+        promotablePageCount: scopedPageCount,
+      };
+    }
+
     return {
       account,
       allowed: true,
       issue: null,
-      promotablePageCount: pageCount,
+      promotablePageCount: promotablePageIds.length,
     };
   } catch (error) {
     log(options, "Ad account promote_pages access check failed with exception", {

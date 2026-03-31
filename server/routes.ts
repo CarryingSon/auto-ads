@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import crypto from "crypto";
 import multer from "multer";
 import { z } from "zod";
 import { storage } from "./storage.js";
@@ -303,7 +304,28 @@ async function assertAdsetOwnership(userId: string, adsetId: string) {
 }
 
 async function cachedMetaFetch(url: string, cacheKey?: string): Promise<any> {
-  const key = cacheKey || url.replace(/access_token=[^&]+/, "access_token=REDACTED");
+  let tokenHash = "no_token";
+  let sanitizedUrl = url;
+  try {
+    const parsedUrl = new URL(url);
+    const accessToken = parsedUrl.searchParams.get("access_token");
+    if (accessToken) {
+      tokenHash = crypto.createHash("sha256").update(accessToken).digest("hex").slice(0, 16);
+      parsedUrl.searchParams.set("access_token", "[REDACTED]");
+    }
+    sanitizedUrl = parsedUrl.toString();
+  } catch {
+    const tokenMatch = url.match(/access_token=([^&]+)/);
+    if (tokenMatch?.[1]) {
+      tokenHash = crypto.createHash("sha256").update(tokenMatch[1]).digest("hex").slice(0, 16);
+    }
+    sanitizedUrl = url.replace(/access_token=[^&]+/gi, "access_token=[REDACTED]");
+  }
+
+  // Scope memory cache to the token fingerprint so reconnects never reuse
+  // responses from an older token with broader permissions.
+  const baseKey = cacheKey || sanitizedUrl;
+  const key = `${baseKey}::tok_${tokenHash}`;
   const cached = metaApiCache.get(key);
   if (cached && Date.now() < cached.expiry) {
     return cached.data;
@@ -1698,7 +1720,7 @@ export async function registerRoutes(
       if (!pageAccessToken) {
         const promoteData = await cachedMetaFetch(
           `https://graph.facebook.com/v21.0/${adAccountId}/promote_pages?fields=id,name,access_token&access_token=${userAccessToken}`,
-          `promote_pages_launch_${adAccountId}`,
+          `promote_pages_launch_${userId}_${adAccountId}`,
         );
         if (Array.isArray(promoteData?.data)) {
           const promotePage = promoteData.data.find((p: any) => p.id === pageId);
@@ -2300,7 +2322,7 @@ export async function registerRoutes(
           if (!pageAccessToken) {
             const promoteData = await cachedMetaFetch(
               `https://graph.facebook.com/v21.0/${adAccountId}/promote_pages?fields=id,name,access_token&access_token=${userAccessToken}`,
-              `promote_pages_${adAccountId}`,
+              `promote_pages_launch_${userId}_${adAccountId}`,
             );
             if (Array.isArray(promoteData?.data)) {
               const promotePage = promoteData.data.find((p: any) => p.id === pageId);
@@ -4913,7 +4935,10 @@ export async function registerRoutes(
           // Fetch pages that can be used for ads by this ad account (including access_token for each page)
           const promoteUrl = `https://graph.facebook.com/v21.0/${selectedAdAccountId}/promote_pages?fields=id,name,access_token&access_token=${accessToken}`;
           console.log(`[Pages] Fetching promote_pages for ad account: ${selectedAdAccountId}`);
-          const promoteData = await cachedMetaFetch(promoteUrl, `promote_pages_${selectedAdAccountId}`);
+          const promoteData = await cachedMetaFetch(
+            promoteUrl,
+            `promote_pages_sidebar_${userId}_${selectedAdAccountId}`,
+          );
 
           if (promoteData?.error) {
             const rawCode = (promoteData.error as any)?.code;
@@ -5001,7 +5026,7 @@ export async function registerRoutes(
                   userAccessToken: accessToken,
                   pageName: page.name,
                   apiVersion: "v21.0",
-                  cacheKeyPrefix: `ig_prefetch_${selectedAdAccountId}_${page.id}`,
+                  cacheKeyPrefix: `ig_prefetch_${userId}_${selectedAdAccountId}_${page.id}`,
                 });
                 if (igAccounts.length > 0) {
                   page.instagram_accounts = igAccounts;
@@ -5295,7 +5320,7 @@ export async function registerRoutes(
         pageAccessToken: selectedPage.access_token,
         pageName: selectedPage.name,
         apiVersion: "v21.0",
-        cacheKeyPrefix: `ig_endpoint_${pageId}`,
+        cacheKeyPrefix: `ig_endpoint_${userId}_${pageId}`,
       });
 
       // If we found accounts via API, update both metaAssets and metaAccountCache
@@ -5381,7 +5406,7 @@ export async function registerRoutes(
         userAccessToken: api.getAccessToken(),
         pageName: selectedPage.name,
         apiVersion: "v21.0",
-        cacheKeyPrefix: `ig_legacy_${selectedPageId}`,
+        cacheKeyPrefix: `ig_legacy_${userId}_${selectedPageId}`,
       });
       if (selectedAdAccountId && igAccounts.length > 0) {
         upsertAccountCache(userId, selectedAdAccountId, "instagramAccountsJson", igAccounts);

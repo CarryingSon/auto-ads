@@ -166,6 +166,75 @@ function metaLog(traceId: string, message: string, details?: Record<string, unkn
   console.log(`[MetaOAuth][${traceId}] ${message}`);
 }
 
+type MetaTokenScopeSnapshot = {
+  pageIds: Set<string>;
+  adAccountIds: Set<string>;
+};
+
+function normalizeAdAccountTargetId(id: string): string {
+  return String(id || "").replace(/^act_/, "").trim();
+}
+
+function isStrictSubset(candidate: Set<string>, reference: Set<string>): boolean {
+  if (candidate.size === 0) return false;
+  if (reference.size === 0) return true;
+  if (candidate.size > reference.size) return false;
+  return Array.from(candidate).every((id) => reference.has(id));
+}
+
+async function fetchMetaTokenGranularScopeTargets(
+  traceId: string,
+  token: string,
+  source: "short_lived" | "long_lived",
+): Promise<MetaTokenScopeSnapshot> {
+  if (!META_APP_ID || !META_APP_SECRET) {
+    metaLog(traceId, `Skipping debug_token granular scope lookup (${source}) because app credentials are missing`);
+    return { pageIds: new Set(), adAccountIds: new Set() };
+  }
+
+  try {
+    const debugUrl = new URL(`https://graph.facebook.com/${META_API_VERSION}/debug_token`);
+    debugUrl.searchParams.set("input_token", token);
+    debugUrl.searchParams.set("access_token", `${META_APP_ID}|${META_APP_SECRET}`);
+
+    const response = await fetch(debugUrl.toString());
+    const payload = await response.json();
+    const granularScopes = Array.isArray(payload?.data?.granular_scopes) ? payload.data.granular_scopes : [];
+
+    const pageIds = new Set<string>();
+    const adAccountIds = new Set<string>();
+    for (const scopeEntry of granularScopes) {
+      const scopeName = String(scopeEntry?.scope || "");
+      const targetIds = Array.isArray(scopeEntry?.target_ids) ? scopeEntry.target_ids : [];
+      if (scopeName === "pages_show_list" || scopeName === "pages_read_engagement") {
+        for (const rawId of targetIds) {
+          const id = String(rawId || "").trim();
+          if (id) pageIds.add(id);
+        }
+      }
+      if (scopeName === "ads_management" || scopeName === "ads_read") {
+        for (const rawId of targetIds) {
+          const id = normalizeAdAccountTargetId(String(rawId || ""));
+          if (id) adAccountIds.add(id);
+        }
+      }
+    }
+
+    metaLog(traceId, `Parsed granular token scopes (${source})`, {
+      pagesScopedCount: pageIds.size,
+      adAccountsScopedCount: adAccountIds.size,
+      granularScopeEntries: granularScopes.length,
+    });
+
+    return { pageIds, adAccountIds };
+  } catch (error) {
+    metaLog(traceId, `Failed to parse granular token scopes (${source})`, {
+      error: getErrorMessage(error),
+    });
+    return { pageIds: new Set(), adAccountIds: new Set() };
+  }
+}
+
 function metaErrorRedirect(message: string, traceId: string): string {
   return `/connections?meta=error&trace=${encodeURIComponent(traceId)}&message=${encodeURIComponent(message)}`;
 }
@@ -477,6 +546,28 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       return data;
     };
 
+    let effectiveScopeTargets = await fetchMetaTokenGranularScopeTargets(traceId, finalToken, "long_lived");
+    if (accessToken && accessToken !== finalToken) {
+      const shortLivedScopeTargets = await fetchMetaTokenGranularScopeTargets(traceId, accessToken, "short_lived");
+      const shouldUseShortPageScopes =
+        isStrictSubset(shortLivedScopeTargets.pageIds, effectiveScopeTargets.pageIds) &&
+        (effectiveScopeTargets.pageIds.size === 0 || shortLivedScopeTargets.pageIds.size < effectiveScopeTargets.pageIds.size);
+      const shouldUseShortAdScopes =
+        isStrictSubset(shortLivedScopeTargets.adAccountIds, effectiveScopeTargets.adAccountIds) &&
+        (effectiveScopeTargets.adAccountIds.size === 0 || shortLivedScopeTargets.adAccountIds.size < effectiveScopeTargets.adAccountIds.size);
+
+      if (shouldUseShortPageScopes || shouldUseShortAdScopes) {
+        effectiveScopeTargets = {
+          pageIds: shouldUseShortPageScopes ? shortLivedScopeTargets.pageIds : effectiveScopeTargets.pageIds,
+          adAccountIds: shouldUseShortAdScopes ? shortLivedScopeTargets.adAccountIds : effectiveScopeTargets.adAccountIds,
+        };
+        metaLog(traceId, "Using stricter short-lived granular token scopes for reconnect", {
+          pageScopeCount: effectiveScopeTargets.pageIds.size,
+          adAccountScopeCount: effectiveScopeTargets.adAccountIds.size,
+        });
+      }
+    }
+
     metaLog(traceId, "Fetching ad accounts");
     const longLivedAdAccountsData = await fetchAdAccounts(finalToken, "long_lived");
     if (longLivedAdAccountsData?.error) {
@@ -512,6 +603,23 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
         }
       }
     }
+
+    const adAccountsBeforeGranularFilter = Array.isArray(adAccountsData?.data) ? adAccountsData.data : [];
+    if (effectiveScopeTargets.adAccountIds.size > 0) {
+      const scopedAdAccounts = adAccountsBeforeGranularFilter.filter((account: any) =>
+        effectiveScopeTargets.adAccountIds.has(normalizeAdAccountTargetId(String(account?.id || ""))),
+      );
+      if (scopedAdAccounts.length !== adAccountsBeforeGranularFilter.length) {
+        metaLog(traceId, "Applied granular ad-account scope filter to reconnect accounts", {
+          before: adAccountsBeforeGranularFilter.length,
+          after: scopedAdAccounts.length,
+        });
+      }
+      adAccountsData = {
+        ...adAccountsData,
+        data: scopedAdAccounts,
+      };
+    }
     
     const pagesResponse = await fetch(
       `https://graph.facebook.com/${META_API_VERSION}/me/accounts?fields=id,name,access_token&access_token=${finalToken}`
@@ -526,6 +634,18 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     if (pagesData.error) {
       metaLog(traceId, "Meta /accounts error", { metaError: pagesData.error });
       return sendMetaOauthError(res, isPopup, pagesData.error.message || "Failed to fetch pages", traceId);
+    }
+    if (Array.isArray(pagesData.data) && effectiveScopeTargets.pageIds.size > 0) {
+      const pagesBeforeScopeFilter = pagesData.data.length;
+      pagesData.data = pagesData.data.filter((page: any) =>
+        effectiveScopeTargets.pageIds.has(String(page?.id || "").trim()),
+      );
+      if (pagesData.data.length !== pagesBeforeScopeFilter) {
+        metaLog(traceId, "Applied granular page scope filter to reconnect pages", {
+          before: pagesBeforeScopeFilter,
+          after: pagesData.data.length,
+        });
+      }
     }
     metaLog(traceId, "Pages fetched", { count: pagesData.data?.length || 0 });
     
@@ -653,6 +773,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       finalToken,
       {
         apiVersion: META_API_VERSION,
+        allowedPageIds: effectiveScopeTargets.pageIds,
         log: (message, details) => metaLog(traceId, message, details),
       },
     );
