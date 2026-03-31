@@ -854,6 +854,13 @@ export default function BulkAds() {
 
   const { data: connections = [] } = useQuery<Connection[]>({
     queryKey: ["/api/connections"],
+    queryFn: async () => {
+      const res = await fetch("/api/connections", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch connections");
+      return res.json();
+    },
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const { data: globalSettings } = useQuery<{
