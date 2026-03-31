@@ -648,6 +648,14 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       }
     }
     metaLog(traceId, "Pages fetched", { count: pagesData.data?.length || 0 });
+    const reconnectPageScopeIds = new Set<string>(
+      (Array.isArray(pagesData.data) ? pagesData.data : [])
+        .map((page: any) => String(page?.id || "").trim())
+        .filter((id: string) => id.length > 0),
+    );
+    metaLog(traceId, "Reconnect page scope prepared for ad-account filtering", {
+      pageScopeCount: reconnectPageScopeIds.size,
+    });
     
     // For each Page, fetch connected Instagram accounts using the Page Access Token
     // This way we have the IG IDs stored and don't need to re-fetch during launch
@@ -773,7 +781,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       finalToken,
       {
         apiVersion: META_API_VERSION,
-        allowedPageIds: effectiveScopeTargets.pageIds,
+        allowedPageIds: reconnectPageScopeIds,
         log: (message, details) => metaLog(traceId, message, details),
       },
     );

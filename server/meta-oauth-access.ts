@@ -150,10 +150,11 @@ export async function checkAdAccountPromotePagesAccess(
       };
     }
 
-    const grantedPageSet = options.allowedPageIds
-      ? new Set(Array.from(options.allowedPageIds).map((id) => String(id).trim()).filter((id) => id.length > 0))
+    const hasExplicitAllowedPageIds = options.allowedPageIds !== undefined;
+    const grantedPageSet = hasExplicitAllowedPageIds
+      ? new Set(Array.from(options.allowedPageIds || []).map((id) => String(id).trim()).filter((id) => id.length > 0))
       : null;
-    if (grantedPageSet && grantedPageSet.size > 0) {
+    if (grantedPageSet) {
       const scopedPageCount = promotablePageIds.filter((id) => grantedPageSet.has(id)).length;
       if (scopedPageCount === 0) {
         log(options, "Ad account excluded because promotable pages are outside granted page scope", {
