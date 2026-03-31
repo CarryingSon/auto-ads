@@ -3,14 +3,12 @@ import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { filterDisplayableInstagramAccounts } from "@/lib/instagram-accounts";
-import { useToast } from "@/hooks/use-toast";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -19,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Building2, Loader2, Lock, ShieldCheck } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { SiFacebook, SiInstagram } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -84,19 +82,6 @@ interface BillingStatusSummary {
   uploadsUsed: number;
   uploadsLimit: number | null;
   uploadsRemaining: number | null;
-}
-
-interface PendingAdAccount {
-  id: string;
-  name: string;
-  account_status: number;
-  access_verified?: boolean;
-  access_issue?: string | null;
-  promotable_pages_count?: number;
-}
-
-interface PendingAdAccountsResponse {
-  accounts: PendingAdAccount[];
 }
 
 const SIDEBAR_CACHE_PREFIX = "auto_ads_sidebar_cache_v3";
@@ -199,13 +184,11 @@ interface ActiveJob {
 }
 
 export function AppSidebar() {
-  const [location, setLocation] = useLocation();
+  const [location] = useLocation();
   const { user } = useAuth();
-  const { toast } = useToast();
   const userId = user?.id;
 
   const [isAdAccountSwitching, setIsAdAccountSwitching] = useState(false);
-  const [selectedPendingAdAccountIds, setSelectedPendingAdAccountIds] = useState<string[]>([]);
 
   // Single combined query - always use server as source of truth for reconnect permissions.
   const { data: sidebarDataRaw, isFetching: isSidebarFetching, isError: isSidebarError } = useQuery<SidebarData>({
@@ -214,41 +197,6 @@ export function AppSidebar() {
     refetchOnMount: "always",
   });
   const sidebarData = isSidebarError ? undefined : sidebarDataRaw;
-  const hasPendingAccounts = sidebarData?.hasPendingAccounts === true;
-
-  const {
-    data: pendingAdAccountsData,
-    isFetching: isPendingAdAccountsFetching,
-    isError: isPendingAdAccountsError,
-    refetch: refetchPendingAdAccounts,
-  } = useQuery<PendingAdAccountsResponse>({
-    queryKey: ["/api/meta/pending-ad-accounts"],
-    enabled: hasPendingAccounts,
-    queryFn: async () => {
-      const res = await fetch("/api/meta/pending-ad-accounts", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch pending ad accounts");
-      return res.json();
-    },
-    staleTime: 0,
-  });
-  const pendingAdAccounts = pendingAdAccountsData?.accounts || [];
-  const selectablePendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified !== false);
-  const blockedPendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified === false);
-  const shouldForceAccountSelection = hasPendingAccounts;
-  const allSelectablePendingIds = selectablePendingAdAccounts.map((acc) => acc.id);
-  const areAllSelectablePendingSelected =
-    allSelectablePendingIds.length > 0 &&
-    allSelectablePendingIds.every((id) => selectedPendingAdAccountIds.includes(id));
-
-  useEffect(() => {
-    if (!hasPendingAccounts) {
-      setSelectedPendingAdAccountIds([]);
-      return;
-    }
-    setSelectedPendingAdAccountIds((prev) =>
-      prev.filter((id) => selectablePendingAdAccounts.some((acc) => acc.id === id)),
-    );
-  }, [hasPendingAccounts, selectablePendingAdAccounts]);
 
   const { data: billingStatus } = useQuery<BillingStatusSummary>({
     queryKey: ["/api/billing/status"],
@@ -405,38 +353,6 @@ export function AppSidebar() {
     },
   });
 
-  const confirmPendingAccountsMutation = useMutation({
-    mutationFn: async (adAccountIds: string[]) => {
-      const res = await apiRequest("POST", "/api/meta/confirm-ad-account", { adAccountIds });
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      const savedCount = Number(data?.savedCount || selectedPendingAdAccountIds.length || 0);
-      toast({
-        title: "Ad accounts selected",
-        description:
-          savedCount > 0
-            ? `${savedCount} ad account${savedCount === 1 ? "" : "s"} saved.`
-            : "Selection saved.",
-      });
-      setSelectedPendingAdAccountIds([]);
-      queryClient.invalidateQueries({ queryKey: ["/api/sidebar-data"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/meta/ad-accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/meta/pending-ad-accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["/auth/status"] });
-      queryClient.removeQueries({ queryKey: ["/api/meta/pages"] });
-      queryClient.removeQueries({ queryKey: ["/api/meta/instagram-accounts"], exact: false });
-      queryClient.removeQueries({ queryKey: ["sidebar-meta-pages"] });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Failed to save ad accounts",
-        description: error?.message || "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
   const updateInstagramMutation = useMutation({
     mutationFn: async ({ instagramPageId, instagramPageName }: { instagramPageId: string; instagramPageName: string }) => {
       const res = await apiRequest("PATCH", "/api/settings", { instagramPageId, instagramPageName });
@@ -473,40 +389,6 @@ export function AppSidebar() {
 
   const handleAdAccountChange = (adAccountId: string) => {
     updateAdAccountMutation.mutate(adAccountId);
-  };
-
-  const togglePendingAdAccountSelection = (adAccountId: string) => {
-    setSelectedPendingAdAccountIds((prev) =>
-      prev.includes(adAccountId)
-        ? prev.filter((id) => id !== adAccountId)
-        : [...prev, adAccountId],
-    );
-  };
-
-  const toggleSelectAllPendingAdAccounts = () => {
-    if (areAllSelectablePendingSelected) {
-      setSelectedPendingAdAccountIds([]);
-      return;
-    }
-    setSelectedPendingAdAccountIds(allSelectablePendingIds);
-  };
-
-  const describePendingAccessIssue = (issue?: string | null) => {
-    if (issue === "missing_ad_account_permission") return "Missing ad-account permission";
-    if (issue === "meta_auth_error") return "Meta auth/token issue";
-    if (issue === "meta_fetch_error") return "Meta fetch issue";
-    if (issue === "no_promotable_pages") return "No promotable Pages";
-    return "Unavailable";
-  };
-
-  const getPendingStatusLabel = (accountStatus: number) => {
-    if (accountStatus === 1) {
-      return { label: "ACTIVE", className: "text-emerald-700 bg-emerald-100 border-emerald-200" };
-    }
-    if (accountStatus === 3) {
-      return { label: "UNSETTLED", className: "text-orange-700 bg-orange-100 border-orange-200" };
-    }
-    return { label: "INACTIVE", className: "text-slate-700 bg-slate-100 border-slate-200" };
   };
 
   const effectivePlanType = billingStatus?.planType || (settings?.planType || "free");
@@ -557,140 +439,6 @@ export function AppSidebar() {
 
   return (
     <>
-      {shouldForceAccountSelection && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[radial-gradient(circle_at_16%_20%,rgba(213,223,242,0.92),rgba(240,244,251,0.96)_46%,rgba(255,255,255,0.98)_100%)] p-4 backdrop-blur-[2px]">
-          <div
-            className="w-full max-w-[540px] rounded-[28px] border border-white/70 bg-[#f8faff]/95 p-7 shadow-[0_26px_90px_rgba(39,66,116,0.22)]"
-            data-testid="dialog-pending-ad-accounts"
-          >
-            <h2 className="text-4xl leading-none tracking-tight font-bold text-slate-900 sm:text-[52px]">Select Ad Accounts</h2>
-            <p className="mt-4 text-lg leading-snug text-slate-500 sm:text-[25px]">
-              Select which ad accounts you want to manage with Auto-ads. You can select multiple accounts for bulk launching.
-            </p>
-
-            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-800 sm:text-[20px]">
-              <div className="flex items-start gap-3">
-                <ShieldCheck className="h-5 w-5 shrink-0 mt-0.5" />
-                <p>
-                  <span className="font-semibold">Your data is safe.</span> We only use features for adding ads and reading data for campaign optimization.
-                </p>
-              </div>
-            </div>
-
-            {isPendingAdAccountsFetching ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Loading ad accounts...</span>
-              </div>
-            ) : isPendingAdAccountsError ? (
-              <div className="space-y-3 py-6">
-                <p className="text-sm text-muted-foreground">
-                  We could not load pending ad accounts. Please try again.
-                </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => refetchPendingAdAccounts()}>
-                    Retry
-                  </Button>
-                  <Button variant="secondary" onClick={() => setLocation("/connections")}>
-                    Open Connections
-                  </Button>
-                </div>
-              </div>
-            ) : selectablePendingAdAccounts.length === 0 ? (
-              <div className="space-y-3 py-6">
-                <p className="text-sm text-muted-foreground">
-                  No selectable ad accounts are available right now. Reconnect Meta and include ad accounts with promotable Facebook Pages.
-                </p>
-                <Button variant="secondary" onClick={() => setLocation("/connections")}>
-                  Open Connections
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-7 space-y-2">
-                <button
-                  type="button"
-                  onClick={toggleSelectAllPendingAdAccounts}
-                  className="flex w-full items-center gap-4 rounded-xl px-3 py-2 text-left transition hover:bg-white/70"
-                >
-                  <span
-                    className={`flex h-7 w-7 items-center justify-center rounded-full border ${areAllSelectablePendingSelected ? "border-[#6d84c9] bg-[#dfe8ff]" : "border-slate-300 bg-white"}`}
-                  >
-                    {areAllSelectablePendingSelected ? (
-                      <span className="material-symbols-outlined text-[16px] text-[#4864b2]">check</span>
-                    ) : null}
-                  </span>
-                  <span className="text-xl leading-none font-medium text-slate-700 sm:text-[34px]">Select all accounts</span>
-                </button>
-
-                <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
-                  {selectablePendingAdAccounts.map((acc) => {
-                    const checked = selectedPendingAdAccountIds.includes(acc.id);
-                    const status = getPendingStatusLabel(Number(acc.account_status));
-                    return (
-                      <button
-                        key={acc.id}
-                        type="button"
-                        onClick={() => togglePendingAdAccountSelection(acc.id)}
-                        className="flex w-full items-center gap-4 rounded-xl px-3 py-3 text-left transition hover:bg-white/70"
-                      >
-                        <span
-                          className={`flex h-7 w-7 items-center justify-center rounded-full border ${checked ? "border-[#6d84c9] bg-[#dfe8ff]" : "border-slate-300 bg-white"}`}
-                        >
-                          {checked ? (
-                            <span className="material-symbols-outlined text-[16px] text-[#4864b2]">check</span>
-                          ) : null}
-                        </span>
-
-                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-slate-500">
-                          <Building2 className="h-5 w-5" />
-                        </span>
-
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-lg leading-none font-semibold text-slate-800 sm:text-[29px]">
-                            {acc.name || acc.id}
-                          </span>
-                          <span className="block mt-1 truncate text-sm leading-none text-slate-400 sm:text-[20px]">
-                            {acc.id}
-                          </span>
-                        </span>
-
-                        <span className={`rounded-full border px-3 py-1 text-[15px] font-semibold tracking-wide ${status.className}`}>
-                          {status.label}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {blockedPendingAdAccounts.length > 0 && (
-                  <div className="pt-2 text-xs text-amber-900/80 dark:text-amber-200/80">
-                    {blockedPendingAdAccounts.length} account(s) are unavailable:
-                    {blockedPendingAdAccounts.map((acc) => (
-                      <div key={`blocked-sidebar-${acc.id}`}>
-                        {acc.name || acc.id} ({describePendingAccessIssue(acc.access_issue)})
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <Button
-                  onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
-                  disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
-                  className="mt-4 h-16 w-full rounded-2xl bg-[#c5d2ef] text-xl font-semibold text-white hover:bg-[#b7c7ea] disabled:opacity-70"
-                  data-testid="button-confirm-sidebar-pending-ad-accounts"
-                >
-                  {confirmPendingAccountsMutation.isPending ? (
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  ) : null}
-                  Confirm selection ({selectedPendingAdAccountIds.length})
-                  <span className="material-symbols-outlined ml-1 text-xl">chevron_right</span>
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       <Sidebar className="sidebar-pane border-r-0">
       <div className="px-4 pt-4 pb-1 mb-1">
         <Link href="/dashboard" className="flex items-center space-x-2.5 cursor-pointer" data-testid="link-header-logo">
