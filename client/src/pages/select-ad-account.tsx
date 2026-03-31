@@ -166,16 +166,16 @@ export default function SelectAdAccountPage() {
       </div>
 
       <div className="relative z-10 flex min-h-screen items-center justify-center p-4" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.01em" }}>
-        <div className="w-full max-w-[560px] rounded-[28px] border border-white/70 bg-background/95 p-6 shadow-[0_24px_90px_rgba(39,66,116,0.22)] sm:p-7">
-          <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">Select Ad Accounts</h1>
-          <p className="mt-4 text-lg leading-snug text-slate-500 sm:text-[25px]">
+        <div className="glass-card w-full max-w-[560px] rounded-[28px] border-none p-6 sm:p-7">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">Select Ad Accounts</h1>
+          <p className="mt-3 text-base leading-snug text-slate-500 sm:text-lg dark:text-slate-300">
             Select which ad accounts you want to manage with Auto-ads. You can select multiple accounts for bulk launching.
           </p>
 
-          <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
+          <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
             <div className="flex items-start gap-3 text-emerald-800">
               <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="text-sm sm:text-base">
+              <p className="text-sm sm:text-[15px] dark:text-emerald-200">
                 <span className="font-semibold">Your data is safe.</span> We only use features for adding ads and reading data for campaign optimization.
               </p>
             </div>
@@ -203,16 +203,16 @@ export default function SelectAdAccountPage() {
               </Button>
             </div>
           ) : (
-            <div className="mt-7 space-y-2">
+            <div className="mt-6 space-y-1.5">
               <button
                 type="button"
                 onClick={toggleSelectAll}
-                className="flex w-full items-center gap-4 rounded-xl px-2 py-2 text-left transition hover:bg-white/70"
+                className="glass-nav-item flex w-full items-center gap-4 rounded-xl px-2 py-2 text-left"
               >
                 <span className={`flex h-7 w-7 items-center justify-center rounded-full border ${allSelected ? "border-[#6d84c9] bg-[#dfe8ff]" : "border-slate-300 bg-white"}`}>
                   {allSelected ? <span className="material-symbols-outlined text-[16px] text-[#4864b2]">check</span> : null}
                 </span>
-                <span className="text-xl leading-none font-medium text-slate-700 sm:text-[34px]">Select all accounts</span>
+                <span className="text-xl leading-none font-medium text-slate-700 dark:text-slate-200 sm:text-2xl">Select all accounts</span>
               </button>
 
               <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
@@ -224,7 +224,7 @@ export default function SelectAdAccountPage() {
                       key={acc.id}
                       type="button"
                       onClick={() => toggleAccount(acc.id)}
-                      className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-left transition hover:bg-white/70"
+                      className="glass-nav-item flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left"
                     >
                       <span className={`flex h-7 w-7 items-center justify-center rounded-full border ${checked ? "border-[#6d84c9] bg-[#dfe8ff]" : "border-slate-300 bg-white"}`}>
                         {checked ? <span className="material-symbols-outlined text-[16px] text-[#4864b2]">check</span> : null}
@@ -235,10 +235,10 @@ export default function SelectAdAccountPage() {
                       </span>
 
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-lg leading-none font-semibold text-slate-800 sm:text-[29px]">
+                        <span className="block truncate text-2xl leading-none font-semibold text-slate-800 dark:text-slate-100">
                           {acc.name || acc.id}
                         </span>
-                        <span className="mt-1 block truncate text-sm leading-none text-slate-400 sm:text-[20px]">
+                        <span className="mt-1 block truncate text-sm leading-none text-slate-400 dark:text-slate-400 sm:text-base">
                           {acc.id}
                         </span>
                       </span>
@@ -265,7 +265,7 @@ export default function SelectAdAccountPage() {
               <Button
                 onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
                 disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
-                className="mt-4 h-14 w-full rounded-2xl bg-[#aebee0] text-lg font-semibold text-white hover:bg-[#9fb2db]"
+                className="mt-4 h-12 w-full rounded-xl bg-[#1877F2] text-sm font-semibold text-white hover:bg-[#0f6be2]"
                 data-testid="button-confirm-select-ad-account"
               >
                 {confirmPendingAccountsMutation.isPending ? (
