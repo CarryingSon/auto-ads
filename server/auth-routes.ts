@@ -790,15 +790,24 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       name: String(acc.name || acc.id),
       account_status: Number.isFinite(Number(acc.account_status)) ? Number(acc.account_status) : 0,
     }));
-    const primarySelectedAdAccountId = selectedAccountsForStorage.length > 0
-      ? selectedAccountsForStorage[0].id
-      : null;
+    const pendingAccountsForStorage = pendingAccounts.map((acc) => ({
+      id: String(acc.id || ""),
+      name: String(acc.name || acc.id || ""),
+      account_status: Number.isFinite(Number(acc.account_status)) ? Number(acc.account_status) : 0,
+      access_verified: acc.access_verified !== false,
+      access_issue: acc.access_issue || null,
+      promotable_pages_count: Number.isFinite(Number(acc.promotable_pages_count))
+        ? Number(acc.promotable_pages_count)
+        : 0,
+    }));
     const noUsableAdAccountsMessage = adAccounts.length === 0
       ? buildNoUsableAdAccountsMessage(rawAdAccounts.length, blockedByIssue)
       : null;
     const pages = pagesData.data || [];
     
-    // Auto-select all usable ad accounts from OAuth and set the first as primary.
+    // Reconnect should not auto-select ad accounts. Keep all reconnect-visible
+    // accounts in pending state and let user explicitly confirm which accounts
+    // should appear in the app.
     const existingAssetsRows = await db.select({ id: metaAssets.id })
       .from(metaAssets)
       .where(eq(metaAssets.userId, userId));
@@ -809,11 +818,11 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       existingAssetsCount: existingAssetsRows.length,
       adAccountsCount: adAccounts.length,
       selectedAccountsStoredCount: selectedAccountsForStorage.length,
+      pendingAccountsStoredCount: pendingAccountsForStorage.length,
       rawAdAccountsCount: rawAdAccounts.length,
       blockedByIssue,
       pagesCount: pages.length,
       hasUsableAdAccounts: adAccounts.length > 0,
-      primarySelectedAdAccountId,
       blockedAccountsCount: pendingAccounts.filter((acc) => acc.access_verified === false).length,
     });
 
@@ -825,19 +834,19 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     await db.insert(metaAssets).values({
       userId,
       metaUserId: meData.id,
-      adAccountsJson: selectedAccountsForStorage,
-      pendingAdAccountsJson: [],
+      adAccountsJson: [],
+      pendingAdAccountsJson: pendingAccountsForStorage as any,
       pagesJson: pages,
       businessesJson: businesses,
       businessOwnedPagesJson: businessOwnedPages,
-      selectedAdAccountId: primarySelectedAdAccountId,
+      selectedAdAccountId: null,
       selectedPageId: null,
       updatedAt: new Date(),
     });
     
     const postAuthRedirect = noUsableAdAccountsMessage
       ? metaErrorRedirect(noUsableAdAccountsMessage, traceId)
-      : "/dashboard";
+      : "/connections?meta=connected&pending=1";
 
     // Save session and redirect either to dashboard or back to Connections with diagnostics.
     metaLog(traceId, "Saving session and finalizing OAuth", {
