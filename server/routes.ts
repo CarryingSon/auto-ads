@@ -48,6 +48,7 @@ import {
   syncSubscriptionFromStripeEvent,
   verifyStripeWebhookSignature,
 } from "./billing.js";
+import { checkAdAccountPromotePagesAccess, normalizeMetaAdAccount } from "./meta-oauth-access.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
@@ -5442,7 +5443,88 @@ export async function registerRoutes(
         return res.json({ accounts: [] });
       }
 
-      const pendingAccounts = (assets[0] as any).pendingAdAccountsJson || [];
+      const storedPendingAccounts = Array.isArray((assets[0] as any).pendingAdAccountsJson)
+        ? (assets[0] as any).pendingAdAccountsJson
+        : [];
+      let pendingAccounts = storedPendingAccounts;
+
+      if (storedPendingAccounts.length > 0) {
+        try {
+          const [connection] = await db.select({ accessToken: oauthConnections.accessToken })
+            .from(oauthConnections)
+            .where(and(
+              eq(oauthConnections.userId, userId),
+              eq(oauthConnections.provider, "meta"),
+            ))
+            .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
+            .limit(1);
+
+          const encryptedToken = connection?.accessToken;
+          if (encryptedToken) {
+            const accessToken = decrypt(encryptedToken);
+            const apiVersion = process.env.META_API_VERSION || "v21.0";
+
+            const refreshedPendingAccounts = await Promise.all(
+              storedPendingAccounts.map(async (rawAccount: any) => {
+                const normalizedAccount = normalizeMetaAdAccount(rawAccount);
+                if (!normalizedAccount) {
+                  return {
+                    ...rawAccount,
+                    access_verified: rawAccount?.access_verified === true,
+                    access_issue: rawAccount?.access_issue || "meta_fetch_error",
+                    promotable_pages_count: Number.isFinite(Number(rawAccount?.promotable_pages_count))
+                      ? Number(rawAccount.promotable_pages_count)
+                      : 0,
+                  };
+                }
+
+                const result = await checkAdAccountPromotePagesAccess(
+                  normalizedAccount,
+                  accessToken,
+                  { apiVersion },
+                );
+
+                return {
+                  id: String(normalizedAccount.id || ""),
+                  name: String(normalizedAccount.name || normalizedAccount.id || ""),
+                  account_status: Number.isFinite(Number(normalizedAccount.account_status))
+                    ? Number(normalizedAccount.account_status)
+                    : 0,
+                  access_verified: result.allowed,
+                  access_issue: result.issue,
+                  promotable_pages_count: Number.isFinite(Number(result.promotablePageCount))
+                    ? Number(result.promotablePageCount)
+                    : 0,
+                };
+              }),
+            );
+
+            const wasUpdated =
+              JSON.stringify(refreshedPendingAccounts) !== JSON.stringify(storedPendingAccounts);
+
+            if (wasUpdated) {
+              await db.update(metaAssets)
+                .set({
+                  pendingAdAccountsJson: refreshedPendingAccounts as any,
+                  updatedAt: new Date(),
+                })
+                .where(eq(metaAssets.id, assets[0].id));
+              console.log("[MetaOAuth][pending-ad-accounts] Refreshed pending access state from Meta", {
+                userId,
+                count: refreshedPendingAccounts.length,
+              });
+            }
+
+            pendingAccounts = refreshedPendingAccounts;
+          }
+        } catch (refreshError: any) {
+          console.warn("[MetaOAuth][pending-ad-accounts] Live refresh failed, using stored pending snapshot", {
+            userId,
+            error: refreshError?.message || String(refreshError),
+          });
+        }
+      }
+
       console.log("[MetaOAuth][pending-ad-accounts] Returning pending accounts", {
         userId,
         count: pendingAccounts.length,

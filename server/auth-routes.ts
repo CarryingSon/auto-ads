@@ -781,7 +781,6 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       finalToken,
       {
         apiVersion: META_API_VERSION,
-        allowedPageIds: reconnectPageScopeIds,
         log: (message, details) => metaLog(traceId, message, details),
       },
     );
