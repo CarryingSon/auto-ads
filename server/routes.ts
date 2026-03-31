@@ -3987,6 +3987,10 @@ export async function registerRoutes(
         const parsed = parseDCTName(dct.name);
         const validationErrors: string[] = [];
         
+        if (dct.creatives.length === 0) {
+          validationErrors.push("No creatives found (images or videos)");
+        }
+
         // Create adset record - use FULL DCT name for proper identification
         const adset = await storage.createAdset({
           jobId: job.id,
@@ -4307,6 +4311,9 @@ export async function registerRoutes(
           const type = getFileType(f.mimeType, f.name);
           return type === "video" || type === "image";
         });
+        if (mediaFiles.length === 0) {
+          validationErrors.push("No creatives found (images or videos)");
+        }
 
         // Parse DCT-specific or global DOCX
         let parsedCopy: any = null;
