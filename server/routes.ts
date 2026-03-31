@@ -871,9 +871,11 @@ export async function registerRoutes(
         } catch {}
       }
       
-      // Check Meta connection from OAuth connections table (from auth-routes.ts)
+      // Check Meta connection from OAuth connections table (source of truth from auth-routes.ts).
+      // Keep legacy connections table in sync even when a stale "disconnected" row already exists.
       const metaConnection = connections.find(c => c.provider === "meta");
-      if (!metaConnection && userId) {
+      const needsMetaSyncFromOAuth = !metaConnection || metaConnection.status !== "connected";
+      if (needsMetaSyncFromOAuth && userId) {
         const metaOAuth = await db.select()
           .from(oauthConnections)
           .where(and(
