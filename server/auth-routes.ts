@@ -16,6 +16,10 @@ import {
   oauthConnections, 
   metaAssets, 
   metaAccountCache,
+  metaCampaigns,
+  metaAdsets,
+  metaAds,
+  metaInsights,
   googleDriveLinks, 
   oauthStates,
   metaObjects,
@@ -826,10 +830,18 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     });
 
     // Reconnect is authoritative: replace previous ad-account/page snapshot and clear cache.
+    // Also clear cached campaigns/adsets/ads/insights so UI cannot show stale
+    // objects from the previous token/session after reconnect.
     if (existingAssetsRows.length > 0) {
       await db.delete(metaAssets).where(eq(metaAssets.userId, userId));
     }
     await db.delete(metaAccountCache).where(eq(metaAccountCache.userId, userId));
+    await Promise.all([
+      db.delete(metaCampaigns).where(eq(metaCampaigns.userId, userId)),
+      db.delete(metaAdsets).where(eq(metaAdsets.userId, userId)),
+      db.delete(metaAds).where(eq(metaAds.userId, userId)),
+      db.delete(metaInsights).where(eq(metaInsights.userId, userId)),
+    ]);
     await db.insert(metaAssets).values({
       userId,
       metaUserId: meData.id,

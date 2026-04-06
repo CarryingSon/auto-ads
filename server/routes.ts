@@ -5920,10 +5920,9 @@ export async function registerRoutes(
       // Cache miss for selected ad account:
       // fetch-on-demand once, then serve from DB cache.
       const cacheKey = `campaigns:${userId}:${normalizeAdAccountId(selectedAdAccountId)}`;
-      const memoryCached = metaApiCache.get(cacheKey);
-      if (memoryCached && Date.now() < memoryCached.expiry) {
-        return res.json({ data: memoryCached.data || [], source: "memory-cache" });
-      }
+      // Intentionally avoid serving campaigns from process memory on DB cache miss.
+      // After reconnect we clear DB cache, and memory can contain stale campaigns.
+      // For correctness, trigger a real sync and then repopulate caches.
 
       try {
         const api = new MetaAdsApi(userId);
