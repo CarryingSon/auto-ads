@@ -4228,7 +4228,7 @@ export async function registerRoutes(
         getServiceAccountEmail,
       } = await import("./google-drive-service-account.js");
       const { parseDocx } = await import("./docx-parser.js");
-      const { parseDCTCopyFromText, normalizeDCTName } = await import("./google-drive.js");
+      const { parseDCTCopyFromText, normalizeDCTName, parseDCTFolderName } = await import("./google-drive.js");
       const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser.js");
       
       const folderId = extractFolderIdFromUrl(driveUrl);
@@ -4252,6 +4252,12 @@ export async function registerRoutes(
           error: "No DCT folders found. Create subfolders starting with 'DCT' (e.g., 'DCT 1 - Retargeting')." 
         });
       }
+      const sortedDctFolders = [...dctFolders].sort((a, b) => {
+        const orderA = parseDCTFolderName(a.name || "DCT").order || 0;
+        const orderB = parseDCTFolderName(b.name || "DCT").order || 0;
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base", numeric: true });
+      });
 
       // Pre-sync validation: check if media files are actually readable by the service account
       const firstMediaFile = dctFolders[0].files.find(f => {
@@ -4296,15 +4302,15 @@ export async function registerRoutes(
         driveRootFolderUrl: driveUrl,
         driveRootFolderName: folderName,
         campaignId,
-        totalAdSets: dctFolders.length,
+        totalAdSets: sortedDctFolders.length,
         completedAdSets: 0,
         userId: userId || undefined,
       });
 
       // Process each DCT folder
       const adSetResults: any[] = [];
-      for (let index = 0; index < dctFolders.length; index++) {
-        const dct = dctFolders[index];
+      for (let index = 0; index < sortedDctFolders.length; index++) {
+        const dct = sortedDctFolders[index];
         const validationErrors: string[] = [];
         
         const mediaFiles = dct.files.filter(f => {

@@ -393,7 +393,11 @@ export function parseDCTCopyFromText(rawText: string): ParsedDCTCopy[] {
   const dctHeaders: { name: string; start: number; contentStart: number }[] = [];
   let match;
   
-  const dctBlockPattern = /(?:^|\n)\s*(DCT[\s_]*\d+[^\n:]*):\s*/gi;
+  // Support both:
+  // - "DCT 1:"
+  // - "DCT 1 - Prospecting" (no trailing colon)
+  // If no explicit colon is present, we still treat the line as a section header.
+  const dctBlockPattern = /(?:^|\n)\s*(DCT[\s_]*\d+[^\n:]*?)(?:\s*:\s*|\s*(?=\n|$))/gi;
   while ((match = dctBlockPattern.exec(rawText)) !== null) {
     dctHeaders.push({
       name: match[1].trim(),
@@ -403,7 +407,10 @@ export function parseDCTCopyFromText(rawText: string): ParsedDCTCopy[] {
   }
 
   if (dctHeaders.length === 0) {
-    const adBlockPattern = /(?:^|\n)\s*(Ad\s*(\d{1,3}))[:\s]*/gi;
+    // Support both:
+    // - "Ad 1:"
+    // - "Ad 1 - Retargeting" (no trailing colon)
+    const adBlockPattern = /(?:^|\n)\s*(Ad\s*(\d{1,3})[^\n:]*?)(?:\s*:\s*|\s*(?=\n|$))/gi;
     while ((match = adBlockPattern.exec(rawText)) !== null) {
       const adNumber = match[2];
       dctHeaders.push({
