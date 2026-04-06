@@ -213,7 +213,7 @@ export default function Connections() {
   };
 
   const pageOptions = pagesData?.data || [];
-  const selectedPageValue = pagesData?.selectedPageId || authStatus?.meta?.selectedPageId || "";
+  const selectedPageValue = pagesData?.selectedPageId ?? authStatus?.meta?.selectedPageId ?? "";
   const pagesAccessIssue = pagesData?.accessIssue || null;
   const pagesEmptyHint = pagesAccessIssue === "missing_ad_account_permission"
     ? "This ad account is missing Facebook Page permissions. Reconnect Meta and include this ad account."
