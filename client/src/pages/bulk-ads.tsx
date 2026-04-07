@@ -1115,7 +1115,7 @@ export default function BulkAds() {
   }>({
     queryKey: ["/api/meta/adsets", selectedAdAccountId || "none", importCampaignId || "none"],
     queryFn: async () => {
-      const res = await fetch(`/api/meta/adsets?campaignId=${encodeURIComponent(importCampaignId)}`, {
+      const res = await fetch(`/api/meta/adsets?campaignId=${encodeURIComponent(importCampaignId)}&live=true`, {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to fetch ad sets");
@@ -1135,8 +1135,17 @@ export default function BulkAds() {
       ads: any[];
     };
   }>({
-    queryKey: [`/api/meta/campaigns/${importCampaignId}/details`],
-    enabled: !!importCampaignId,
+    queryKey: ["/api/meta/campaigns/details", selectedAdAccountId || "none", importCampaignId || "none", "live"],
+    queryFn: async () => {
+      const res = await fetch(`/api/meta/campaigns/${encodeURIComponent(importCampaignId)}/details?live=true`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch campaign details");
+      return res.json();
+    },
+    enabled: !!importCampaignId && !!selectedAdAccountId,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const importCampaignAds = importCampaignDetailsData?.data?.ads || [];
   const hasImportCampaignAdsForSelectedAdSet = !!importAdSetId &&

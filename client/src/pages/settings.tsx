@@ -313,8 +313,15 @@ export default function Settings() {
       }>;
     };
   }>({
-    queryKey: ["/api/meta/campaigns", importCampaignId, "details"],
-    enabled: !!importCampaignId,
+    queryKey: ["/api/meta/campaigns", selectedAdAccountId || "none", importCampaignId || "none", "details", "live"],
+    queryFn: async () => {
+      const res = await fetch(`/api/meta/campaigns/${encodeURIComponent(importCampaignId)}/details?live=true`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch campaign details");
+      return res.json();
+    },
+    enabled: !!importCampaignId && !!selectedAdAccountId,
     staleTime: 0,
     retry: 2,
     retryDelay: 3000,
