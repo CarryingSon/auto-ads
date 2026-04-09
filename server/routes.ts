@@ -2228,6 +2228,7 @@ export async function registerRoutes(
             gender?: 'ALL' | 'MALE' | 'FEMALE';
             customAudiences?: Array<{ id: string }>;
             excludedCustomAudiences?: Array<{ id: string }>;
+            advantageAudience?: boolean;
           } = {};
           
           const adsetOverride = adset.overrideSettings as any;
@@ -2246,6 +2247,7 @@ export async function registerRoutes(
           if (adSetSettings.excludedAudienceIds?.length) {
             targeting.excludedCustomAudiences = adSetSettings.excludedAudienceIds.map((id: string) => ({ id }));
           }
+          targeting.advantageAudience = adSetSettings.audienceType === "ADVANTAGE_PLUS";
 
           // Build promoted object with pixel and conversion event
           const promotedObject: { pixelId?: string; pageId?: string; customEventType?: string } = { pageId };

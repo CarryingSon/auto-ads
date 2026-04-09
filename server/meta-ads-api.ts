@@ -1551,6 +1551,7 @@ export class MetaAdsApi {
       gender?: 'ALL' | 'MALE' | 'FEMALE';
       customAudiences?: Array<{ id: string }>;
       excludedCustomAudiences?: Array<{ id: string }>;
+      advantageAudience?: boolean;
     };
     promotedObject?: { pixelId?: string; pageId?: string; customEventType?: string };
     dsaBeneficiary?: string;
@@ -1608,6 +1609,12 @@ export class MetaAdsApi {
     if (params.targeting?.gender && params.targeting.gender !== 'ALL') {
       targeting.genders = params.targeting.gender === 'MALE' ? [1] : [2];
     }
+    // Explicit Advantage Audience opt-in/out is required by newer Meta API versions.
+    if (typeof params.targeting?.advantageAudience === 'boolean') {
+      targeting.targeting_automation = {
+        advantage_audience: params.targeting.advantageAudience ? 1 : 0,
+      };
+    }
     
     // Use Advantage+ placements (automatic) - let Meta optimize across Facebook + Instagram
     // Don't restrict to specific platforms or positions - Meta will choose the best placements
@@ -1616,7 +1623,10 @@ export class MetaAdsApi {
     if (Object.keys(targeting).length > 0) {
       body.append('targeting', JSON.stringify(targeting));
     } else {
-      body.append('targeting', JSON.stringify({ geo_locations: { countries: ['US'] } }));
+      body.append('targeting', JSON.stringify({
+        geo_locations: { countries: ['US'] },
+        targeting_automation: { advantage_audience: 0 },
+      }));
     }
 
     // Spending limits
