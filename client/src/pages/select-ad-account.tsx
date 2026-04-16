@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Building2, Loader2, ShieldCheck } from "lucide-react";
+import { Building2, Loader2, Plug, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -198,9 +198,15 @@ export default function SelectAdAccountPage() {
               <p className="text-sm text-muted-foreground">
                 No selectable ad accounts are available right now. Reconnect Meta and include ad accounts with promotable Facebook Pages.
               </p>
-              <Button variant="secondary" onClick={() => setLocation("/connections")}>
-                Open Connections
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => { window.location.href = "/auth/meta/start"; }} data-testid="button-reconnect-meta-from-select">
+                  <Plug className="mr-2 h-4 w-4" />
+                  Reconnect Meta
+                </Button>
+                <Button variant="secondary" onClick={() => setLocation("/connections")} data-testid="button-open-connections-from-select">
+                  Open Connections
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="mt-6 space-y-1.5">

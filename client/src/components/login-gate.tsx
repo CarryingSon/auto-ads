@@ -16,6 +16,8 @@ export function LoginGate({ children }: LoginGateProps) {
   const [location, setLocation] = useLocation();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const isSelectAdAccountRoute = location === "/select-ad-account";
+  const isConnectionsRoute = location === "/connections";
+  const isPendingSelectionBypassRoute = isSelectAdAccountRoute || isConnectionsRoute;
 
   const { data: sidebarGateData, isLoading: sidebarGateLoading } = useQuery<SidebarGateData>({
     queryKey: ["/api/sidebar-data"],
@@ -35,9 +37,9 @@ export function LoginGate({ children }: LoginGateProps) {
   useEffect(() => {
     if (authLoading || !isAuthenticated) return;
     if (!mustSelectAdAccounts) return;
-    if (isSelectAdAccountRoute) return;
+    if (isPendingSelectionBypassRoute) return;
     setLocation("/select-ad-account", { replace: true });
-  }, [authLoading, isAuthenticated, mustSelectAdAccounts, isSelectAdAccountRoute, setLocation]);
+  }, [authLoading, isAuthenticated, mustSelectAdAccounts, isPendingSelectionBypassRoute, setLocation]);
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) return;
@@ -51,7 +53,7 @@ export function LoginGate({ children }: LoginGateProps) {
   const shouldHoldForGate =
     !authLoading &&
     isAuthenticated &&
-    !isSelectAdAccountRoute &&
+    !isPendingSelectionBypassRoute &&
     sidebarGateLoading;
 
   if (authLoading || shouldHoldForGate) {
@@ -74,7 +76,7 @@ export function LoginGate({ children }: LoginGateProps) {
     return null;
   }
 
-  if (mustSelectAdAccounts && !isSelectAdAccountRoute) {
+  if (mustSelectAdAccounts && !isPendingSelectionBypassRoute) {
     return (
       <div className="relative h-screen overflow-hidden bg-background">
         <div className="liquid-bg">
