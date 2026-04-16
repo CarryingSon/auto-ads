@@ -140,7 +140,7 @@ function CountryPicker({ selectedCountries, onToggle }: { selectedCountries: str
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -155,7 +155,12 @@ function CountryPicker({ selectedCountries, onToggle }: { selectedCountries: str
           <ChevronsUpDown className="h-3 w-3 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[280px] p-0" align="start">
+      <PopoverContent
+        className="w-[280px] p-0"
+        align="start"
+        data-country-picker-popover="true"
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
         <Command shouldFilter={false}>
           <CommandInput
             placeholder="Search countries..."
@@ -172,7 +177,11 @@ function CountryPicker({ selectedCountries, onToggle }: { selectedCountries: str
                   <CommandItem
                     key={country.code}
                     value={country.code}
-                    onSelect={() => onToggle(country.code)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onSelect={() => {
+                      onToggle(country.code);
+                      setOpen(true);
+                    }}
                     data-testid={`country-option-${country.code}`}
                   >
                     <Check className={`mr-2 h-3.5 w-3.5 ${isSelected ? "opacity-100" : "opacity-0"}`} />
@@ -5195,7 +5204,21 @@ Your description`}
 
       {/* Targeting Edit Dialog */}
       <Dialog open={showTargetingEditDialog} onOpenChange={setShowTargetingEditDialog}>
-        <DialogContent className="sm:max-w-2xl rounded-2xl">
+        <DialogContent
+          className="sm:max-w-2xl rounded-2xl"
+          onPointerDownOutside={(event) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest('[data-country-picker-popover="true"]')) {
+              event.preventDefault();
+            }
+          }}
+          onInteractOutside={(event) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest('[data-country-picker-popover="true"]')) {
+              event.preventDefault();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="text-lg font-bold">Edit Targeting</DialogTitle>
             <DialogDescription>
