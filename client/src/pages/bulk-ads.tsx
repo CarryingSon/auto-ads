@@ -1819,6 +1819,51 @@ export default function BulkAds() {
     },
   });
 
+  const saveTargetingSettingsMutation = useMutation({
+    mutationFn: async (targeting: {
+      geoTargeting: string[];
+      ageMin: number;
+      ageMax: number;
+      gender: "ALL" | "MALE" | "FEMALE";
+    }) => {
+      const normalizedGeoTargeting = Array.from(
+        new Set(
+          (targeting.geoTargeting || [])
+            .map((code) => String(code || "").trim().toUpperCase())
+            .filter((code) => /^[A-Z]{2}$/.test(code)),
+        ),
+      );
+
+      const res = await apiRequest("PATCH", "/api/ad-account-settings", {
+        geoTargeting: normalizedGeoTargeting,
+        ageMin: targeting.ageMin,
+        ageMax: targeting.ageMax,
+        gender: targeting.gender,
+      });
+
+      return res.json();
+    },
+    onSuccess: (_, targeting) => {
+      setDefaultSettings((prev) => ({
+        ...prev,
+        geoTargeting: targeting.geoTargeting,
+        ageMin: targeting.ageMin,
+        ageMax: targeting.ageMax,
+        gender: targeting.gender,
+      }));
+      queryClient.invalidateQueries({ queryKey: ["/api/ad-account-settings"] });
+      setShowTargetingEditDialog(false);
+      toast({ title: "Saved", description: "Targeting settings updated" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to save targeting",
+        description: error.message || "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const createCampaignMutation = useMutation({
     mutationFn: async (params: { name: string; objective: string; budgetType: "ABO" | "CBO"; dailyBudget?: number }) => {
       const res = await apiRequest("POST", "/api/meta/campaigns", params);
@@ -5316,19 +5361,39 @@ Your description`}
             <Button
               className="rounded-xl"
               onClick={() => {
-                setDefaultSettings(prev => ({
-                  ...prev,
-                  geoTargeting: editingTargeting.geoTargeting,
-                  ageMin: editingTargeting.ageMin,
-                  ageMax: editingTargeting.ageMax,
-                  gender: editingTargeting.gender,
-                }));
-                setShowTargetingEditDialog(false);
-                toast({ title: "Saved", description: "Targeting settings updated" });
+                const normalizedGeoTargeting = Array.from(
+                  new Set(
+                    (editingTargeting.geoTargeting || [])
+                      .map((code) => String(code || "").trim().toUpperCase())
+                      .filter((code) => /^[A-Z]{2}$/.test(code)),
+                  ),
+                );
+
+                if (normalizedGeoTargeting.length === 0) {
+                  toast({
+                    title: "Select at least one country",
+                    description: "Geo targeting is required before launch.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                saveTargetingSettingsMutation.mutate({
+                  ...editingTargeting,
+                  geoTargeting: normalizedGeoTargeting,
+                });
               }}
+              disabled={saveTargetingSettingsMutation.isPending}
               data-testid="button-save-targeting"
             >
-              Save
+              {saveTargetingSettingsMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
