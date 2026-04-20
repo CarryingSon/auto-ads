@@ -237,20 +237,21 @@ export default function Connections() {
   }
 
   return (
-    <div className="p-4 max-w-4xl mx-auto space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold" data-testid="text-page-title">Connections</h1>
-        <p className="text-sm text-muted-foreground">
-          Connect your Meta Ads account to enable bulk uploads
+    <div className="mx-auto w-full max-w-5xl space-y-6 px-2 pb-8 pt-2 md:px-4">
+      <div className="rounded-2xl border border-white/60 bg-white/60 p-5 shadow-[0_8px_30px_-20px_rgba(15,23,42,0.5)] backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/45">
+        <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Connections</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Connect your Meta Ads account to enable bulk uploads and keep launch defaults in sync.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card data-testid="card-connection-meta" className="shadow-sm">
-          <CardHeader>
-            <div className="flex items-start justify-between gap-4">
+      <div className="grid gap-4">
+        <Card data-testid="card-connection-meta" className="overflow-hidden border border-white/70 bg-white/80 shadow-[0_16px_34px_-24px_rgba(15,23,42,0.65)] backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/55">
+          <div className="h-1 w-full bg-gradient-to-r from-[#1877F2] via-sky-400 to-emerald-400" />
+          <CardHeader className="pb-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-md bg-[#1877F2]/10 dark:bg-[#1877F2]/20">
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#1877F2]/10 ring-1 ring-[#1877F2]/15 dark:bg-[#1877F2]/20 dark:ring-[#1877F2]/30">
                   <SiFacebook className="h-6 w-6 text-[#1877F2]" />
                 </div>
                 <div>
@@ -287,9 +288,9 @@ export default function Connections() {
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5">
             {metaConnected && authStatus?.meta?.accountName && (
-              <div className="rounded-md bg-muted p-3">
+              <div className="rounded-xl border border-slate-200/70 bg-slate-50/75 p-3 dark:border-slate-700/60 dark:bg-slate-800/40">
                 <p className="text-sm font-medium">{authStatus.meta.accountName}</p>
                 {authStatus.meta.accountEmail && (
                   <p className="text-xs text-muted-foreground">{authStatus.meta.accountEmail}</p>
@@ -365,7 +366,7 @@ export default function Connections() {
                     value={authStatus.meta.selectedAdAccountId || ""}
                     onValueChange={(val) => updateAssetsMutation.mutate({ selectedAdAccountId: val })}
                   >
-                    <SelectTrigger data-testid="select-ad-account">
+                    <SelectTrigger data-testid="select-ad-account" className="bg-background/80">
                       <SelectValue placeholder="Select ad account" />
                     </SelectTrigger>
                     <SelectContent>
@@ -385,7 +386,7 @@ export default function Connections() {
                       value={selectedPageValue}
                       onValueChange={(val) => updateAssetsMutation.mutate({ selectedPageId: val })}
                     >
-                      <SelectTrigger data-testid="select-page">
+                      <SelectTrigger data-testid="select-page" className="bg-background/80">
                         <SelectValue placeholder="Select page" />
                       </SelectTrigger>
                       <SelectContent>
@@ -407,12 +408,12 @@ export default function Connections() {
               </div>
             )}
 
-            <div>
+            <div className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-slate-700/60 dark:bg-slate-800/35">
               <div className="flex items-center gap-2 mb-2">
                 <Info className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Permissions requested</span>
               </div>
-              <ul className="text-sm text-muted-foreground space-y-1 ml-6">
+              <ul className="ml-6 space-y-1 text-sm text-muted-foreground">
                 <li className="list-disc">Manage ad accounts and campaigns</li>
                 <li className="list-disc">Access your Facebook Pages</li>
                 <li className="list-disc">Upload video creatives</li>
@@ -421,7 +422,7 @@ export default function Connections() {
 
             <Separator />
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 sm:justify-end">
               {metaConnected || metaExpired ? (
                 <>
                   <Button
@@ -429,6 +430,7 @@ export default function Connections() {
                     size="sm"
                     onClick={() => testMetaMutation.mutate()}
                     disabled={testMetaMutation.isPending}
+                    className="bg-white/70 dark:bg-slate-900/40"
                     data-testid="button-test-meta"
                   >
                     {testMetaMutation.isPending ? (
@@ -452,7 +454,7 @@ export default function Connections() {
                     variant="outline"
                     size="sm"
                     onClick={() => disconnectMetaMutation.mutate()}
-                    className="text-destructive hover:text-destructive"
+                    className="bg-white/70 text-destructive hover:text-destructive dark:bg-slate-900/40"
                     disabled={disconnectMetaMutation.isPending}
                     data-testid="button-disconnect-meta"
                   >
@@ -475,7 +477,7 @@ export default function Connections() {
 
       </div>
 
-      <Card className="border-dashed bg-muted/30 shadow-sm">
+      <Card className="border border-slate-200/70 bg-white/65 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.6)] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/40">
         <CardContent className="py-6">
           <div className="flex items-start gap-4">
             <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
