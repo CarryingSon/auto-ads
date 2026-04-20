@@ -351,9 +351,17 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     // Required scopes for Meta Ads with page + ad-account access:
     // - public_profile: Always needed
     // - pages_show_list: For page selection
-    // - pages_read_engagement: For promote_pages API
+    // - pages_read_engagement: For promote_pages API and page insights metadata
+    // - pages_manage_metadata: For page metadata/webhook compatibility on Page assets
     // - ads_management, ads_read: For creating and reading ads
-    const scopeArray = ["public_profile", "pages_show_list", "pages_read_engagement", "ads_management", "ads_read"];
+    const scopeArray = [
+      "public_profile",
+      "pages_show_list",
+      "pages_read_engagement",
+      "pages_manage_metadata",
+      "ads_management",
+      "ads_read",
+    ];
     const scopeRaw = scopeArray.join(",");
     
     // Build OAuth URL
@@ -788,7 +796,14 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     const tokenExpiresAt = finalExpires ? new Date(Date.now() + finalExpires * 1000) : null;
     
     // Match the scopes requested in /meta/start
-    const scopes = ["public_profile", "pages_show_list", "pages_read_engagement", "ads_management", "ads_read"];
+    const scopes = [
+      "public_profile",
+      "pages_show_list",
+      "pages_read_engagement",
+      "pages_manage_metadata",
+      "ads_management",
+      "ads_read",
+    ];
 
     // Hard-replace meta connection rows so reconnect always uses the newest token
     // and we never keep stale duplicate rows for the same user/provider.
