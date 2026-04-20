@@ -416,7 +416,7 @@ export default function Connections() {
               <ul className="ml-6 space-y-1 text-sm text-muted-foreground">
                 <li className="list-disc">Manage ad accounts and campaigns</li>
                 <li className="list-disc">Access your Facebook Pages</li>
-                <li className="list-disc">Read Page metadata</li>
+                <li className="list-disc">Access linked Instagram account profile</li>
                 <li className="list-disc">Upload video creatives</li>
               </ul>
             </div>

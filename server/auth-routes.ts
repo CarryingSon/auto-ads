@@ -348,19 +348,20 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     const redirectUri = getMetaRedirectUri(req);
     
     // Build scope from FIXED ARRAY - never copy from text/UI
-    // Required scopes for Meta Ads with page + ad-account access:
-    // - public_profile: Always needed
+    // Required scopes for Meta Ads + Instagram account linking:
+    // - public_profile, email: Basic identity
     // - pages_show_list: For page selection
-    // - pages_read_engagement: For promote_pages API and page insights metadata
-    // - pages_manage_metadata: For page metadata/webhook compatibility on Page assets
+    // - pages_read_engagement: For promote_pages API and page insights
     // - ads_management, ads_read: For creating and reading ads
+    // - instagram_basic: For linked Instagram account metadata
     const scopeArray = [
       "public_profile",
+      "email",
       "pages_show_list",
       "pages_read_engagement",
-      "pages_manage_metadata",
       "ads_management",
       "ads_read",
+      "instagram_basic",
     ];
     const scopeRaw = scopeArray.join(",");
     
@@ -798,11 +799,12 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     // Match the scopes requested in /meta/start
     const scopes = [
       "public_profile",
+      "email",
       "pages_show_list",
       "pages_read_engagement",
-      "pages_manage_metadata",
       "ads_management",
       "ads_read",
+      "instagram_basic",
     ];
 
     // Hard-replace meta connection rows so reconnect always uses the newest token
