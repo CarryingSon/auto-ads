@@ -97,13 +97,44 @@ const META_APP_SECRET = process.env.META_APP_SECRET || "";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 
-const DEFAULT_APP_BASE_URL = "https://auto-ads-ebon.vercel.app";
-const APP_BASE_URL_RAW = process.env.APP_BASE_URL || DEFAULT_APP_BASE_URL;
-const APP_BASE_URL = APP_BASE_URL_RAW.replace(/\/+$/, "");
+const APP_BASE_URL = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
-function getMetaRedirectUri(): string {
-  return `${APP_BASE_URL}/auth/meta/callback`;
+function resolveRequestBaseUrl(req: Request): string {
+  const forwardedHost = (req.get("x-forwarded-host") || "").split(",")[0]?.trim();
+  const host = forwardedHost || (req.get("host") || "").trim();
+  if (!host) return "";
+
+  const forwardedProto = (req.get("x-forwarded-proto") || "").split(",")[0]?.trim();
+  const protocol = forwardedProto || (req.secure ? "https" : "http");
+  return `${protocol}://${host}`.replace(/\/+$/, "");
+}
+
+function resolveAppBaseUrl(req: Request): string {
+  const requestBaseUrl = resolveRequestBaseUrl(req);
+  const isProduction = process.env.NODE_ENV === "production";
+  // In local/staging development, prefer the active request origin so OAuth
+  // callbacks stay on the same host developers are currently using.
+  if (!isProduction) {
+    return (requestBaseUrl || APP_BASE_URL).replace(/\/+$/, "");
+  }
+  return (APP_BASE_URL || requestBaseUrl).replace(/\/+$/, "");
+}
+
+function getMetaRedirectUri(req: Request): string {
+  const appBaseUrl = resolveAppBaseUrl(req);
+  if (!appBaseUrl) {
+    throw new Error("Unable to resolve APP_BASE_URL for Meta OAuth callback");
+  }
+  return `${appBaseUrl}/auth/meta/callback`;
+}
+
+function getGoogleRedirectUri(req: Request): string {
+  const appBaseUrl = resolveAppBaseUrl(req);
+  if (!appBaseUrl) {
+    throw new Error("Unable to resolve APP_BASE_URL for Google OAuth callback");
+  }
+  return `${appBaseUrl}/auth/google/callback`;
 }
 
 // ============ META OAUTH ============
@@ -254,6 +285,20 @@ function sendMetaOauthError(res: Response, isPopup: boolean, message: string, tr
 router.get("/meta/start", async (req: Request, res: Response) => {
   let traceId = createMetaTraceId();
   try {
+    if (!META_APP_ID || !META_APP_SECRET) {
+      metaLog(traceId, "Meta OAuth env not configured", {
+        hasMetaAppId: Boolean(META_APP_ID),
+        hasMetaAppSecret: Boolean(META_APP_SECRET),
+      });
+      return res.redirect(metaErrorRedirect("Meta OAuth is not configured on server", traceId));
+    }
+
+    const appBaseUrl = resolveAppBaseUrl(req);
+    if (!appBaseUrl) {
+      metaLog(traceId, "Failed to resolve app base URL for OAuth start");
+      return res.redirect(metaErrorRedirect("Invalid app base URL configuration", traceId));
+    }
+
     const state = crypto.randomBytes(32).toString('hex');
     traceId = createMetaTraceId(state);
     // For Meta login, we don't have a userId yet - we'll get it from the callback
@@ -267,16 +312,18 @@ router.get("/meta/start", async (req: Request, res: Response) => {
       xForwardedProto: req.get("x-forwarded-proto") || null,
       origin: req.get("origin") || null,
       referer: req.get("referer") || null,
-      appBaseUrl: APP_BASE_URL,
+      appBaseUrl,
       apiVersion: META_API_VERSION,
     });
-    const requestHost = (req.get("host") || "").toLowerCase();
-    const appHost = new URL(APP_BASE_URL).host.toLowerCase();
-    if (requestHost && requestHost !== appHost) {
-      metaLog(traceId, "Host mismatch: request host differs from canonical APP_BASE_URL host", {
-        requestHost,
-        canonicalHost: appHost,
-      });
+    if (APP_BASE_URL) {
+      const requestHost = (req.get("host") || "").toLowerCase();
+      const appHost = new URL(APP_BASE_URL).host.toLowerCase();
+      if (requestHost && requestHost !== appHost) {
+        metaLog(traceId, "Host mismatch: request host differs from canonical APP_BASE_URL host", {
+          requestHost,
+          canonicalHost: appHost,
+        });
+      }
     }
     
     // Store state in DATABASE instead of session (fixes cross-domain issue)
@@ -298,16 +345,15 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     });
     
     // Always use canonical app domain for OAuth redirect URI
-    const redirectUri = getMetaRedirectUri();
+    const redirectUri = getMetaRedirectUri(req);
     
     // Build scope from FIXED ARRAY - never copy from text/UI
-    // Required scopes for Meta Ads with Instagram placement:
+    // Required scopes for Meta Ads with page + ad-account access:
     // - public_profile: Always needed
     // - pages_show_list: For page selection
     // - pages_read_engagement: For promote_pages API
-    // - instagram_basic: For reading connected Instagram accounts
     // - ads_management, ads_read: For creating and reading ads
-    const scopeArray = ["public_profile", "pages_show_list", "pages_read_engagement", "instagram_basic", "ads_management", "ads_read"];
+    const scopeArray = ["public_profile", "pages_show_list", "pages_read_engagement", "ads_management", "ads_read"];
     const scopeRaw = scopeArray.join(",");
     
     // Build OAuth URL
@@ -363,15 +409,17 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     origin: req.get("origin") || null,
     referer: req.get("referer") || null,
     userAgent: req.get("user-agent") || null,
-    appBaseUrl: APP_BASE_URL,
+    appBaseUrl: resolveAppBaseUrl(req),
   });
-  const callbackRequestHost = (req.get("host") || "").toLowerCase();
-  const callbackAppHost = new URL(APP_BASE_URL).host.toLowerCase();
-  if (callbackRequestHost && callbackRequestHost !== callbackAppHost) {
-    metaLog(traceId, "Host mismatch on callback", {
-      callbackRequestHost,
-      canonicalHost: callbackAppHost,
-    });
+  if (APP_BASE_URL) {
+    const callbackRequestHost = (req.get("host") || "").toLowerCase();
+    const callbackAppHost = new URL(APP_BASE_URL).host.toLowerCase();
+    if (callbackRequestHost && callbackRequestHost !== callbackAppHost) {
+      metaLog(traceId, "Host mismatch on callback", {
+        callbackRequestHost,
+        canonicalHost: callbackAppHost,
+      });
+    }
   }
 
   try {
@@ -445,7 +493,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       return sendMetaOauthError(res, isPopup, "No code received", traceId);
     }
 
-    const redirectUri = getMetaRedirectUri();
+    const redirectUri = getMetaRedirectUri(req);
     metaLog(traceId, "Exchanging authorization code for access token", {
       redirectUri,
       codeLength: code.length,
@@ -739,8 +787,8 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     
     const tokenExpiresAt = finalExpires ? new Date(Date.now() + finalExpires * 1000) : null;
     
-    // Match the scopes requested in /meta/start - includes Instagram access
-    const scopes = ["public_profile", "pages_show_list", "pages_read_engagement", "instagram_basic", "ads_management", "ads_read"];
+    // Match the scopes requested in /meta/start
+    const scopes = ["public_profile", "pages_show_list", "pages_read_engagement", "ads_management", "ads_read"];
 
     // Hard-replace meta connection rows so reconnect always uses the newest token
     // and we never keep stale duplicate rows for the same user/provider.
@@ -1036,8 +1084,7 @@ router.get("/google/start", (req: Request, res: Response) => {
   const state = crypto.randomBytes(32).toString('hex');
   (req.session as any).googleOauthState = state;
   
-  const baseUrl = APP_BASE_URL;
-  const redirectUri = `${baseUrl}/auth/google/callback`;
+  const redirectUri = getGoogleRedirectUri(req);
   
   const scopes = [
     "https://www.googleapis.com/auth/drive.readonly",
@@ -1078,8 +1125,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
   }
   
   try {
-    const baseUrl = APP_BASE_URL;
-    const redirectUri = `${baseUrl}/auth/google/callback`;
+    const redirectUri = getGoogleRedirectUri(req);
     
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",

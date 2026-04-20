@@ -165,7 +165,7 @@ export default function Privacy() {
             <p className="mb-2">For privacy questions or requests:</p>
             <ul className="list-disc pl-6 space-y-1">
               <li><strong>Email:</strong> <a href="mailto:info@flowgens.com" className="text-primary hover:underline">info@flowgens.com</a></li>
-              <li><strong>Website:</strong> <a href="https://your-app.vercel.app" className="text-primary hover:underline">https://your-app.vercel.app</a></li>
+              <li><strong>Website:</strong> <a href="https://www.auto-ads.co" className="text-primary hover:underline">https://www.auto-ads.co</a></li>
             </ul>
           </section>
         </div>
