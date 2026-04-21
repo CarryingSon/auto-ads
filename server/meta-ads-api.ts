@@ -1274,6 +1274,8 @@ export class MetaAdsApi {
             .onConflictDoUpdate({
               target: metaCampaigns.id,
               set: {
+                userId: this.userId,
+                adAccountId: this.adAccountId!,
                 name: campaign.name,
                 status: campaign.status,
                 objective: campaign.objective,
@@ -1326,6 +1328,9 @@ export class MetaAdsApi {
             .onConflictDoUpdate({
               target: metaAdsets.id,
               set: {
+                userId: this.userId,
+                adAccountId: this.adAccountId!,
+                campaignId: adset.campaign_id,
                 name: adset.name,
                 status: adset.effective_status || adset.status,
                 dailyBudget: adset.daily_budget,
@@ -1374,6 +1379,10 @@ export class MetaAdsApi {
             .onConflictDoUpdate({
               target: metaAds.id,
               set: {
+                userId: this.userId,
+                adAccountId: this.adAccountId!,
+                campaignId: ad.campaign_id,
+                adsetId: ad.adset_id,
                 name: ad.name,
                 status: ad.status,
                 creativeJson: ad.creative,

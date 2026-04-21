@@ -5932,12 +5932,14 @@ export async function registerRoutes(
       // After reconnect we clear DB cache, and memory can contain stale campaigns.
       // For correctness, trigger a real sync and then repopulate caches.
 
+      let fallbackSynced = 0;
       try {
         const api = new MetaAdsApi(userId);
         const initialized = await api.initialize();
         if (initialized) {
           api.setAdAccountId(selectedAdAccountId);
           const syncResult = await api.syncCampaigns();
+          fallbackSynced = syncResult.synced;
           if (syncResult.errors.length > 0) {
             console.warn("[Campaigns] Sync fallback completed with warnings", {
               userId,
@@ -5971,6 +5973,28 @@ export async function registerRoutes(
         .where(whereClause)
         .orderBy(desc(metaCampaigns.lastSyncedAt));
       const refreshedCampaigns = refreshedRows.map(normalizeCachedCampaign);
+
+      // If sync reported records but DB filtering still returns empty, bypass cache
+      // for this response so UI can proceed. This can happen if stale rows were
+      // historically keyed to a different user/ad-account tuple.
+      if (refreshedCampaigns.length === 0 && fallbackSynced > 0) {
+        try {
+          const api = new MetaAdsApi(userId);
+          const initialized = await api.initialize();
+          if (initialized) {
+            api.setAdAccountId(selectedAdAccountId);
+            const liveCampaigns = await api.getCampaigns();
+            return res.json({ data: liveCampaigns, source: "live-after-sync" });
+          }
+        } catch (liveFallbackError: any) {
+          console.warn("[Campaigns] Live fallback after sync failed", {
+            userId,
+            selectedAdAccountId,
+            error: liveFallbackError?.message || String(liveFallbackError),
+          });
+        }
+      }
+
       metaApiCache.set(cacheKey, {
         data: refreshedCampaigns,
         expiry: Date.now() + META_CACHE_TTL,
