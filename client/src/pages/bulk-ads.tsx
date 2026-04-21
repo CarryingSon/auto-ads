@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { SiFacebook, SiInstagram } from "react-icons/si";
 import { TypewriterProgressBar } from "@/components/typewriter-progress-bar";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -521,6 +521,171 @@ interface DefaultSettings {
   payerName?: string;
 }
 
+interface CreativeDraft {
+  pixelId: string;
+  defaultCta: string;
+  websiteUrl: string;
+  defaultUrl: string;
+  displayLink: string;
+  beneficiaryName: string;
+  payerName: string;
+}
+
+const CreativeEditDialog = memo(function CreativeEditDialog({
+  open,
+  onOpenChange,
+  initialDraft,
+  availablePixels,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialDraft: CreativeDraft;
+  availablePixels: Array<{ id: string; name: string }>;
+  onSave: (draft: CreativeDraft) => void;
+}) {
+  const [draft, setDraft] = useState<CreativeDraft>(initialDraft);
+
+  useEffect(() => {
+    if (open) {
+      setDraft(initialDraft);
+    }
+  }, [open, initialDraft]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-bold">Edit Creative</DialogTitle>
+          <DialogDescription>
+            Change creative and tracking settings for your ads
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="edit-pixel" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pixel</Label>
+            <Select
+              value={draft.pixelId || "none"}
+              onValueChange={(val) => setDraft(prev => ({ ...prev, pixelId: val === "none" ? "" : val }))}
+            >
+              <SelectTrigger id="edit-pixel" className="rounded-xl" data-testid="select-edit-pixel">
+                <SelectValue placeholder="Select pixel" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No pixel</SelectItem>
+                {availablePixels.map((pixel) => (
+                  <SelectItem key={pixel.id} value={pixel.id}>
+                    {pixel.name} ({pixel.id})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {availablePixels.length === 0 && (
+              <p className="text-xs text-muted-foreground">No pixels found. Check your settings in Meta.</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-cta" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Call to Action</Label>
+            <Select
+              value={draft.defaultCta}
+              onValueChange={(val) => setDraft(prev => ({ ...prev, defaultCta: val }))}
+            >
+              <SelectTrigger id="edit-cta" className="rounded-xl" data-testid="select-edit-cta">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="LEARN_MORE">Learn More</SelectItem>
+                <SelectItem value="SHOP_NOW">Shop Now</SelectItem>
+                <SelectItem value="SIGN_UP">Sign Up</SelectItem>
+                <SelectItem value="SUBSCRIBE">Subscribe</SelectItem>
+                <SelectItem value="CONTACT_US">Contact Us</SelectItem>
+                <SelectItem value="GET_OFFER">Get Offer</SelectItem>
+                <SelectItem value="ORDER_NOW">Order Now</SelectItem>
+                <SelectItem value="BUY_NOW">Buy Now</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-website-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Website URL</Label>
+              <Input
+                id="edit-website-url"
+                value={draft.websiteUrl}
+                onChange={(e) => setDraft(prev => ({ ...prev, websiteUrl: e.target.value }))}
+                placeholder="https://example.com"
+                className="rounded-xl"
+                data-testid="input-edit-website-url"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-default-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Default URL</Label>
+              <Input
+                id="edit-default-url"
+                value={draft.defaultUrl}
+                onChange={(e) => setDraft(prev => ({ ...prev, defaultUrl: e.target.value }))}
+                placeholder="https://example.com/landing"
+                className="rounded-xl"
+                data-testid="input-edit-default-url"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-display-link" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Display Link</Label>
+            <Input
+              id="edit-display-link"
+              value={draft.displayLink}
+              onChange={(e) => setDraft(prev => ({ ...prev, displayLink: e.target.value }))}
+              placeholder="www.example.com"
+              className="rounded-xl"
+              data-testid="input-edit-display-link"
+            />
+            <p className="text-xs text-muted-foreground">Visible URL shown on the ad</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-beneficiary" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Beneficiary</Label>
+              <Input
+                id="edit-beneficiary"
+                value={draft.beneficiaryName}
+                onChange={(e) => setDraft(prev => ({ ...prev, beneficiaryName: e.target.value }))}
+                placeholder="Company name"
+                className="rounded-xl"
+                data-testid="input-edit-beneficiary"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-payer" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payer</Label>
+              <Input
+                id="edit-payer"
+                value={draft.payerName}
+                onChange={(e) => setDraft(prev => ({ ...prev, payerName: e.target.value }))}
+                placeholder="Payer name"
+                className="rounded-xl"
+                data-testid="input-edit-payer"
+              />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)} data-testid="button-cancel-creative">
+            Cancel
+          </Button>
+          <Button
+            className="rounded-xl"
+            onClick={() => {
+              onSave(draft);
+              onOpenChange(false);
+            }}
+            data-testid="button-save-creative"
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+});
+
 interface ActiveSyncState {
   syncStep: number;
   startTime: number;
@@ -759,7 +924,7 @@ export default function BulkAds() {
     ageMax: 65,
     gender: "ALL" as "ALL" | "MALE" | "FEMALE",
   });
-  const [editingCreative, setEditingCreative] = useState({
+  const [editingCreative, setEditingCreative] = useState<CreativeDraft>({
     pixelId: "",
     defaultCta: "LEARN_MORE",
     websiteUrl: "",
@@ -782,6 +947,12 @@ export default function BulkAds() {
   const [driveSearchDebounced, setDriveSearchDebounced] = useState("");
   const [driveTab, setDriveTab] = useState<"my-drive" | "shared" | "shared-drives">("my-drive");
   const [selectedSharedDriveId, setSelectedSharedDriveId] = useState<string | null>(null);
+
+  const autoResizeTextarea = (textarea: HTMLTextAreaElement | null) => {
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
 
   useEffect(() => {
     if (selectedCampaignId && selectedCampaignId !== "__create_new__") {
@@ -3189,7 +3360,7 @@ export default function BulkAds() {
                         <Badge variant="outline" className="text-xs">Primary ({adset.parsedCopy.primaryTexts.length})</Badge>
                         <div className="space-y-1 pl-2 border-l-2 border-muted">
                           {adset.parsedCopy.primaryTexts.map((text, idx) => (
-                            <p key={idx} className="text-muted-foreground text-sm line-clamp-2">{idx + 1}. {text}</p>
+                            <p key={idx} className="text-muted-foreground text-sm whitespace-pre-wrap break-words">{idx + 1}. {text}</p>
                           ))}
                         </div>
                       </div>
@@ -4527,6 +4698,33 @@ export default function BulkAds() {
     }
   };
 
+  const handleCreativeSave = useCallback((draft: CreativeDraft) => {
+    setDefaultSettings(prev => ({
+      ...prev,
+      pixelId: draft.pixelId,
+      defaultCta: draft.defaultCta,
+      websiteUrl: draft.websiteUrl,
+      defaultUrl: draft.defaultUrl,
+      displayLink: draft.displayLink,
+      beneficiaryName: draft.beneficiaryName,
+      payerName: draft.payerName,
+    }));
+
+    apiRequest("PATCH", "/api/ad-account-settings", {
+      pixelId: draft.pixelId,
+      defaultCta: draft.defaultCta,
+      websiteUrl: draft.websiteUrl,
+      defaultUrl: draft.defaultUrl,
+      displayLink: draft.displayLink,
+      beneficiaryName: draft.beneficiaryName,
+      payerName: draft.payerName,
+    }).then(() => {
+      queryClient.invalidateQueries({ queryKey: ["/api/ad-account-settings"] });
+    }).catch(() => {});
+
+    toast({ title: "Saved", description: "Creative settings updated" });
+  }, [toast]);
+
   return (
     <div className="max-w-5xl mx-auto py-1 px-2">
       <div className="glass-panel rounded-2xl p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] mb-8">
@@ -4657,11 +4855,16 @@ export default function BulkAds() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-primary-text">Primary Text</Label>
-              <Input
+              <textarea
                 id="edit-primary-text"
                 data-testid="input-edit-primary-text"
+                className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-none overflow-hidden"
                 value={editingCopy.primaryText}
-                onChange={(e) => setEditingCopy((prev) => ({ ...prev, primaryText: e.target.value }))}
+                ref={(el) => autoResizeTextarea(el)}
+                onChange={(e) => {
+                  autoResizeTextarea(e.currentTarget);
+                  setEditingCopy((prev) => ({ ...prev, primaryText: e.target.value }));
+                }}
                 placeholder="Main ad copy"
               />
             </div>
@@ -5096,12 +5299,16 @@ Your description`}
                       )}
                     </div>
                     <textarea
-                      className="w-full min-h-[100px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-y"
+                      className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-none overflow-hidden"
                       value={text}
-                      onChange={(e) => setEditingAdSetCopy(prev => ({
-                        ...prev,
-                        primaryTexts: prev.primaryTexts.map((t, i) => i === idx ? e.target.value : t),
-                      }))}
+                      ref={(el) => autoResizeTextarea(el)}
+                      onChange={(e) => {
+                        autoResizeTextarea(e.currentTarget);
+                        setEditingAdSetCopy(prev => ({
+                          ...prev,
+                          primaryTexts: prev.primaryTexts.map((t, i) => i === idx ? e.target.value : t),
+                        }));
+                      }}
                       placeholder="Enter primary text..."
                       data-testid={`textarea-primary-text-${idx}`}
                     />
@@ -5399,158 +5606,13 @@ Your description`}
         </DialogContent>
       </Dialog>
 
-      {/* Creative Edit Dialog */}
-      <Dialog open={showCreativeEditDialog} onOpenChange={setShowCreativeEditDialog}>
-        <DialogContent className="sm:max-w-2xl rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">Edit Creative</DialogTitle>
-            <DialogDescription>
-              Change creative and tracking settings for your ads
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="edit-pixel" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pixel</Label>
-              <Select
-                value={editingCreative.pixelId || "none"}
-                onValueChange={(val) => setEditingCreative(prev => ({ ...prev, pixelId: val === "none" ? "" : val }))}
-              >
-                <SelectTrigger id="edit-pixel" className="rounded-xl" data-testid="select-edit-pixel">
-                  <SelectValue placeholder="Select pixel" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No pixel</SelectItem>
-                  {availablePixels.map((pixel) => (
-                    <SelectItem key={pixel.id} value={pixel.id}>
-                      {pixel.name} ({pixel.id})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {availablePixels.length === 0 && (
-                <p className="text-xs text-muted-foreground">No pixels found. Check your settings in Meta.</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-cta" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Call to Action</Label>
-              <Select
-                value={editingCreative.defaultCta}
-                onValueChange={(val) => setEditingCreative(prev => ({ ...prev, defaultCta: val }))}
-              >
-                <SelectTrigger id="edit-cta" className="rounded-xl" data-testid="select-edit-cta">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="LEARN_MORE">Learn More</SelectItem>
-                  <SelectItem value="SHOP_NOW">Shop Now</SelectItem>
-                  <SelectItem value="SIGN_UP">Sign Up</SelectItem>
-                  <SelectItem value="SUBSCRIBE">Subscribe</SelectItem>
-                  <SelectItem value="CONTACT_US">Contact Us</SelectItem>
-                  <SelectItem value="GET_OFFER">Get Offer</SelectItem>
-                  <SelectItem value="ORDER_NOW">Order Now</SelectItem>
-                  <SelectItem value="BUY_NOW">Buy Now</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-website-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Website URL</Label>
-                <Input
-                  id="edit-website-url"
-                  value={editingCreative.websiteUrl}
-                  onChange={(e) => setEditingCreative(prev => ({ ...prev, websiteUrl: e.target.value }))}
-                  placeholder="https://example.com"
-                  className="rounded-xl"
-                  data-testid="input-edit-website-url"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-default-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Default URL</Label>
-                <Input
-                  id="edit-default-url"
-                  value={editingCreative.defaultUrl}
-                  onChange={(e) => setEditingCreative(prev => ({ ...prev, defaultUrl: e.target.value }))}
-                  placeholder="https://example.com/landing"
-                  className="rounded-xl"
-                  data-testid="input-edit-default-url"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-display-link" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Display Link</Label>
-              <Input
-                id="edit-display-link"
-                value={editingCreative.displayLink}
-                onChange={(e) => setEditingCreative(prev => ({ ...prev, displayLink: e.target.value }))}
-                placeholder="www.example.com"
-                className="rounded-xl"
-                data-testid="input-edit-display-link"
-              />
-              <p className="text-xs text-muted-foreground">Visible URL shown on the ad</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-beneficiary" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Beneficiary</Label>
-                <Input
-                  id="edit-beneficiary"
-                  value={editingCreative.beneficiaryName}
-                  onChange={(e) => setEditingCreative(prev => ({ ...prev, beneficiaryName: e.target.value }))}
-                  placeholder="Company name"
-                  className="rounded-xl"
-                  data-testid="input-edit-beneficiary"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-payer" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payer</Label>
-                <Input
-                  id="edit-payer"
-                  value={editingCreative.payerName}
-                  onChange={(e) => setEditingCreative(prev => ({ ...prev, payerName: e.target.value }))}
-                  placeholder="Payer name"
-                  className="rounded-xl"
-                  data-testid="input-edit-payer"
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" className="rounded-xl" onClick={() => setShowCreativeEditDialog(false)} data-testid="button-cancel-creative">
-              Cancel
-            </Button>
-            <Button
-              className="rounded-xl"
-              onClick={() => {
-                setDefaultSettings(prev => ({
-                  ...prev,
-                  pixelId: editingCreative.pixelId,
-                  defaultCta: editingCreative.defaultCta,
-                  websiteUrl: editingCreative.websiteUrl,
-                  defaultUrl: editingCreative.defaultUrl,
-                  displayLink: editingCreative.displayLink,
-                  beneficiaryName: editingCreative.beneficiaryName,
-                  payerName: editingCreative.payerName,
-                }));
-                apiRequest("PATCH", "/api/ad-account-settings", {
-                  pixelId: editingCreative.pixelId,
-                  defaultCta: editingCreative.defaultCta,
-                  websiteUrl: editingCreative.websiteUrl,
-                  defaultUrl: editingCreative.defaultUrl,
-                  displayLink: editingCreative.displayLink,
-                  beneficiaryName: editingCreative.beneficiaryName,
-                  payerName: editingCreative.payerName,
-                }).then(() => {
-                  queryClient.invalidateQueries({ queryKey: ["/api/ad-account-settings"] });
-                }).catch(() => {});
-                setShowCreativeEditDialog(false);
-                toast({ title: "Saved", description: "Creative settings updated" });
-              }}
-              data-testid="button-save-creative"
-            >
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreativeEditDialog
+        open={showCreativeEditDialog}
+        onOpenChange={setShowCreativeEditDialog}
+        initialDraft={editingCreative}
+        availablePixels={availablePixels}
+        onSave={handleCreativeSave}
+      />
 
     </div>
   );

@@ -272,7 +272,7 @@ export function AppSidebar() {
     (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
 
   const { data: activeJobs } = useQuery<ActiveJob[]>({
-    queryKey: ["/api/bulk-ads/jobs"],
+    queryKey: ["/api/jobs"],
     enabled: location.startsWith("/bulk-ads"),
   });
 
