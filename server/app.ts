@@ -111,6 +111,28 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+function emitStructuredAppLog(
+  level: "info" | "warn" | "error",
+  message: string,
+  details: Record<string, unknown> = {},
+) {
+  const payload = {
+    level,
+    message,
+    source: "express",
+    timestamp: new Date().toISOString(),
+    ...details,
+  };
+  const line = JSON.stringify(payload);
+  if (level === "error") {
+    console.error(line);
+  } else if (level === "warn") {
+    console.warn(line);
+  } else {
+    console.log(line);
+  }
+}
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -207,7 +229,12 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   app.use((req, _res, next) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/auth")) {
-      console.log(`[REQUEST] ${req.method} ${redactString(req.originalUrl || req.path)}`);
+      emitStructuredAppLog("info", "request_started", {
+        requestId: req.get("x-vercel-id") || req.get("x-request-id") || null,
+        method: req.method,
+        path: req.path,
+        url: redactString(req.originalUrl || req.path),
+      });
     }
     next();
   });
@@ -231,6 +258,17 @@ export async function createApp(options: CreateAppOptions = {}) {
           logLine += ` :: ${JSON.stringify(redactSensitive(capturedJsonResponse))}`;
         }
         log(logLine);
+        const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
+        emitStructuredAppLog(level, "request_completed", {
+          requestId: req.get("x-vercel-id") || req.get("x-request-id") || null,
+          method: req.method,
+          path,
+          statusCode: res.statusCode,
+          durationMs: duration,
+          response: res.statusCode >= 400 && capturedJsonResponse
+            ? redactSensitive(capturedJsonResponse)
+            : undefined,
+        });
       }
     });
 
@@ -243,6 +281,11 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
+    emitStructuredAppLog("error", "request_handler_failed", {
+      statusCode: status,
+      errorMessage: message,
+      stack: err.stack,
+    });
     console.error(`[Error Handler] ${status}: ${message}`, err.stack || err);
     if (!res.headersSent) {
       res.status(status).json({ message });
@@ -253,7 +296,8 @@ export async function createApp(options: CreateAppOptions = {}) {
     if (isProduction) {
       serveStatic(app);
     } else if (enableDevVite) {
-      const { setupVite } = await import("./vite.js");
+      const devViteModule = "./vite.js";
+      const { setupVite } = await import(devViteModule);
       await setupVite(httpServer, app);
     }
   }

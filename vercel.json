@@ -1,22 +1,13 @@
 {
   "version": 2,
   "framework": null,
-  "builds": [
-    {
-      "src": "api/index.ts",
-      "use": "@vercel/node",
-      "config": {
-        "maxDuration": 60
-      }
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist/public"
-      }
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/public",
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 300
     }
-  ],
+  },
   "routes": [
     {
       "src": "/api/(.*)",

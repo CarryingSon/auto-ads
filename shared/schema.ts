@@ -382,6 +382,7 @@ export const jobQueueAttempts = pgTable("job_queue_attempts", {
   attemptNumber: integer("attempt_number").notNull(),
   status: text("status").notNull(), // processing | completed | retrying | failed
   errorMessage: text("error_message"),
+  details: jsonb("details").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

@@ -66,6 +66,29 @@ const isRateLimitError = (error: any): boolean => {
   return msg.includes('rate limit') || msg.includes('request limit') || msg.includes('limit reached') || msg.includes('too many calls');
 };
 
+const formatMetaVideoUploadError = (error: any, videoName: string): string => {
+  const code = error?.code;
+  const subcode = error?.error_subcode;
+  const title = error?.error_user_title || error?.type || "Meta video upload error";
+  const userMessage = error?.error_user_msg || error?.message || "Meta rejected the video upload.";
+  const traceId = error?.fbtrace_id ? ` Meta trace ID: ${error.fbtrace_id}.` : "";
+  const codeDetails = [
+    code ? `code ${code}` : null,
+    subcode ? `subcode ${subcode}` : null,
+  ].filter(Boolean).join(", ");
+  const suffix = codeDetails ? ` (${codeDetails})` : "";
+
+  if (code === 351 || subcode === 1363027 || title.toLowerCase().includes("corrupt video")) {
+    return [
+      `Meta rejected "${videoName}" as unreadable/corrupt${suffix}: ${userMessage}`,
+      "This is a Meta file validation failure, not an app size limit. Re-export or transcode the video to MP4/H.264 video, AAC audio, yuv420p, constant frame rate, and faststart/moov atom at the beginning.",
+      `${traceId} Raw Meta error: ${JSON.stringify(error)}`,
+    ].join(" ");
+  }
+
+  return `Video upload failed for "${videoName}"${suffix}: ${userMessage}.${traceId} Raw Meta error: ${JSON.stringify(error)}`;
+};
+
 interface MetaApiError {
   error?: {
     message: string;
@@ -1889,7 +1912,7 @@ export class MetaAdsApi {
                 await sleep(attempt * 5000);
                 continue;
               }
-              throw new Error(`Video upload failed: ${JSON.stringify(uploadData.error)}`);
+              throw new Error(formatMetaVideoUploadError(uploadData.error, name));
             }
           } catch (err: any) {
             console.error(`[MetaAdsApi] file_url upload attempt ${attempt} error:`, err);
@@ -1946,7 +1969,7 @@ export class MetaAdsApi {
               await sleep(attempt * 5000);
               continue;
             }
-            throw new Error(`Video upload failed: ${JSON.stringify(uploadData.error)}`);
+            throw new Error(formatMetaVideoUploadError(uploadData.error, name));
           }
         }
       } else {
@@ -1984,7 +2007,7 @@ export class MetaAdsApi {
               await sleep(attempt * 5000);
               continue;
             }
-            throw new Error(`Video upload failed: ${JSON.stringify(uploadData.error)}`);
+            throw new Error(formatMetaVideoUploadError(uploadData.error, name));
           }
         }
       }

@@ -493,10 +493,55 @@ function isInstagramRequiredError(error: unknown): boolean {
   return message.toLowerCase().includes("instagram_required");
 }
 
-// Helper to emit log to a specific job
-function emitJobLog(jobId: string, message: string, type: "info" | "success" | "error" | "warning" = "info") {
-  // Logs are persisted in DB (job.logs). We keep a console mirror for ops visibility.
-  console.log(`[Job ${jobId.slice(0, 8)}] [${type.toUpperCase()}] ${message}`);
+type JobLogType = "info" | "success" | "error" | "warning";
+
+function emitStructuredConsole(
+  level: "info" | "warn" | "error",
+  message: string,
+  details: Record<string, unknown> = {},
+) {
+  const payload = {
+    level,
+    message,
+    source: "bulk-ads",
+    timestamp: new Date().toISOString(),
+    ...details,
+  };
+  const line = JSON.stringify(payload);
+  if (level === "error") {
+    console.error(line);
+  } else if (level === "warn") {
+    console.warn(line);
+  } else {
+    console.log(line);
+  }
+}
+
+// Helper to emit log to a specific job.
+function emitJobLog(
+  jobId: string,
+  message: string,
+  type: JobLogType = "info",
+  details: Record<string, unknown> = {},
+  adsetId?: string | null,
+) {
+  const level = type === "warning" ? "warn" : type === "error" ? "error" : "info";
+  emitStructuredConsole(level, message, {
+    jobId,
+    jobShortId: jobId.slice(0, 8),
+    adsetId: adsetId ?? null,
+    eventType: type,
+    details,
+  });
+  storage.createJobLog({
+    jobId,
+    adsetId: adsetId ?? undefined,
+    level: type,
+    message,
+    details,
+  }).catch((err) => {
+    console.error("[Launch] Failed to persist structured job log:", err);
+  });
 }
 
 // Authentication middleware for API routes
@@ -1195,6 +1240,7 @@ export async function registerRoutes(
 
       const latestQueue = await getLatestQueueForJob(jobId);
       const metaObjects = await storage.getMetaObjectsByJob(job.id);
+      const structuredLogs = (await storage.getJobLogsByJob(job.id)).slice(0, 200).reverse();
 
       const adSetProgress: Record<string, string> = {};
       const adSetObjects = metaObjects.filter((obj) => obj.objectType === "adset");
@@ -1233,6 +1279,7 @@ export async function registerRoutes(
         completedAdSets,
         metaObjects,
         logs: job.logs || [],
+        structuredLogs,
       });
     } catch (error) {
       console.error("Error fetching job progress:", error);
@@ -2028,38 +2075,100 @@ export async function registerRoutes(
       for (const queueItem of claimed) {
         const payload = queueItem.payload as unknown as LaunchQueuePayload | null;
         if (!payload || !payload.jobId || !payload.userId) {
-          await markQueueFailed(queueItem.id, "Invalid queue payload");
+          await markQueueFailed(queueItem.id, "Invalid queue payload", {
+            workerId,
+            queueId: queueItem.id,
+            reason: "invalid_payload",
+          });
           failed++;
           continue;
         }
 
+        const queueItemStartedAt = Date.now();
         try {
+          emitJobLog(payload.jobId, "Worker claimed launch job", "info", {
+            queueId: queueItem.id,
+            workerId,
+            attempt: queueItem.attempts,
+            assetCount: payload.assets?.length ?? 0,
+            adsetCount: payload.jobAdsets?.length ?? 0,
+            uploadMode: payload.effectiveUploadMode,
+          });
           await storage.updateJob(payload.jobId, {
             status: "processing",
             currentStep: 4,
             errorMessage: null,
           });
 
-          await processLaunchInBackground(payload as any);
-          await completeQueueItem(queueItem.id);
+          const result = await processLaunchInBackground(payload as any, {
+            queueId: queueItem.id,
+            workerId,
+            attempt: queueItem.attempts,
+          });
+          const durationMs = Date.now() - queueItemStartedAt;
+          await completeQueueItem(queueItem.id, {
+            workerId,
+            durationMs,
+            totalAdsCreated: result.totalAdsCreated,
+            adSetCount: result.adSetCount,
+          });
+          emitJobLog(payload.jobId, "Worker completed launch job", "success", {
+            queueId: queueItem.id,
+            workerId,
+            attempt: queueItem.attempts,
+            durationMs,
+            totalAdsCreated: result.totalAdsCreated,
+            adSetCount: result.adSetCount,
+          });
           completed++;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Worker processing failed";
+          const durationMs = Date.now() - queueItemStartedAt;
           if (errorMessage.toLowerCase().includes("cancelled")) {
-            await markQueueFailed(queueItem.id, errorMessage);
+            await markQueueFailed(queueItem.id, errorMessage, {
+              workerId,
+              durationMs,
+              reason: "cancelled",
+            });
             await storage.updateJob(payload.jobId, {
               status: "failed",
+              errorMessage,
+            });
+            emitJobLog(payload.jobId, "Worker cancelled launch job", "error", {
+              queueId: queueItem.id,
+              workerId,
+              attempt: queueItem.attempts,
+              durationMs,
               errorMessage,
             });
             failed++;
             continue;
           }
 
-          const result = await failOrRetryQueueItem(queueItem.id, errorMessage);
+          const result = await failOrRetryQueueItem(queueItem.id, errorMessage, {
+            workerId,
+            durationMs,
+            attempt: queueItem.attempts,
+            assetCount: payload.assets?.length ?? 0,
+            adsetCount: payload.jobAdsets?.length ?? 0,
+          });
           await storage.updateJob(payload.jobId, {
             status: result.status === "retrying" ? "retrying" : "failed",
             errorMessage,
           });
+          emitJobLog(
+            payload.jobId,
+            result.status === "retrying" ? "Worker will retry launch job" : "Worker failed launch job",
+            result.status === "retrying" ? "warning" : "error",
+            {
+              queueId: queueItem.id,
+              workerId,
+              attempt: result.attempts,
+              durationMs,
+              nextRunAt: result.nextRunAt?.toISOString() ?? null,
+              errorMessage,
+            },
+          );
           if (result.status === "retrying") {
             retried++;
           } else {
@@ -2105,7 +2214,7 @@ export async function registerRoutes(
     pageId: string;
     pageName?: string;
     globalSettingsRecord: any;
-  }): Promise<{ totalAdsCreated: number; adSetCount: number }> {
+  }, runtime: { queueId?: string; workerId?: string; attempt?: number } = {}): Promise<{ totalAdsCreated: number; adSetCount: number }> {
     const {
       jobId, userId, adAccountId, campaignId, campaignName, adSetName,
       copyOverrides, creativeEnhancements, disabledAdSetIds,
@@ -2127,16 +2236,34 @@ export async function registerRoutes(
         metaApi.setAdAccountId(adAccountId);
       }
 
-      const logs: string[] = [];
-      const log = (message: string, type: "info" | "success" | "error" | "warning" = "info") => {
+      const existingJob = await storage.getJob(jobId);
+      const logs: string[] = Array.isArray(existingJob?.logs) ? [...existingJob.logs] : [];
+      const baseDetails = {
+        queueId: runtime.queueId ?? null,
+        workerId: runtime.workerId ?? null,
+        attempt: runtime.attempt ?? null,
+        adAccountId,
+        campaignId: campaignId ?? null,
+      };
+      const log = (
+        message: string,
+        type: JobLogType = "info",
+        details: Record<string, unknown> = {},
+        adsetId?: string | null,
+      ) => {
         logs.push(message);
         storage.updateJob(jobId, { logs }).catch(err => {
           console.error("[Launch] Failed to save log to DB:", err);
         });
-        emitJobLog(jobId, message, type);
+        emitJobLog(jobId, message, type, { ...baseDetails, ...details }, adsetId);
       };
 
-      log(`Ad upload mode: ${effectiveUploadMode}`, "info");
+      log(`Ad upload mode: ${effectiveUploadMode}`, "info", {
+        event: "launch_started",
+        assetCount: assets.length,
+        adsetCount: jobAdsets.length,
+        useSinglePerCombination,
+      });
       if (useSinglePerCombination) {
         log(`Format: Single (1 ad per asset × primary text kombinacija, DEGREES_OF_FREEDOM)`, "info");
       } else {
@@ -2216,7 +2343,11 @@ export async function registerRoutes(
         }
 
         // Create Meta ad set using global template settings
-        log(`Creating ad set: ${adset.name} (${adsetAssets.length} creatives)...`);
+        log(`Creating ad set: ${adset.name} (${adsetAssets.length} creatives)...`, "info", {
+          event: "adset_started",
+          adsetName: adset.name,
+          creativeCount: adsetAssets.length,
+        }, adset.id);
         let metaAdSetId: string;
         let instagramAccountId: string | undefined; // Defined outside try block for broader scope
         try {
@@ -2531,12 +2662,20 @@ export async function registerRoutes(
 
         if (!adsetValidation.valid) {
           const errorMessages = adsetValidation.errors.map(e => e.message).join("; ");
-          log(`Skipping ad set "${adset.name}": validation failed - ${errorMessages}`, "error");
+          log(`Skipping ad set "${adset.name}": validation failed - ${errorMessages}`, "error", {
+            event: "adset_validation_failed",
+            adsetName: adset.name,
+            validationErrors: adsetValidation.errors,
+          }, adset.id);
           continue;
         }
 
         for (const w of adsetValidation.warnings) {
-          log(`Warning for "${adset.name}": ${w.message}`, "warning");
+          log(`Warning for "${adset.name}": ${w.message}`, "warning", {
+            event: "adset_validation_warning",
+            adsetName: adset.name,
+            warning: w,
+          }, adset.id);
         }
 
         log(`Using ${primaryTexts.length} primary text(s), ${headlines.length} headline(s), ${descriptions.length} description(s)`);
@@ -2565,12 +2704,20 @@ export async function registerRoutes(
           // Upload all media in parallel (videos concurrently, images concurrently)
           const allAssetInfo: Array<{ type: 'image' | 'video'; mediaId: string; name: string; thumbnailUrl?: string }> = [];
           
-          const VIDEO_PARALLEL_LIMIT = 3;
+          const configuredVideoParallelLimit = Number(process.env.VIDEO_PARALLEL_LIMIT || 1);
+          const VIDEO_PARALLEL_LIMIT = Number.isFinite(configuredVideoParallelLimit)
+            ? Math.min(Math.max(1, Math.floor(configuredVideoParallelLimit)), 3)
+            : 1;
           const validAssets = adsetAssets.filter(a => a.driveFileId);
           const videoAssets = validAssets.filter(a => a.mimeType?.startsWith("video/"));
           const imageAssets = validAssets.filter(a => !a.mimeType?.startsWith("video/"));
           
-          log(`Processing ${videoAssets.length} videos (${VIDEO_PARALLEL_LIMIT} parallel) + ${imageAssets.length} images...`);
+          log(`Processing ${videoAssets.length} videos (${VIDEO_PARALLEL_LIMIT} parallel) + ${imageAssets.length} images...`, "info", {
+            event: "media_processing_started",
+            videoCount: videoAssets.length,
+            imageCount: imageAssets.length,
+            videoParallelLimit: VIDEO_PARALLEL_LIMIT,
+          }, adset.id);
           
           // Upload images in batches (limit concurrency to avoid memory spikes)
           const IMAGE_PARALLEL_LIMIT = 5;
@@ -2579,14 +2726,32 @@ export async function registerRoutes(
             const batch = imageAssets.slice(i, i + IMAGE_PARALLEL_LIMIT);
             const batchResults = await Promise.all(batch.map(async (asset) => {
               try {
-                log(`Uploading image: ${asset.originalFilename}...`);
+                log(`Uploading image: ${asset.originalFilename}...`, "info", {
+                  event: "image_upload_started",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  mimeType: asset.mimeType,
+                  sizeBytes: asset.size,
+                }, adset.id);
                 const imageBuffer = await downloadDriveBuffer(asset.driveFileId!, asset.originalFilename);
                 const imageResult = await metaApi.uploadImage(imageBuffer, asset.originalFilename, asset.mimeType || undefined);
-                log(`Image uploaded: ${imageResult.hash}`, "success");
+                log(`Image uploaded: ${imageResult.hash}`, "success", {
+                  event: "image_upload_completed",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  metaImageHash: imageResult.hash,
+                }, adset.id);
                 await storage.updateAsset(asset.id, { metaCreativeId: imageResult.hash });
                 return { type: 'image' as const, mediaId: imageResult.hash, name: asset.originalFilename };
               } catch (err) {
-                log(`Error uploading ${asset.originalFilename}: ${err instanceof Error ? err.message : "Unknown"}`);
+                log(`Error uploading ${asset.originalFilename}: ${err instanceof Error ? err.message : "Unknown"}`, "error", {
+                  event: "image_upload_failed",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  mimeType: asset.mimeType,
+                  sizeBytes: asset.size,
+                  errorMessage: err instanceof Error ? err.message : "Unknown",
+                }, adset.id);
                 return null;
               }
             }));
@@ -2600,7 +2765,13 @@ export async function registerRoutes(
             let videoLocalPath: string | undefined;
             try {
               const videoStartTime = Date.now();
-              log(`Uploading video: ${asset.originalFilename}...`);
+              log(`Uploading video: ${asset.originalFilename}...`, "info", {
+                event: "video_upload_started",
+                assetId: asset.id,
+                filename: asset.originalFilename,
+                mimeType: asset.mimeType,
+                sizeBytes: asset.size,
+              }, adset.id);
               try {
                 const videoBuffer = await saModule.downloadFile(asset.driveFileId!);
                 const crypto = await import("crypto");
@@ -2609,9 +2780,20 @@ export async function registerRoutes(
                 const ext = asset.originalFilename.match(/\.[^.]+$/)?.[0] || '.mp4';
                 videoLocalPath = `/tmp/sa_download_${hash}${ext}`;
                 fs.writeFileSync(videoLocalPath, videoBuffer);
-                log(`Downloaded ${asset.originalFilename} via service account (${videoBuffer.length} bytes)`);
+                log(`Downloaded ${asset.originalFilename} via service account (${videoBuffer.length} bytes)`, "info", {
+                  event: "video_drive_download_completed",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  sizeBytes: videoBuffer.length,
+                  source: "service_account",
+                }, adset.id);
               } catch (saErr) {
-                log(`SA download failed for video ${asset.originalFilename}, using public URL`);
+                log(`SA download failed for video ${asset.originalFilename}, using public URL`, "warning", {
+                  event: "video_drive_download_fallback",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  errorMessage: saErr instanceof Error ? saErr.message : "Unknown",
+                }, adset.id);
               }
               const assetUrl = getPublicDownloadUrl(asset.driveFileId!);
               const videoResult = await metaApi.uploadVideoNoWait(assetUrl, cleanVideoTitle(asset.originalFilename), videoLocalPath ? { localPath: videoLocalPath } : undefined);
@@ -2620,9 +2802,26 @@ export async function registerRoutes(
               const transcodeInfo = videoResult.transcodeResult;
               if (transcodeInfo?.transcoded) {
                 const transcodeTime = transcodeInfo.logs?.transcodeTimeSeconds?.toFixed(1) || '?';
-                log(`Video sent to Meta: ${videoResult.id} (transcoded: ${transcodeTime}s, upload: ${videoTotalTime}s)`, "success");
+                log(`Video sent to Meta: ${videoResult.id} (transcoded: ${transcodeTime}s, upload: ${videoTotalTime}s)`, "success", {
+                  event: "video_upload_completed",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  metaVideoId: videoResult.id,
+                  uploadSeconds: Number(videoTotalTime),
+                  transcoded: true,
+                  transcodeSeconds: Number(transcodeTime),
+                  transcodeReasons: transcodeInfo.reasons,
+                }, adset.id);
               } else {
-                log(`Video sent to Meta: ${videoResult.id} (no transcoding, upload: ${videoTotalTime}s)`, "success");
+                log(`Video sent to Meta: ${videoResult.id} (no transcoding, upload: ${videoTotalTime}s)`, "success", {
+                  event: "video_upload_completed",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  metaVideoId: videoResult.id,
+                  uploadSeconds: Number(videoTotalTime),
+                  transcoded: false,
+                  transcodeReasons: transcodeInfo?.reasons ?? [],
+                }, adset.id);
               }
               
               await storage.updateAsset(asset.id, { metaCreativeId: videoResult.id });
@@ -2631,7 +2830,14 @@ export async function registerRoutes(
                 try { const fs = await import("fs"); fs.unlinkSync(videoLocalPath); } catch {}
               }
             } catch (err) {
-              log(`Error uploading ${asset.originalFilename}: ${err instanceof Error ? err.message : "Unknown"}`);
+              log(`Error uploading ${asset.originalFilename}: ${err instanceof Error ? err.message : "Unknown"}`, "error", {
+                event: "video_upload_failed",
+                assetId: asset.id,
+                filename: asset.originalFilename,
+                mimeType: asset.mimeType,
+                sizeBytes: asset.size,
+                errorMessage: err instanceof Error ? err.message : "Unknown",
+              }, adset.id);
               if (videoLocalPath) {
                 try { const fs = await import("fs"); fs.unlinkSync(videoLocalPath); } catch {}
               }
@@ -2651,7 +2857,10 @@ export async function registerRoutes(
           
           // Batch-check video readiness (2 at a time to avoid rate limits)
           if (pendingVideoIds.length > 0) {
-            log(`Waiting for ${pendingVideoIds.length} videos to finish processing on Meta...`);
+            log(`Waiting for ${pendingVideoIds.length} videos to finish processing on Meta...`, "info", {
+              event: "video_ready_wait_started",
+              videoCount: pendingVideoIds.length,
+            }, adset.id);
             const READY_CHECK_LIMIT = 2;
             for (let i = 0; i < pendingVideoIds.length; i += READY_CHECK_LIMIT) {
               const batch = pendingVideoIds.slice(i, i + READY_CHECK_LIMIT);
@@ -2659,10 +2868,19 @@ export async function registerRoutes(
                 batch.map(async ({ videoId, name }) => {
                   try {
                     const thumbnailUrl = await metaApi.waitForVideoReady(videoId);
-                    log(`Video ready: ${name}`, "success");
+                    log(`Video ready: ${name}`, "success", {
+                      event: "video_ready",
+                      videoId,
+                      filename: name,
+                    }, adset.id);
                     return { type: 'video' as const, mediaId: videoId, name, thumbnailUrl };
                   } catch (err) {
-                    log(`Video processing failed for ${name}: ${err instanceof Error ? err.message : "Unknown"}`);
+                    log(`Video processing failed for ${name}: ${err instanceof Error ? err.message : "Unknown"}`, "error", {
+                      event: "video_ready_failed",
+                      videoId,
+                      filename: name,
+                      errorMessage: err instanceof Error ? err.message : "Unknown",
+                    }, adset.id);
                     return { type: 'video' as const, mediaId: videoId, name, thumbnailUrl: undefined };
                   }
                 })
@@ -2842,10 +3060,18 @@ export async function registerRoutes(
 
       // Mark job as complete (or error if nothing was created)
       if (totalAdsCreated === 0 && adSetIds.length === 0) {
-        log(`No ads were created. All ad sets were skipped due to validation errors or missing data.`, "error");
+        log(`No ads were created. All ad sets were skipped due to validation errors or missing data.`, "error", {
+          event: "launch_no_ads_created",
+          totalAdsCreated,
+          adSetCount: adSetIds.length,
+        });
         throw new Error("No ads created - all ad sets failed validation. Check ad copy and media files.");
       } else {
-        log(`All ads created successfully! Total: ${totalAdsCreated} ads in ${adSetIds.length} ad sets.`);
+        log(`All ads created successfully! Total: ${totalAdsCreated} ads in ${adSetIds.length} ad sets.`, "success", {
+          event: "launch_completed",
+          totalAdsCreated,
+          adSetCount: adSetIds.length,
+        });
         await storage.updateJob(jobId, {
           status: "done",
           completedAt: new Date(),
@@ -2858,6 +3084,12 @@ export async function registerRoutes(
       console.log(`[Background] Job ${jobId} completed: ${totalAdsCreated} ads created`);
       return { totalAdsCreated, adSetCount: adSetIds.length };
     } catch (error) {
+      emitJobLog(jobId, "Background launch processing failed", "error", {
+        queueId: runtime.queueId ?? null,
+        workerId: runtime.workerId ?? null,
+        attempt: runtime.attempt ?? null,
+        errorMessage: error instanceof Error ? error.message : "Launch failed",
+      });
       console.error(`[Background] Error processing job ${jobId}:`, error);
       await storage.updateJob(jobId, {
         status: "error",

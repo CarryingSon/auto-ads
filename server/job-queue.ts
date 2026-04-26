@@ -8,6 +8,7 @@ import {
 } from "../shared/schema.js";
 
 export type QueueStatus = "queued" | "processing" | "retrying" | "completed" | "failed";
+export type QueueAttemptDetails = Record<string, unknown>;
 
 export interface LaunchQueuePayload {
   jobId: string;
@@ -69,9 +70,11 @@ async function ensureQueueTables(): Promise<void> {
           attempt_number integer NOT NULL,
           status text NOT NULL,
           error_message text,
+          details jsonb,
           created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
         );
       `);
+      await pool.query(`ALTER TABLE job_queue_attempts ADD COLUMN IF NOT EXISTS details jsonb;`);
       await pool.query(`CREATE INDEX IF NOT EXISTS job_queue_status_next_run_idx ON job_queue (status, next_run_at);`);
       await pool.query(`CREATE INDEX IF NOT EXISTS job_queue_job_id_idx ON job_queue (job_id);`);
       await pool.query(`CREATE INDEX IF NOT EXISTS job_queue_locked_until_idx ON job_queue (locked_until);`);
@@ -213,13 +216,18 @@ export async function claimLaunchQueueItems(workerId: string, limit = 1): Promis
     .orderBy(asc(jobQueue.createdAt));
 
   for (const row of claimedRows) {
-    await recordAttempt(row.id, row.attempts, "processing");
+    await recordAttempt(row.id, row.attempts, "processing", undefined, {
+      jobId: row.jobId,
+      userId: row.userId,
+      workerId,
+      lockedUntil: row.lockedUntil?.toISOString?.() ?? row.lockedUntil,
+    });
   }
 
   return claimedRows;
 }
 
-export async function completeQueueItem(queueId: string): Promise<void> {
+export async function completeQueueItem(queueId: string, details: QueueAttemptDetails = {}): Promise<void> {
   await ensureQueueTables();
 
   await db
@@ -236,11 +244,14 @@ export async function completeQueueItem(queueId: string): Promise<void> {
 
   const latest = await getQueueItemById(queueId);
   if (latest) {
-    await recordAttempt(queueId, latest.attempts, "completed");
+    await recordAttempt(queueId, latest.attempts, "completed", undefined, {
+      jobId: latest.jobId,
+      ...details,
+    });
   }
 }
 
-export async function failOrRetryQueueItem(queueId: string, errorMessage: string): Promise<{
+export async function failOrRetryQueueItem(queueId: string, errorMessage: string, details: QueueAttemptDetails = {}): Promise<{
   status: "retrying" | "failed";
   attempts: number;
   nextRunAt: Date | null;
@@ -272,11 +283,17 @@ export async function failOrRetryQueueItem(queueId: string, errorMessage: string
     })
     .where(eq(jobQueue.id, queueId));
 
-  await recordAttempt(queueId, attempts, status, errorMessage);
+  await recordAttempt(queueId, attempts, status, errorMessage, {
+    jobId: current.jobId,
+    userId: current.userId,
+    willRetry: shouldRetry,
+    nextRunAt: nextRunAt?.toISOString() ?? null,
+    ...details,
+  });
   return { status, attempts, nextRunAt };
 }
 
-export async function markQueueFailed(queueId: string, errorMessage: string): Promise<void> {
+export async function markQueueFailed(queueId: string, errorMessage: string, details: QueueAttemptDetails = {}): Promise<void> {
   await ensureQueueTables();
 
   const current = await getQueueItemById(queueId);
@@ -294,7 +311,11 @@ export async function markQueueFailed(queueId: string, errorMessage: string): Pr
     })
     .where(eq(jobQueue.id, queueId));
 
-  await recordAttempt(queueId, current.attempts, "failed", errorMessage);
+  await recordAttempt(queueId, current.attempts, "failed", errorMessage, {
+    jobId: current.jobId,
+    userId: current.userId,
+    ...details,
+  });
 }
 
 export async function getLatestQueueForJob(jobId: string) {
@@ -325,6 +346,7 @@ async function recordAttempt(
   attemptNumber: number,
   status: "processing" | "completed" | "retrying" | "failed",
   errorMessage?: string,
+  details?: QueueAttemptDetails,
 ) {
   await ensureQueueTables();
 
@@ -333,6 +355,7 @@ async function recordAttempt(
     attemptNumber,
     status,
     errorMessage: errorMessage?.slice(0, 4000),
+    details,
   });
 }
 

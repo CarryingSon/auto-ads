@@ -1,6 +1,23 @@
 import { build as esbuild } from "esbuild";
-import { build as viteBuild } from "vite";
+import { build as viteBuild, createLogger } from "vite";
 import { rm, readFile } from "fs/promises";
+
+const viteLogger = createLogger();
+const POSTCSS_FROM_WARNING = "A PostCSS plugin did not pass the `from` option";
+
+function createBuildLogger() {
+  return {
+    ...viteLogger,
+    warn(message: string, options?: Parameters<typeof viteLogger.warn>[1]) {
+      if (message.includes(POSTCSS_FROM_WARNING)) return;
+      viteLogger.warn(message, options);
+    },
+    warnOnce(message: string, options?: Parameters<typeof viteLogger.warnOnce>[1]) {
+      if (message.includes(POSTCSS_FROM_WARNING)) return;
+      viteLogger.warnOnce(message, options);
+    },
+  };
+}
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -33,10 +50,12 @@ const allowlist = [
 ];
 
 async function buildAll() {
+  process.env.NODE_ENV ||= "production";
+
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
-  await viteBuild();
+  await viteBuild({ customLogger: createBuildLogger() });
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
