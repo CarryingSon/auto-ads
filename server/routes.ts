@@ -124,12 +124,12 @@ function resolveScopedSelectedPageId(
   if (!Array.isArray(pages) || pages.length === 0) {
     return { selectedPageId: null, autoSelected: false };
   }
+  if (preferredPageId && pages.some((p) => p?.id === preferredPageId)) {
+    return { selectedPageId: preferredPageId, autoSelected: false };
+  }
   const exactNameMatchPageId = findExactPageMatchForAdAccountName(pages, selectedAdAccountName);
   if (exactNameMatchPageId) {
     return { selectedPageId: exactNameMatchPageId, autoSelected: true };
-  }
-  if (preferredPageId && pages.some((p) => p?.id === preferredPageId)) {
-    return { selectedPageId: preferredPageId, autoSelected: false };
   }
   if (pages.length === 1) {
     const onlyPage = pages.find((p) => typeof p?.id === "string" && p.id.length > 0);
