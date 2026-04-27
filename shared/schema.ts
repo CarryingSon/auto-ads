@@ -152,6 +152,7 @@ export const jobDefaultsSchema = z.object({
   placements: z.enum(["AUTO", "MANUAL"]).optional().default("AUTO"),
   geoTargeting: z.array(z.string()).optional().default([]),
   geoSplitMarket: z.string().optional(),
+  dailySpendCap: z.number().optional(),
   ageMin: z.number().optional().default(18),
   ageMax: z.number().optional().default(65),
   pageId: z.string().optional(),

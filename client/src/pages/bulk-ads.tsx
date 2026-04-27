@@ -389,6 +389,13 @@ interface AdSetInfo {
   geoTargeting?: string[];
 }
 
+function getAdSetDailySpendCap(adset: AdSetInfo): number | undefined {
+  const value = adset.overrideSettings?.dailySpendCap;
+  if (value === null || value === undefined || value === "") return undefined;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
+}
+
 interface ImportResult {
   jobId: string;
   folderName: string;
@@ -1975,10 +1982,51 @@ export default function BulkAds() {
     },
     onSuccess: (_, variables) => {
       setAdSets((prev) =>
-        prev.map((a) => (a.id === variables.adsetId ? { ...a, ...variables.updates } : a))
+        prev.map((a) => {
+          if (a.id !== variables.adsetId) return a;
+          return {
+            ...a,
+            ...variables.updates,
+            overrideSettings: variables.updates.overrideSettings
+              ? { ...(a.overrideSettings || {}), ...variables.updates.overrideSettings }
+              : a.overrideSettings,
+          };
+        })
       );
     },
   });
+
+  const updateAdSetDailySpendCap = (adsetId: string, rawValue: string) => {
+    const trimmed = rawValue.trim();
+    const dailySpendCap = trimmed === "" ? null : Number(trimmed);
+
+    if (dailySpendCap !== null && (!Number.isFinite(dailySpendCap) || dailySpendCap < 0)) {
+      toast({
+        title: "Invalid max daily spend",
+        description: "Use a positive amount or leave it empty.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setAdSets((prev) =>
+      prev.map((adset) => {
+        if (adset.id !== adsetId) return adset;
+        const nextOverrideSettings = { ...(adset.overrideSettings || {}) };
+        if (dailySpendCap === null) {
+          delete nextOverrideSettings.dailySpendCap;
+        } else {
+          nextOverrideSettings.dailySpendCap = dailySpendCap;
+        }
+        return { ...adset, overrideSettings: nextOverrideSettings };
+      })
+    );
+
+    updateAdSetMutation.mutate({
+      adsetId,
+      updates: { overrideSettings: { dailySpendCap } as any },
+    });
+  };
 
   const updateDefaultsMutation = useMutation({
     mutationFn: async (settings: DefaultSettings) => {
@@ -3750,10 +3798,11 @@ export default function BulkAds() {
         <div className="space-y-2">
           {validAdSets.map((adset, idx) => {
             const isDisabled = disabledAdSetIds.has(adset.id);
+            const dailySpendCap = getAdSetDailySpendCap(adset);
             return (
               <div
                 key={adset.id}
-                className={`flex items-center justify-between border rounded-xl px-4 py-3 transition-opacity ${isDisabled ? "opacity-50" : ""}`}
+                className={`flex items-center justify-between gap-3 border rounded-xl px-4 py-3 transition-opacity ${isDisabled ? "opacity-50" : ""}`}
                 data-testid={`adset-row-${adset.id}`}
               >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -3772,6 +3821,27 @@ export default function BulkAds() {
                   <Badge variant="secondary" className="text-xs flex-shrink-0">
                     {(adset.videoCount || 0) + (adset.imageCount || 0)} creatives
                   </Badge>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Label
+                    htmlFor={`daily-spend-cap-${adset.id}`}
+                    className="text-[11px] text-muted-foreground whitespace-nowrap"
+                  >
+                    Max daily spend
+                  </Label>
+                  <Input
+                    id={`daily-spend-cap-${adset.id}`}
+                    data-testid={`input-adset-daily-spend-cap-${adset.id}`}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    placeholder="No cap"
+                    disabled={isDisabled}
+                    value={dailySpendCap ?? ""}
+                    onChange={(event) => updateAdSetDailySpendCap(adset.id, event.target.value)}
+                    className="h-9 w-28 text-sm"
+                  />
                 </div>
                 <Switch
                   data-testid={`switch-adset-enabled-${adset.id}`}

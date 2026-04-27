@@ -1666,7 +1666,7 @@ export class MetaAdsApi {
       body.append('daily_min_spend_target', (params.dailyMinSpendTarget * 100).toString());
     }
     if (params.dailySpendCap) {
-      body.append('daily_spend_cap', (params.dailySpendCap * 100).toString());
+      body.append('daily_spend_cap', Math.round(params.dailySpendCap * 100).toString());
     }
     if (params.lifetimeSpendCap) {
       body.append('lifetime_spend_cap', (params.lifetimeSpendCap * 100).toString());

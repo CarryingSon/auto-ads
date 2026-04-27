@@ -627,6 +627,16 @@ const dryRunRequestSchema = z.object({
   disabledAdSetIds: z.array(z.string()).optional().default([]),
 });
 
+const adsetOverrideSettingsPatchSchema = z.object({
+  dailySpendCap: z.number().finite().min(0).nullable().optional(),
+}).passthrough();
+
+const updateAdsetPatchSchema = z.object({
+  name: z.string().optional(),
+  useDefaults: z.boolean().optional(),
+  overrideSettings: adsetOverrideSettingsPatchSchema.optional(),
+});
+
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: {
@@ -1671,6 +1681,34 @@ export async function registerRoutes(
       const assets = await storage.getAssetsByJob(jobId);
       const extractedAds = await storage.getExtractedAdsByJob(jobId);
 
+      for (const adset of jobAdsets) {
+        const override = adset.overrideSettings as any;
+        const effectiveDailySpendCap = override?.dailySpendCap ?? adSetSettings.dailySpendCap;
+        if (
+          effectiveDailySpendCap !== undefined &&
+          effectiveDailySpendCap !== null &&
+          (!Number.isFinite(Number(effectiveDailySpendCap)) || Number(effectiveDailySpendCap) < 0)
+        ) {
+          return res.status(400).json({
+            error: `Ad set "${adset.name}" has an invalid max daily spend.`,
+            details: ["Use a positive amount or leave max daily spend empty."],
+          });
+        }
+        if (
+          adSetSettings.dailyMinSpendTarget !== undefined &&
+          effectiveDailySpendCap !== undefined &&
+          effectiveDailySpendCap !== null &&
+          Number(adSetSettings.dailyMinSpendTarget) > Number(effectiveDailySpendCap)
+        ) {
+          return res.status(400).json({
+            error: `Ad set "${adset.name}" has a daily minimum spend greater than its max daily spend.`,
+            details: [
+              `Daily minimum spend (${adSetSettings.dailyMinSpendTarget}) cannot exceed max daily spend (${effectiveDailySpendCap}).`,
+            ],
+          });
+        }
+      }
+
       // Resolve Facebook Page for current ad account (avoid cross-account page mismatch)
       let pageId: string | undefined;
       let pageName: string | undefined;
@@ -2431,6 +2469,10 @@ export async function registerRoutes(
           // Do NOT set ad set budget if existing campaign has CBO (campaign-level budget)
           const isNewCampaign = !campaignId; // If no campaignId was provided, we created a new one
           const needsAdSetBudget = isNewCampaign || !campaignSettings.isCBO;
+          const effectiveDailySpendCap =
+            campaignSettings.isCBO && campaignSettings.budgetType === "DAILY"
+              ? adsetOverride?.dailySpendCap ?? adSetSettings.dailySpendCap
+              : undefined;
           
           // Resolve Instagram account for the selected Facebook Page.
           log(`Finding Instagram account for Page ${pageId}...`);
@@ -2569,7 +2611,7 @@ export async function registerRoutes(
             billingEvent: adSetSettings.billingEvent || "IMPRESSIONS",
             optimizationGoal,
             dailyMinSpendTarget: adSetSettings.dailyMinSpendTarget,
-            dailySpendCap: adSetSettings.dailySpendCap,
+            dailySpendCap: effectiveDailySpendCap,
             lifetimeSpendCap: adSetSettings.lifetimeSpendCap,
             targeting: Object.keys(targeting).length > 0 ? targeting : undefined,
             promotedObject,
@@ -4780,12 +4822,26 @@ export async function registerRoutes(
       if (!ownedAdset) {
         return res.status(404).json({ error: "Ad set not found" });
       }
-      const { name, useDefaults, overrideSettings } = req.body;
+      const parseResult = updateAdsetPatchSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          error: parseResult.error.errors[0]?.message || "Invalid ad set update",
+        });
+      }
+
+      const { name, useDefaults, overrideSettings } = parseResult.data;
+      const mergedOverrideSettings: Record<string, any> = {
+        ...((ownedAdset.overrideSettings as Record<string, any> | null) || {}),
+        ...(overrideSettings || {}),
+      };
+      if (overrideSettings && "dailySpendCap" in overrideSettings && overrideSettings.dailySpendCap === null) {
+        delete mergedOverrideSettings.dailySpendCap;
+      }
       
       const updated = await storage.updateAdset(adsetId, {
         name,
         useDefaults,
-        overrideSettings: overrideSettings || undefined,
+        overrideSettings: overrideSettings ? mergedOverrideSettings : undefined,
       });
       
       res.json(updated);
