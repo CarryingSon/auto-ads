@@ -351,6 +351,7 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     // Required scopes for Meta Ads + Instagram account linking:
     // - public_profile, email: Basic identity
     // - pages_show_list: For page selection
+    // - pages_manage_metadata: For reading Page metadata and connected Page integrations
     // - pages_read_engagement: For promote_pages API and page insights
     // - ads_management, ads_read: For creating and reading ads
     // - instagram_basic: For linked Instagram account metadata
@@ -358,6 +359,7 @@ router.get("/meta/start", async (req: Request, res: Response) => {
       "public_profile",
       "email",
       "pages_show_list",
+      "pages_manage_metadata",
       "pages_read_engagement",
       "ads_management",
       "ads_read",
@@ -372,6 +374,7 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     oauthUrl.searchParams.set("state", state);
     oauthUrl.searchParams.set("scope", scopeRaw);
     oauthUrl.searchParams.set("response_type", "code");
+    oauthUrl.searchParams.set("auth_type", "rerequest");
     // Force full-page Meta OAuth UI (not embedded dialog) to avoid scroll lock
     // issues on long Instagram asset lists.
     oauthUrl.searchParams.set("display", isPopup ? "popup" : "page");
@@ -801,6 +804,7 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       "public_profile",
       "email",
       "pages_show_list",
+      "pages_manage_metadata",
       "pages_read_engagement",
       "ads_management",
       "ads_read",
@@ -1343,6 +1347,17 @@ router.get("/status", async (req: Request, res: Response) => {
       .filter((c) => c.provider === "google")
       .sort(sortByMostRecent)[0];
     
+    const requiredMetaScopes = [
+      "pages_show_list",
+      "pages_manage_metadata",
+      "pages_read_engagement",
+      "ads_management",
+      "ads_read",
+      "instagram_basic",
+    ];
+    const metaScopes = Array.isArray(metaConnection?.scopes) ? metaConnection.scopes : [];
+    const missingMetaScopes = requiredMetaScopes.filter((scope) => !metaScopes.includes(scope));
+
     res.json({
       meta: metaConnection ? {
         status: metaConnection.status,
@@ -1350,6 +1365,8 @@ router.get("/status", async (req: Request, res: Response) => {
         accountEmail: metaConnection.accountEmail,
         connectedAt: metaConnection.connectedAt,
         lastTestedAt: metaConnection.lastTestedAt,
+        scopes: metaScopes,
+        missingScopes: missingMetaScopes,
         adAccounts: assets[0]?.adAccountsJson || [],
         pages: sanitizePagesForClient(assets[0]?.pagesJson || []),
         selectedAdAccountId: assets[0]?.selectedAdAccountId,

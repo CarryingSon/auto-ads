@@ -18,6 +18,8 @@ interface AuthStatus {
     accountEmail?: string;
     connectedAt?: string;
     lastTestedAt?: string;
+    scopes?: string[];
+    missingScopes?: string[];
     adAccounts?: Array<{ id: string; name: string; account_status: number }>;
     pages?: Array<{ id: string; name: string }>;
     selectedAdAccountId?: string;
@@ -104,6 +106,8 @@ export default function Connections() {
   const metaConnected = authStatus?.meta?.status === "connected";
   const metaExpired = authStatus?.meta?.status === "expired";
   const usableMetaAdAccounts = authStatus?.meta?.adAccounts || [];
+  const missingMetaScopes = authStatus?.meta?.missingScopes || [];
+  const missingPagePermissions = missingMetaScopes.some((scope) => scope.startsWith("pages_"));
   const [selectedPendingAdAccountIds, setSelectedPendingAdAccountIds] = useState<string[]>([]);
 
   const {
@@ -355,6 +359,12 @@ export default function Connections() {
                   ) : null}
                   Save selected ad accounts
                 </Button>
+              </div>
+            )}
+
+            {metaConnected && missingPagePermissions && (
+              <div className="rounded-md border border-amber-300/60 bg-amber-50/80 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+                Meta is connected, but this token is missing Page permissions ({missingMetaScopes.join(", ")}). Reconnect Meta and approve all requested Pages.
               </div>
             )}
 
