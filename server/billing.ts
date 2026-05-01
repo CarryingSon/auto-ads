@@ -440,8 +440,8 @@ export async function syncSubscriptionFromStripeEvent(
   });
 
   let userId =
-    subscription.metadata?.userId ||
     existing?.userId ||
+    subscription.metadata?.userId ||
     (await resolveStripeCustomerUserId(stripeCustomerId));
 
   if (!userId) {
@@ -508,8 +508,8 @@ export async function recordInvoicePaymentFromStripeEvent(
   });
 
   const userId =
-    invoice.metadata?.userId ||
     mapped?.userId ||
+    invoice.metadata?.userId ||
     (await resolveStripeCustomerUserId(stripeCustomerId));
 
   if (!userId) {

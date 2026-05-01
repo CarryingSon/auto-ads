@@ -16,8 +16,7 @@ export function LoginGate({ children }: LoginGateProps) {
   const [location, setLocation] = useLocation();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const isSelectAdAccountRoute = location === "/select-ad-account";
-  const isConnectionsRoute = location === "/connections";
-  const isPendingSelectionBypassRoute = isSelectAdAccountRoute || isConnectionsRoute;
+  const isPendingSelectionBypassRoute = isSelectAdAccountRoute;
 
   const { data: sidebarGateData, isLoading: sidebarGateLoading } = useQuery<SidebarGateData>({
     queryKey: ["/api/sidebar-data"],

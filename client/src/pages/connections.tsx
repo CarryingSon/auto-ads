@@ -1,14 +1,15 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { CheckCircle2, XCircle, RefreshCw, Unplug, Plug, Info, AlertTriangle } from "lucide-react";
+import { Building2, CheckCircle2, XCircle, RefreshCw, Unplug, Plug, Info, AlertTriangle, ShieldCheck } from "lucide-react";
 import { SiFacebook } from "react-icons/si";
 
 interface AuthStatus {
@@ -52,6 +53,16 @@ interface PendingAdAccountsResponse {
   accounts: PendingAdAccount[];
 }
 
+function getPendingAccountStatusBadge(accountStatus: number) {
+  if (accountStatus === 1) {
+    return { label: "ACTIVE", className: "border-emerald-200 bg-emerald-100 text-emerald-700" };
+  }
+  if (accountStatus === 3) {
+    return { label: "UNSETTLED", className: "border-orange-200 bg-orange-100 text-orange-700" };
+  }
+  return { label: "UNKNOWN", className: "border-slate-200 bg-slate-100 text-slate-600" };
+}
+
 export default function Connections() {
   const { toast } = useToast();
   const search = useSearch();
@@ -69,7 +80,8 @@ export default function Connections() {
     if (metaResult === "connected") {
       toast({ title: "Meta connected", description: "Your Facebook account has been connected successfully." });
       refetch();
-      setLocation("/connections", { replace: true });
+      // Let LoginGate route pending-account users to /select-ad-account.
+      setLocation("/dashboard", { replace: true });
     } else if (metaResult === "error") {
       toast({ title: "Meta connection failed", description: message || "Something went wrong.", variant: "destructive" });
       setLocation("/connections", { replace: true });
@@ -126,8 +138,21 @@ export default function Connections() {
   const pendingAdAccounts = pendingAdAccountsData?.accounts || [];
   const selectablePendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified !== false);
   const blockedPendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified === false);
+  const selectablePendingIds = useMemo(
+    () => selectablePendingAdAccounts.map((acc) => acc.id),
+    [selectablePendingAdAccounts],
+  );
+  const allPendingSelected =
+    selectablePendingIds.length > 0 &&
+    selectablePendingIds.every((id) => selectedPendingAdAccountIds.includes(id));
   const metaHasPendingSelection = metaConnected && usableMetaAdAccounts.length === 0 && selectablePendingAdAccounts.length > 0;
   const metaNeedsAdAccount = metaConnected && usableMetaAdAccounts.length === 0 && selectablePendingAdAccounts.length === 0;
+
+  useEffect(() => {
+    if (metaHasPendingSelection) {
+      setLocation("/select-ad-account", { replace: true });
+    }
+  }, [metaHasPendingSelection, setLocation]);
 
   useEffect(() => {
     if (!metaHasPendingSelection) {
@@ -214,6 +239,10 @@ export default function Connections() {
         ? prev.filter((id) => id !== adAccountId)
         : [...prev, adAccountId],
     );
+  };
+
+  const toggleAllPendingAdAccounts = () => {
+    setSelectedPendingAdAccountIds(allPendingSelected ? [] : selectablePendingIds);
   };
 
   const pageOptions = pagesData?.data || [];
@@ -309,56 +338,8 @@ export default function Connections() {
             )}
 
             {metaHasPendingSelection && (
-              <div className="space-y-3 rounded-md border border-amber-300/60 bg-amber-50/80 p-3 dark:border-amber-500/50 dark:bg-amber-500/10">
-                <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                  Choose which ad accounts should be visible in the app.
-                </p>
-                <div className="space-y-2">
-                  {selectablePendingAdAccounts.map((acc) => {
-                    const checked = selectedPendingAdAccountIds.includes(acc.id);
-                    return (
-                      <label
-                        key={acc.id}
-                        className="flex items-start gap-2 rounded-md border border-amber-200/70 bg-white/80 p-2 text-sm dark:border-amber-500/30 dark:bg-black/10"
-                      >
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 h-4 w-4"
-                          checked={checked}
-                          onChange={() => togglePendingAdAccountSelection(acc.id)}
-                        />
-                        <span className="flex-1">
-                          <span className="block font-medium text-amber-900 dark:text-amber-100">{acc.name || acc.id}</span>
-                          <span className="block text-xs text-amber-800/80 dark:text-amber-200/80">
-                            {acc.id}
-                            {typeof acc.promotable_pages_count === "number" ? ` · ${acc.promotable_pages_count} promotable page(s)` : ""}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-                {blockedPendingAdAccounts.length > 0 && (
-                  <div className="text-xs text-amber-900/80 dark:text-amber-200/80">
-                    {blockedPendingAdAccounts.length} account(s) are unavailable and cannot be selected:
-                    {blockedPendingAdAccounts.map((acc) => (
-                      <div key={`blocked-${acc.id}`}>
-                        {acc.name || acc.id} ({describePendingAccessIssue(acc.access_issue)})
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Button
-                  size="sm"
-                  onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
-                  disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
-                  data-testid="button-confirm-pending-ad-accounts"
-                >
-                  {confirmPendingAccountsMutation.isPending ? (
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  ) : null}
-                  Save selected ad accounts
-                </Button>
+              <div className="rounded-md border border-amber-300/60 bg-amber-50/80 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+                New ad accounts require confirmation. Use the selection window to continue.
               </div>
             )}
 
@@ -487,6 +468,107 @@ export default function Connections() {
         </Card>
 
       </div>
+
+      <Dialog open={metaHasPendingSelection}>
+        <DialogContent className="sm:max-w-[840px] rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_28px_90px_rgba(60,78,108,0.22)] backdrop-blur-xl sm:p-8 [&>button]:hidden">
+          <DialogHeader className="text-left">
+            <DialogTitle className="text-3xl font-bold tracking-tight text-[#151f3b] sm:text-4xl">
+              Select Ad Accounts
+            </DialogTitle>
+            <DialogDescription className="mt-2 text-base leading-snug text-[#5f6f8f] sm:text-lg">
+              Select which ad accounts you want to manage with Auto-ads. You can select multiple accounts for bulk launching.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-2 rounded-2xl border border-emerald-200/80 bg-emerald-50/55 px-4 py-3">
+            <div className="flex items-start gap-3 text-emerald-800">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+              <p className="text-sm sm:text-[15px]">
+                <span className="font-semibold">Your data is safe.</span> We only use features for adding ads and reading data for campaign optimization.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <button
+              type="button"
+              onClick={toggleAllPendingAdAccounts}
+              className="flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:bg-slate-100"
+            >
+              <input
+                type="checkbox"
+                checked={allPendingSelected}
+                readOnly
+                className="h-7 w-7 rounded-md border-slate-300 accent-[#5e7ec8]"
+              />
+              <span className="text-2xl leading-none font-medium text-[#24304a]">Select all accounts</span>
+            </button>
+
+            <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
+              {selectablePendingAdAccounts.map((acc) => {
+                const checked = selectedPendingAdAccountIds.includes(acc.id);
+                const status = getPendingAccountStatusBadge(Number(acc.account_status));
+                return (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    onClick={() => togglePendingAdAccountSelection(acc.id)}
+                    className="flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:bg-slate-100"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      readOnly
+                      className="h-7 w-7 rounded-md border-slate-300 accent-[#5e7ec8]"
+                    />
+
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-[#7587a8]">
+                      <Building2 className="h-6 w-6" />
+                    </span>
+
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[22px] leading-none font-semibold text-[#1d2845] sm:text-[26px]">
+                        {acc.name || acc.id}
+                      </span>
+                      <span className="mt-2 block truncate text-sm leading-none text-[#8a98b5] sm:text-lg">
+                        {acc.id}
+                      </span>
+                    </span>
+
+                    <span className={`rounded-full border px-4 py-1.5 text-xs font-semibold tracking-wide sm:text-sm ${status.className}`}>
+                      {status.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {blockedPendingAdAccounts.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {blockedPendingAdAccounts.length} account(s) are unavailable:
+                {blockedPendingAdAccounts.map((acc) => (
+                  <div key={`blocked-${acc.id}`}>
+                    {acc.name || acc.id} ({describePendingAccessIssue(acc.access_issue)})
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Button
+              onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
+              disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
+              className="mt-4 h-14 w-full rounded-2xl border border-[#9cb3df] bg-[#c4d1eb]/95 text-2xl font-semibold text-white shadow-[0_10px_24px_rgba(84,112,166,0.22)] hover:bg-[#b8c7e6] disabled:opacity-100"
+              data-testid="button-confirm-pending-ad-accounts"
+            >
+              {confirmPendingAccountsMutation.isPending ? (
+                <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
+              ) : null}
+              Confirm selection ({selectedPendingAdAccountIds.length})
+              <span className="material-symbols-outlined ml-1 text-xl">chevron_right</span>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Card className="border border-slate-200/70 bg-white/65 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.6)] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/40">
         <CardContent className="py-6">

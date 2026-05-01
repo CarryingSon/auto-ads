@@ -301,9 +301,14 @@ router.get("/meta/start", async (req: Request, res: Response) => {
 
     const state = crypto.randomBytes(32).toString('hex');
     traceId = createMetaTraceId(state);
-    // For Meta login, we don't have a userId yet - we'll get it from the callback
-    // Store a placeholder that will be replaced with the real Meta user ID after login
-    const pendingUserId = "pending_" + crypto.randomBytes(16).toString('hex');
+    // For first-time Meta login, we don't have a local app userId yet and will
+    // fall back to the Meta user id in the callback. For reconnects, preserve
+    // the already-authenticated app user so billing/settings survive a changed
+    // Meta identity.
+    const sessionUserId = (req.session as any)?.userId;
+    const pendingUserId = typeof sessionUserId === "string" && sessionUserId
+      ? sessionUserId
+      : "pending_" + crypto.randomBytes(16).toString('hex');
     
     const isPopup = req.query.popup === "1";
     metaLog(traceId, "START request received", {
@@ -341,7 +346,8 @@ router.get("/meta/start", async (req: Request, res: Response) => {
       statePrefix: maskValue(state),
       popupStatePrefix: isPopup ? maskValue(`popup:${state}`) : null,
       expiresAt: expiresAt.toISOString(),
-      pendingUserId,
+      stateUserId: pendingUserId,
+      isReconnect: Boolean(sessionUserId),
     });
     
     // Always use canonical app domain for OAuth redirect URI
@@ -788,8 +794,25 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
     const businesses: Array<{id: string, name: string}> = [];
     const businessOwnedPages: Array<{business_id: string, pages: Array<{id: string, name: string}>}> = [];
     
-    // Use Meta user ID as the userId for this user
-    const userId = meData.id;
+    const stateUserId = typeof savedState?.userId === "string" ? savedState.userId : null;
+    const sessionUserId = typeof (req.session as any)?.userId === "string"
+      ? (req.session as any).userId
+      : null;
+    const stateHasExistingAppUser = Boolean(stateUserId && !stateUserId.startsWith("pending_"));
+
+    // First login uses Meta's id as the local app id. Reconnects must keep the
+    // existing app id; otherwise plan/settings rows appear to reset to a new
+    // free user whenever Meta returns a different identity.
+    const userId = stateHasExistingAppUser
+      ? stateUserId
+      : sessionUserId || meData.id;
+
+    metaLog(traceId, "Resolved app user for Meta callback", {
+      userId,
+      metaUserId: meData.id,
+      stateHadExistingAppUser: stateHasExistingAppUser,
+      hadSessionUser: Boolean(sessionUserId),
+    });
     
     // Save userId to session - this is the login!
     (req.session as any).userId = userId;

@@ -918,12 +918,25 @@ export class MetaAdsApi {
       { fields: "id,name,status,effective_status" }
     );
 
+    const statsStatuses = [
+      "ACTIVE",
+      "PAUSED",
+      "IN_PROCESS",
+      "WITH_ISSUES",
+      "PENDING_REVIEW",
+      "DISAPPROVED",
+      "PREAPPROVED",
+      "PENDING_BILLING_INFO",
+      "CAMPAIGN_PAUSED",
+      "ADSET_PAUSED",
+    ];
+
     const adSetsData = await this.apiRequest<{ data: any[] }>(
       `${campaignId}/adsets`,
       { 
         fields: "id,name,status,effective_status,created_time", 
         limit: "100",
-        filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }])
+        filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: statsStatuses }])
       }
     );
 
@@ -934,7 +947,7 @@ export class MetaAdsApi {
       { 
         fields: "id,name,status,effective_status,adset_id", 
         limit: "500",
-        filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }])
+        filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: statsStatuses }])
       }
     );
 

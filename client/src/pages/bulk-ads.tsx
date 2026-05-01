@@ -3408,7 +3408,7 @@ export default function BulkAds() {
                         <Badge variant="outline" className="text-xs">Primary ({adset.parsedCopy.primaryTexts.length})</Badge>
                         <div className="space-y-1 pl-2 border-l-2 border-muted">
                           {adset.parsedCopy.primaryTexts.map((text, idx) => (
-                            <p key={idx} className="text-muted-foreground text-sm whitespace-pre-wrap break-words">{idx + 1}. {text}</p>
+                            <p key={idx} className="text-muted-foreground text-sm line-clamp-2">{idx + 1}. {text}</p>
                           ))}
                         </div>
                       </div>
