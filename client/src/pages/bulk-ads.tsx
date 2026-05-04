@@ -389,8 +389,8 @@ interface AdSetInfo {
   geoTargeting?: string[];
 }
 
-function getAdSetDailySpendCap(adset: AdSetInfo): number | undefined {
-  const value = adset.overrideSettings?.dailySpendCap;
+function getAdSetDailyMinSpendTarget(adset: AdSetInfo): number | undefined {
+  const value = adset.overrideSettings?.dailyMinSpendTarget;
   if (value === null || value === undefined || value === "") return undefined;
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
@@ -1996,13 +1996,13 @@ export default function BulkAds() {
     },
   });
 
-  const updateAdSetDailySpendCap = (adsetId: string, rawValue: string) => {
+  const updateAdSetDailyMinSpendTarget = (adsetId: string, rawValue: string) => {
     const trimmed = rawValue.trim();
-    const dailySpendCap = trimmed === "" ? null : Number(trimmed);
+    const dailyMinSpendTarget = trimmed === "" ? null : Number(trimmed);
 
-    if (dailySpendCap !== null && (!Number.isFinite(dailySpendCap) || dailySpendCap < 0)) {
+    if (dailyMinSpendTarget !== null && (!Number.isFinite(dailyMinSpendTarget) || dailyMinSpendTarget < 0)) {
       toast({
-        title: "Invalid max daily spend",
+        title: "Invalid min daily spend",
         description: "Use a positive amount or leave it empty.",
         variant: "destructive",
       });
@@ -2013,18 +2013,19 @@ export default function BulkAds() {
       prev.map((adset) => {
         if (adset.id !== adsetId) return adset;
         const nextOverrideSettings = { ...(adset.overrideSettings || {}) };
-        if (dailySpendCap === null) {
-          delete nextOverrideSettings.dailySpendCap;
+        if (dailyMinSpendTarget === null) {
+          delete nextOverrideSettings.dailyMinSpendTarget;
         } else {
-          nextOverrideSettings.dailySpendCap = dailySpendCap;
+          nextOverrideSettings.dailyMinSpendTarget = dailyMinSpendTarget;
         }
+        delete nextOverrideSettings.dailySpendCap;
         return { ...adset, overrideSettings: nextOverrideSettings };
       })
     );
 
     updateAdSetMutation.mutate({
       adsetId,
-      updates: { overrideSettings: { dailySpendCap } as any },
+      updates: { overrideSettings: { dailyMinSpendTarget } as any },
     });
   };
 
@@ -3798,7 +3799,7 @@ export default function BulkAds() {
         <div className="space-y-2">
           {validAdSets.map((adset, idx) => {
             const isDisabled = disabledAdSetIds.has(adset.id);
-            const dailySpendCap = getAdSetDailySpendCap(adset);
+            const dailyMinSpendTarget = getAdSetDailyMinSpendTarget(adset);
             return (
               <div
                 key={adset.id}
@@ -3824,22 +3825,22 @@ export default function BulkAds() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <Label
-                    htmlFor={`daily-spend-cap-${adset.id}`}
+                    htmlFor={`daily-min-spend-target-${adset.id}`}
                     className="text-[11px] text-muted-foreground whitespace-nowrap"
                   >
-                    Max daily spend
+                    Min daily spend
                   </Label>
                   <Input
-                    id={`daily-spend-cap-${adset.id}`}
-                    data-testid={`input-adset-daily-spend-cap-${adset.id}`}
+                    id={`daily-min-spend-target-${adset.id}`}
+                    data-testid={`input-adset-daily-min-spend-target-${adset.id}`}
                     type="number"
                     min="0"
                     step="0.01"
                     inputMode="decimal"
-                    placeholder="No cap"
+                    placeholder="No min"
                     disabled={isDisabled}
-                    value={dailySpendCap ?? ""}
-                    onChange={(event) => updateAdSetDailySpendCap(adset.id, event.target.value)}
+                    value={dailyMinSpendTarget ?? ""}
+                    onChange={(event) => updateAdSetDailyMinSpendTarget(adset.id, event.target.value)}
                     className="h-9 w-28 text-sm"
                   />
                 </div>

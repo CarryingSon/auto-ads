@@ -628,7 +628,7 @@ const dryRunRequestSchema = z.object({
 });
 
 const adsetOverrideSettingsPatchSchema = z.object({
-  dailySpendCap: z.number().finite().min(0).nullable().optional(),
+  dailyMinSpendTarget: z.number().finite().min(0).nullable().optional(),
 }).passthrough();
 
 const updateAdsetPatchSchema = z.object({
@@ -1683,27 +1683,27 @@ export async function registerRoutes(
 
       for (const adset of jobAdsets) {
         const override = adset.overrideSettings as any;
-        const effectiveDailySpendCap = override?.dailySpendCap ?? adSetSettings.dailySpendCap;
+        const effectiveDailyMinSpendTarget = override?.dailyMinSpendTarget ?? adSetSettings.dailyMinSpendTarget;
         if (
-          effectiveDailySpendCap !== undefined &&
-          effectiveDailySpendCap !== null &&
-          (!Number.isFinite(Number(effectiveDailySpendCap)) || Number(effectiveDailySpendCap) < 0)
+          effectiveDailyMinSpendTarget !== undefined &&
+          effectiveDailyMinSpendTarget !== null &&
+          (!Number.isFinite(Number(effectiveDailyMinSpendTarget)) || Number(effectiveDailyMinSpendTarget) < 0)
         ) {
           return res.status(400).json({
-            error: `Ad set "${adset.name}" has an invalid max daily spend.`,
-            details: ["Use a positive amount or leave max daily spend empty."],
+            error: `Ad set "${adset.name}" has an invalid min daily spend.`,
+            details: ["Use a positive amount or leave min daily spend empty."],
           });
         }
         if (
-          adSetSettings.dailyMinSpendTarget !== undefined &&
-          effectiveDailySpendCap !== undefined &&
-          effectiveDailySpendCap !== null &&
-          Number(adSetSettings.dailyMinSpendTarget) > Number(effectiveDailySpendCap)
+          adSetSettings.dailySpendCap !== undefined &&
+          effectiveDailyMinSpendTarget !== undefined &&
+          effectiveDailyMinSpendTarget !== null &&
+          Number(effectiveDailyMinSpendTarget) > Number(adSetSettings.dailySpendCap)
         ) {
           return res.status(400).json({
-            error: `Ad set "${adset.name}" has a daily minimum spend greater than its max daily spend.`,
+            error: `Ad set "${adset.name}" has a min daily spend greater than the account daily spend cap.`,
             details: [
-              `Daily minimum spend (${adSetSettings.dailyMinSpendTarget}) cannot exceed max daily spend (${effectiveDailySpendCap}).`,
+              `Daily minimum spend (${effectiveDailyMinSpendTarget}) cannot exceed daily spend cap (${adSetSettings.dailySpendCap}).`,
             ],
           });
         }
@@ -2469,9 +2469,9 @@ export async function registerRoutes(
           // Do NOT set ad set budget if existing campaign has CBO (campaign-level budget)
           const isNewCampaign = !campaignId; // If no campaignId was provided, we created a new one
           const needsAdSetBudget = isNewCampaign || !campaignSettings.isCBO;
-          const effectiveDailySpendCap =
+          const effectiveDailyMinSpendTarget =
             campaignSettings.isCBO && campaignSettings.budgetType === "DAILY"
-              ? adsetOverride?.dailySpendCap ?? adSetSettings.dailySpendCap
+              ? adsetOverride?.dailyMinSpendTarget ?? adSetSettings.dailyMinSpendTarget
               : undefined;
           
           // Resolve Instagram account for the selected Facebook Page.
@@ -2610,8 +2610,8 @@ export async function registerRoutes(
             endTime,
             billingEvent: adSetSettings.billingEvent || "IMPRESSIONS",
             optimizationGoal,
-            dailyMinSpendTarget: adSetSettings.dailyMinSpendTarget,
-            dailySpendCap: effectiveDailySpendCap,
+            dailyMinSpendTarget: effectiveDailyMinSpendTarget,
+            dailySpendCap: adSetSettings.dailySpendCap,
             lifetimeSpendCap: adSetSettings.lifetimeSpendCap,
             targeting: Object.keys(targeting).length > 0 ? targeting : undefined,
             promotedObject,
@@ -4834,7 +4834,10 @@ export async function registerRoutes(
         ...((ownedAdset.overrideSettings as Record<string, any> | null) || {}),
         ...(overrideSettings || {}),
       };
-      if (overrideSettings && "dailySpendCap" in overrideSettings && overrideSettings.dailySpendCap === null) {
+      if (overrideSettings && "dailyMinSpendTarget" in overrideSettings && overrideSettings.dailyMinSpendTarget === null) {
+        delete mergedOverrideSettings.dailyMinSpendTarget;
+      }
+      if (overrideSettings && "dailyMinSpendTarget" in overrideSettings) {
         delete mergedOverrideSettings.dailySpendCap;
       }
       
