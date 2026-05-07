@@ -227,6 +227,47 @@ export async function claimLaunchQueueItems(workerId: string, limit = 1): Promis
   return claimedRows;
 }
 
+export async function claimLaunchQueueItemById(workerId: string, queueId: string): Promise<JobQueue | null> {
+  await ensureQueueTables();
+
+  const rawResult = await db.execute<{ id: string }>(sql`
+    UPDATE job_queue AS q
+    SET
+      status = 'processing',
+      attempts = q.attempts + 1,
+      locked_by = ${workerId},
+      locked_until = NOW() + (${LOCK_WINDOW_MINUTES} * INTERVAL '1 minute'),
+      started_at = COALESCE(q.started_at, NOW()),
+      updated_at = NOW()
+    WHERE q.id = ${queueId}
+      AND q.queue_type = 'launch'
+      AND q.status IN ('queued', 'retrying')
+      AND q.next_run_at <= NOW()
+      AND (q.locked_until IS NULL OR q.locked_until < NOW())
+    RETURNING q.id;
+  `);
+
+  const claimedId = rawResult.rows[0]?.id;
+  if (!claimedId) {
+    return null;
+  }
+
+  const row = await getQueueItemById(claimedId);
+  if (!row) {
+    return null;
+  }
+
+  await recordAttempt(row.id, row.attempts, "processing", undefined, {
+    jobId: row.jobId,
+    userId: row.userId,
+    workerId,
+    lockedUntil: row.lockedUntil?.toISOString?.() ?? row.lockedUntil,
+    claimMode: "queue_id",
+  });
+
+  return row;
+}
+
 export async function completeQueueItem(queueId: string, details: QueueAttemptDetails = {}): Promise<void> {
   await ensureQueueTables();
 

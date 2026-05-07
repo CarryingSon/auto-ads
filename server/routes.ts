@@ -30,6 +30,7 @@ import {
   enqueueLaunchJob,
   enqueueLaunchJobWithMonthlyQuotaGuard,
   claimLaunchQueueItems,
+  claimLaunchQueueItemById,
   completeQueueItem,
   failOrRetryQueueItem,
   getLatestQueueForJob,
@@ -2017,15 +2018,18 @@ export async function registerRoutes(
 
       if (cronSecret && host) {
         workerTrigger = "requested";
-        const workerUrl = `${protocol}://${host}/api/workers/launch?limit=1`;
+        const workerUrl = `${protocol}://${host}/api/workers/launch?queueId=${encodeURIComponent(queueItem.id)}`;
         void fetch(workerUrl, {
           method: "POST",
           headers: {
             "x-cron-secret": cronSecret,
           },
         })
-          .then((workerResponse) => {
-            console.log(`[Launch] Immediate worker trigger for job ${jobId}: ${workerResponse.status}`);
+          .then(async (workerResponse) => {
+            const responseText = await workerResponse.text().catch(() => "");
+            console.log(
+              `[Launch] Immediate worker trigger for job ${jobId} queue ${queueItem.id}: ${workerResponse.status} ${responseText}`,
+            );
           })
           .catch((triggerError) => {
             console.error(`[Launch] Failed to trigger worker for job ${jobId}:`, triggerError);
@@ -2095,15 +2099,28 @@ export async function registerRoutes(
         console.log(`[Worker] Triggered by Vercel Cron schedule: ${vercelCron}`);
       }
 
+      const requestedQueueId = typeof req.query.queueId === "string" ? req.query.queueId.trim() : "";
       const requestedLimit = Number(req.query.limit || 1);
       const limit = Number.isFinite(requestedLimit)
         ? Math.min(Math.max(1, Math.floor(requestedLimit)), 3)
         : 1;
       const workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const claimed = await claimLaunchQueueItems(workerId, limit);
+      const claimedQueueItem = requestedQueueId
+        ? await claimLaunchQueueItemById(workerId, requestedQueueId)
+        : null;
+      const claimed = requestedQueueId
+        ? (claimedQueueItem ? [claimedQueueItem] : [])
+        : await claimLaunchQueueItems(workerId, limit);
 
       if (claimed.length === 0) {
-        return res.json({ ok: true, claimed: 0, completed: 0, retried: 0, failed: 0 });
+        return res.json({
+          ok: true,
+          claimed: 0,
+          completed: 0,
+          retried: 0,
+          failed: 0,
+          queueId: requestedQueueId || undefined,
+        });
       }
 
       let completed = 0;
@@ -2221,6 +2238,7 @@ export async function registerRoutes(
         completed,
         retried,
         failed,
+        queueId: requestedQueueId || undefined,
       });
     } catch (error) {
       console.error("[Worker] Launch worker failed:", error);
