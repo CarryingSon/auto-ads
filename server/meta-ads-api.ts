@@ -3127,7 +3127,8 @@ export class MetaAdsApi {
       console.log('[MetaAdsApi] asset_feed_spec:', JSON.stringify(assetFeedSpec, null, 2));
       const sendCreativeRequest = async (
         featuresSpec: Record<string, { enroll_status: "OPT_IN" | "OPT_OUT" }>,
-        attemptLabel: string
+        attemptLabel: string,
+        feedSpec: Record<string, any> = assetFeedSpec
       ) => {
         const hasCreativeFeatures = Object.keys(featuresSpec).length > 0;
         const degreesOfFreedomSpec = hasCreativeFeatures
@@ -3143,7 +3144,7 @@ export class MetaAdsApi {
         const requestBody = new URLSearchParams();
         requestBody.append('name', params.name);
         requestBody.append('object_story_spec', JSON.stringify(objectStorySpec));
-        requestBody.append('asset_feed_spec', JSON.stringify(assetFeedSpec));
+        requestBody.append('asset_feed_spec', JSON.stringify(feedSpec));
         if (hasCreativeFeatures) {
           requestBody.append('degrees_of_freedom_spec', JSON.stringify(degreesOfFreedomSpec));
         }
@@ -3190,6 +3191,17 @@ export class MetaAdsApi {
           creativeFeaturesSpec = {};
           data = await sendCreativeRequest(creativeFeaturesSpec, "no-creative-features retry");
         }
+      }
+
+      if (data?.error && this.isStandardEnhancementsDeprecatedError(data.error)) {
+        const noEnhancementsAssetFeedSpec = { ...assetFeedSpec };
+        delete noEnhancementsAssetFeedSpec.optimization_type;
+
+        console.log(
+          "[MetaAdsApi] Meta still rejected creative as deprecated standard enhancements. Retrying without degrees_of_freedom_spec and without asset_feed_spec.optimization_type.",
+          JSON.stringify(noEnhancementsAssetFeedSpec, null, 2)
+        );
+        data = await sendCreativeRequest({}, "no-enhancements asset_feed_spec retry", noEnhancementsAssetFeedSpec);
       }
 
       console.log('[MetaAdsApi] createSingleCreativeWithTextVariations response:', JSON.stringify(data, null, 2));
