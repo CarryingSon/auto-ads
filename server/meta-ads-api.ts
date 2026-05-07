@@ -38,6 +38,12 @@ function hasSupabaseStorageConfig(): boolean {
   );
 }
 
+function readPositiveNumberEnv(name: string, fallback: number, minimum: number): number {
+  const raw = Number(process.env[name]);
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(minimum, raw);
+}
+
 // Rate limiting configuration
 const RATE_LIMIT_CONFIG = {
   minDelayMs: 500,           // Minimum delay between API calls (500ms)
@@ -45,6 +51,12 @@ const RATE_LIMIT_CONFIG = {
   baseBackoffMs: 1000,       // Base backoff time (1 second)
   maxBackoffMs: 60000,       // Maximum backoff time (60 seconds)
   rateLimitCodes: [4, 17, 613, 80004], // Meta rate limit error codes
+};
+
+const META_VIDEO_UPLOAD_RETRY_CONFIG = {
+  maxAttempts: Math.floor(readPositiveNumberEnv("META_VIDEO_UPLOAD_MAX_ATTEMPTS", 3, 1)),
+  timeoutMs: readPositiveNumberEnv("META_VIDEO_UPLOAD_TIMEOUT_MS", 60000, 5000),
+  retryableHttpStatuses: new Set([408, 429, 500, 502, 503, 504]),
 };
 
 // Utility: Sleep for specified milliseconds
@@ -100,6 +112,11 @@ interface MetaApiError {
   };
 }
 
+interface MetaVideoUploadResult {
+  id?: string;
+  error?: any;
+}
+
 export class MetaAdsApi {
   private userId: string;
   private accessToken: string | null = null;
@@ -117,6 +134,198 @@ export class MetaAdsApi {
       .filter((key: string) => key.length > 0)
       .map((key: string) => key.toUpperCase());
     return keys.length > 0 ? new Set(keys) : null;
+  }
+
+  private isStandardEnhancementsDeprecatedError(error: any): boolean {
+    const message = [
+      error?.message,
+      error?.error_user_msg,
+      error?.error_user_title,
+    ]
+      .filter((part) => typeof part === "string")
+      .join(" ")
+      .toLowerCase();
+
+    return message.includes("standard enhancements") && message.includes("deprecated");
+  }
+
+  private isPermanentMetaVideoUploadError(error: any): boolean {
+    const code = error?.code;
+    const subcode = error?.error_subcode;
+    const message = [
+      error?.message,
+      error?.error_user_msg,
+      error?.error_user_title,
+      error?.type,
+    ]
+      .filter((part) => typeof part === "string")
+      .join(" ")
+      .toLowerCase();
+
+    return (
+      code === 351 ||
+      subcode === 1363027 ||
+      message.includes("corrupt video") ||
+      code === 190 ||
+      code === 10 ||
+      code === 200 ||
+      message.includes("permission") ||
+      message.includes("not authorized") ||
+      message.includes("invalid parameter") ||
+      message.includes("unsupported post request") ||
+      message.includes("file too large")
+    );
+  }
+
+  private getTransientNetworkCode(error: any): string | undefined {
+    return error?.code || error?.cause?.code || error?.cause?.cause?.code;
+  }
+
+  private isRetryableMetaVideoUploadFailure(error: any): boolean {
+    const metaError = error?.metaError;
+    const httpStatus = error?.httpStatus;
+
+    if (metaError) {
+      if (this.isPermanentMetaVideoUploadError(metaError)) return false;
+      if (metaError.is_transient === true) return true;
+    }
+
+    if (
+      typeof httpStatus === "number" &&
+      META_VIDEO_UPLOAD_RETRY_CONFIG.retryableHttpStatuses.has(httpStatus)
+    ) {
+      return true;
+    }
+
+    const transientCode = this.getTransientNetworkCode(error);
+    if (
+      transientCode &&
+      ["UND_ERR_CONNECT_TIMEOUT", "ETIMEDOUT", "ECONNRESET", "EAI_AGAIN"].includes(transientCode)
+    ) {
+      return true;
+    }
+
+    const message = String(error?.message || "").toLowerCase();
+    return (
+      error?.name === "AbortError" ||
+      message.includes("abort") ||
+      message.includes("timeout") ||
+      message.includes("timed out") ||
+      message.includes("fetch failed") ||
+      message.includes("network")
+    );
+  }
+
+  private getMetaVideoUploadBackoffMs(attempt: number): number {
+    const baseDelays = [5000, 10000, 20000];
+    const base = baseDelays[Math.min(Math.max(attempt - 1, 0), baseDelays.length - 1)];
+    const jitter = Math.floor(Math.random() * 1000);
+    return base + jitter;
+  }
+
+  private async uploadVideoFileUrlWithRetry(params: {
+    uploadUrl: string;
+    uploadParams: URLSearchParams;
+    name: string;
+    sourceLabel: string;
+  }): Promise<string> {
+    const maxAttempts = META_VIDEO_UPLOAD_RETRY_CONFIG.maxAttempts;
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const attemptStartedAt = Date.now();
+      console.log("[MetaAdsApi] video_upload_meta_attempt_started", {
+        event: "video_upload_meta_attempt_started",
+        filename: params.name,
+        source: params.sourceLabel,
+        attempt,
+        maxAttempts,
+        timeoutMs: META_VIDEO_UPLOAD_RETRY_CONFIG.timeoutMs,
+      });
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), META_VIDEO_UPLOAD_RETRY_CONFIG.timeoutMs);
+
+      try {
+        const response = await fetch(`${params.uploadUrl}?${params.uploadParams.toString()}`, {
+          method: "POST",
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        let uploadData: MetaVideoUploadResult;
+        try {
+          uploadData = await response.json() as MetaVideoUploadResult;
+        } catch (jsonErr: any) {
+          const err = new Error(`Meta video upload returned non-JSON response (${response.status})`) as any;
+          err.httpStatus = response.status;
+          err.cause = jsonErr;
+          throw err;
+        }
+
+        console.log("[MetaAdsApi] file_url upload response:", JSON.stringify(uploadData, null, 2));
+
+        if (uploadData.id) {
+          const durationMs = Date.now() - attemptStartedAt;
+          console.log("[MetaAdsApi] video_upload_completed", {
+            event: "video_upload_completed",
+            filename: params.name,
+            source: params.sourceLabel,
+            attempt,
+            metaVideoId: uploadData.id,
+            durationMs,
+          });
+          return uploadData.id;
+        }
+
+        if (uploadData.error) {
+          const err = new Error(formatMetaVideoUploadError(uploadData.error, params.name)) as any;
+          err.metaError = uploadData.error;
+          err.httpStatus = response.status;
+          throw err;
+        }
+
+        const err = new Error("Video upload failed: no video_id returned") as any;
+        err.httpStatus = response.status;
+        throw err;
+      } catch (err: any) {
+        clearTimeout(timeout);
+        lastError = err;
+        const retryable = this.isRetryableMetaVideoUploadFailure(err);
+        const durationMs = Date.now() - attemptStartedAt;
+        console.error("[MetaAdsApi] video_upload_meta_attempt_failed", {
+          event: "video_upload_meta_attempt_failed",
+          filename: params.name,
+          source: params.sourceLabel,
+          attempt,
+          maxAttempts,
+          durationMs,
+          retryable,
+          httpStatus: err?.httpStatus ?? null,
+          code: this.getTransientNetworkCode(err) ?? err?.metaError?.code ?? null,
+          errorMessage: err?.message || String(err),
+        });
+
+        if (!retryable || attempt >= maxAttempts) {
+          throw err;
+        }
+
+        const backoffMs = this.getMetaVideoUploadBackoffMs(attempt);
+        console.warn("[MetaAdsApi] video_upload_meta_retrying", {
+          event: "video_upload_meta_retrying",
+          filename: params.name,
+          source: params.sourceLabel,
+          attempt,
+          nextAttempt: attempt + 1,
+          maxAttempts,
+          backoffMs,
+          errorMessage: err?.message || String(err),
+        });
+        await sleep(backoffMs);
+      }
+    }
+
+    throw lastError || new Error("Video upload failed after retry attempts");
   }
 
   private buildStrictCreativeFeaturesSpec(
@@ -1866,7 +2075,6 @@ export class MetaAdsApi {
       }
 
       const uploadUrl = `${META_VIDEO_URL}/${adAccountFormatted}/advideos`;
-      const maxRetries = 3;
       const canUseSupabaseStorage = hasSupabaseStorageConfig();
       let video_id: string | undefined;
       
@@ -1906,33 +2114,14 @@ export class MetaAdsApi {
         });
         
         const metaUploadStart = Date.now();
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          console.log(`[MetaAdsApi] file_url upload attempt ${attempt}/${maxRetries} (from Supabase Storage)...`);
-          try {
-            const uploadResponse = await fetch(`${uploadUrl}?${uploadParams.toString()}`, { method: 'POST' });
-            const uploadData = await uploadResponse.json() as { id?: string; error?: any };
-            console.log('[MetaAdsApi] file_url upload response:', JSON.stringify(uploadData, null, 2));
-            
-            if (uploadData.id) {
-              video_id = uploadData.id;
-              const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
-              console.log(`[MetaAdsApi] META API UPLOAD: video_id ${video_id} in ${metaUploadTime}s`);
-              break;
-            }
-            if (uploadData.error) {
-              console.error(`[MetaAdsApi] file_url upload attempt ${attempt} failed:`, uploadData.error);
-              if (uploadData.error.is_transient && attempt < maxRetries) {
-                await sleep(attempt * 5000);
-                continue;
-              }
-              throw new Error(formatMetaVideoUploadError(uploadData.error, name));
-            }
-          } catch (err: any) {
-            console.error(`[MetaAdsApi] file_url upload attempt ${attempt} error:`, err);
-            if (attempt >= maxRetries) throw err;
-            await sleep(attempt * 5000);
-          }
-        }
+        video_id = await this.uploadVideoFileUrlWithRetry({
+          uploadUrl,
+          uploadParams,
+          name,
+          sourceLabel: "transcoded_supabase",
+        });
+        const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
+        console.log(`[MetaAdsApi] META API UPLOAD: video_id ${video_id} in ${metaUploadTime}s`);
         
         if (downloadedPath) { await cleanupTempFile(downloadedPath); downloadedPath = null; }
         if (transcodedPath && transcodedPath !== downloadedPath) { await cleanupTempFile(transcodedPath); transcodedPath = null; }
@@ -1965,26 +2154,14 @@ export class MetaAdsApi {
         });
         
         const metaUploadStart = Date.now();
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          console.log(`[MetaAdsApi] file_url upload attempt ${attempt}/${maxRetries} (from Supabase Storage)...`);
-          const uploadResponse = await fetch(`${uploadUrl}?${uploadParams.toString()}`, { method: 'POST' });
-          const uploadData = await uploadResponse.json() as { id?: string; error?: any };
-          
-          if (uploadData.id) {
-            video_id = uploadData.id;
-            const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
-            console.log(`[MetaAdsApi] META API UPLOAD (local→ObjStorage): video_id ${video_id} in ${metaUploadTime}s`);
-            break;
-          }
-          if (uploadData.error) {
-            console.error(`[MetaAdsApi] file_url upload attempt ${attempt} failed:`, uploadData.error);
-            if (uploadData.error.is_transient && attempt < maxRetries) {
-              await sleep(attempt * 5000);
-              continue;
-            }
-            throw new Error(formatMetaVideoUploadError(uploadData.error, name));
-          }
-        }
+        video_id = await this.uploadVideoFileUrlWithRetry({
+          uploadUrl,
+          uploadParams,
+          name,
+          sourceLabel: "raw_supabase",
+        });
+        const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
+        console.log(`[MetaAdsApi] META API UPLOAD (local→ObjStorage): video_id ${video_id} in ${metaUploadTime}s`);
       } else {
         if (options?.localPath && !canUseSupabaseStorage) {
           console.warn(
@@ -2002,27 +2179,14 @@ export class MetaAdsApi {
         });
         
         const metaUploadStart = Date.now();
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          console.log(`[MetaAdsApi] file_url upload attempt ${attempt}/${maxRetries}...`);
-          const uploadResponse = await fetch(`${uploadUrl}?${uploadParams.toString()}`, { method: 'POST' });
-          const uploadData = await uploadResponse.json() as { id?: string; error?: any };
-          console.log('[MetaAdsApi] file_url upload response:', JSON.stringify(uploadData, null, 2));
-          
-          if (uploadData.id) {
-            video_id = uploadData.id;
-            const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
-            console.log(`[MetaAdsApi] META API UPLOAD (direct): video_id ${video_id} in ${metaUploadTime}s`);
-            break;
-          }
-          if (uploadData.error) {
-            console.error(`[MetaAdsApi] file_url upload attempt ${attempt} failed:`, uploadData.error);
-            if (uploadData.error.is_transient && attempt < maxRetries) {
-              await sleep(attempt * 5000);
-              continue;
-            }
-            throw new Error(formatMetaVideoUploadError(uploadData.error, name));
-          }
-        }
+        video_id = await this.uploadVideoFileUrlWithRetry({
+          uploadUrl,
+          uploadParams,
+          name,
+          sourceLabel: "direct_file_url",
+        });
+        const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
+        console.log(`[MetaAdsApi] META API UPLOAD (direct): video_id ${video_id} in ${metaUploadTime}s`);
       }
       
       if (!video_id) {
@@ -2996,6 +3160,14 @@ export class MetaAdsApi {
             creativeFeaturesSpec = filteredSpec;
             data = await sendCreativeRequest(creativeFeaturesSpec, "allow-list retry");
           }
+        }
+
+        if (data?.error && this.isStandardEnhancementsDeprecatedError(data.error)) {
+          console.log(
+            "[MetaAdsApi] Meta rejected creative features as deprecated standard enhancements. Retrying without degrees_of_freedom_spec."
+          );
+          creativeFeaturesSpec = {};
+          data = await sendCreativeRequest(creativeFeaturesSpec, "no-creative-features retry");
         }
       }
 
