@@ -7,7 +7,7 @@ import { storage } from "./storage.js";
 // Google Drive functions imported dynamically where needed
 import { parseDocx, validateAds } from "./docx-parser.js";
 import type { ExtractedAdData } from "../shared/schema.js";
-import { MetaAdsApi, createSyncLog, updateSyncLog } from "./meta-ads-api.js";
+import { MetaAdsApi, createSyncLog, isMetaRateLimitError, updateSyncLog } from "./meta-ads-api.js";
 import { validateMetaLaunchData, validateAdSetBeforeCreation } from "./meta-ads-validation.js";
 import { decrypt } from "./auth-routes.js";
 import { db } from "./db.js";
@@ -1493,8 +1493,7 @@ export async function registerRoutes(
           const initialized = await metaApi.initialize();
           if (initialized) {
             metaApi.setAdAccountId(adAccountId);
-            const details = await metaApi.getCampaignDetails(campaignId);
-            existingCampaignData = details.campaign;
+            existingCampaignData = await metaApi.getCampaignSettings(campaignId);
             console.log(`[Launch] Fetched existing campaign settings: ${campaignId}`, existingCampaignData);
           } else {
             campaignFetchError = "Meta API not initialized";
@@ -1506,6 +1505,15 @@ export async function registerRoutes(
         
         // If we couldn't fetch campaign data, return error - don't silently fallback
         if (!existingCampaignData) {
+          if (isMetaRateLimitError(campaignFetchError)) {
+            return res.status(429).json({
+              error: `Meta request limit reached while reading selected campaign (${campaignId}).`,
+              details: [
+                "Meta temporarily rate-limited this account/user. Wait a few minutes, then retry launch.",
+                "The selected campaign was not rejected because of min daily spend; the app could not read campaign settings before launch.",
+              ],
+            });
+          }
           return res.status(400).json({
             error: `Cannot retrieve settings for selected campaign (${campaignId}). ${campaignFetchError || "Please try again."}`,
             details: ["Campaign may not exist or you don't have access to it."]

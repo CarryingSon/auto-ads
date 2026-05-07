@@ -72,6 +72,10 @@ const calculateBackoff = (attempt: number): number => {
 // Check if error is a rate limit error
 const isRateLimitError = (error: any): boolean => {
   if (!error) return false;
+  if (typeof error === "string") {
+    const normalized = error.toLowerCase();
+    return normalized.includes('rate limit') || normalized.includes('request limit') || normalized.includes('limit reached') || normalized.includes('too many calls');
+  }
   const code = error?.error?.code || error?.code;
   if (RATE_LIMIT_CONFIG.rateLimitCodes.includes(code) || error?.status === 429) return true;
   const msg = (error?.error?.message || error?.message || '').toLowerCase();
@@ -110,6 +114,10 @@ interface MetaApiError {
     error_user_msg?: string;
     error_user_title?: string;
   };
+}
+
+export function isMetaRateLimitError(error: any): boolean {
+  return isRateLimitError(error);
 }
 
 interface MetaVideoUploadResult {
@@ -811,6 +819,19 @@ export class MetaAdsApi {
       adSets,
       ads
     };
+  }
+
+  async getCampaignSettings(campaignId: string): Promise<any> {
+    if (!this.adAccountId) {
+      throw new Error("No ad account selected");
+    }
+
+    return this.apiRequest<any>(
+      campaignId,
+      {
+        fields: "id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,special_ad_categories"
+      }
+    );
   }
 
   async getCampaignsByPage(pageId: string): Promise<any[]> {
