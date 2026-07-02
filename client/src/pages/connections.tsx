@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Building2, CheckCircle2, XCircle, RefreshCw, Unplug, Plug, Info, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Building2, Check, CheckCircle2, ChevronRight, XCircle, RefreshCw, Unplug, Plug, Info, AlertTriangle, ShieldCheck } from "lucide-react";
 import { SiFacebook } from "react-icons/si";
 
 interface AuthStatus {
@@ -135,16 +135,30 @@ export default function Connections() {
     },
     staleTime: 0,
   });
-  const pendingAdAccounts = pendingAdAccountsData?.accounts || [];
-  const selectablePendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified !== false);
-  const blockedPendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified === false);
+  const pendingAdAccounts = useMemo(
+    () => pendingAdAccountsData?.accounts || [],
+    [pendingAdAccountsData?.accounts],
+  );
+  const selectablePendingAdAccounts = useMemo(
+    () => pendingAdAccounts.filter((acc) => acc?.access_verified !== false),
+    [pendingAdAccounts],
+  );
+  const blockedPendingAdAccounts = useMemo(
+    () => pendingAdAccounts.filter((acc) => acc?.access_verified === false),
+    [pendingAdAccounts],
+  );
   const selectablePendingIds = useMemo(
     () => selectablePendingAdAccounts.map((acc) => acc.id),
     [selectablePendingAdAccounts],
   );
+  const selectablePendingIdSet = useMemo(() => new Set(selectablePendingIds), [selectablePendingIds]);
+  const selectedPendingAdAccountIdSet = useMemo(
+    () => new Set(selectedPendingAdAccountIds),
+    [selectedPendingAdAccountIds],
+  );
   const allPendingSelected =
     selectablePendingIds.length > 0 &&
-    selectablePendingIds.every((id) => selectedPendingAdAccountIds.includes(id));
+    selectablePendingIds.every((id) => selectedPendingAdAccountIdSet.has(id));
   const metaHasPendingSelection = metaConnected && usableMetaAdAccounts.length === 0 && selectablePendingAdAccounts.length > 0;
   const metaNeedsAdAccount = metaConnected && usableMetaAdAccounts.length === 0 && selectablePendingAdAccounts.length === 0;
 
@@ -159,10 +173,11 @@ export default function Connections() {
       setSelectedPendingAdAccountIds([]);
       return;
     }
-    setSelectedPendingAdAccountIds((prev) =>
-      prev.filter((id) => selectablePendingAdAccounts.some((acc) => acc.id === id)),
-    );
-  }, [metaHasPendingSelection, selectablePendingAdAccounts]);
+    setSelectedPendingAdAccountIds((prev) => {
+      const next = prev.filter((id) => selectablePendingIdSet.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [metaHasPendingSelection, selectablePendingIdSet]);
 
   const {
     data: pagesData,
@@ -493,36 +508,52 @@ export default function Connections() {
             <button
               type="button"
               onClick={toggleAllPendingAdAccounts}
-              className="flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:bg-slate-100"
+              aria-pressed={allPendingSelected}
+              className={`flex w-full items-center gap-4 rounded-2xl border px-4 py-4 text-left transition duration-150 active:scale-[0.99] ${
+                allPendingSelected
+                  ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
+                  : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+              }`}
             >
-              <input
-                type="checkbox"
-                checked={allPendingSelected}
-                readOnly
-                className="h-7 w-7 rounded-md border-slate-300 accent-[#5e7ec8]"
-              />
-              <span className="text-2xl leading-none font-medium text-[#24304a]">Select all accounts</span>
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition duration-150 ${
+                allPendingSelected
+                  ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
+                  : "border-slate-300 bg-white text-transparent"
+              }`}>
+                <Check className={`h-4 w-4 transition duration-150 ${allPendingSelected ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
+              </span>
+              <span className="text-xl leading-none font-medium text-[#24304a] sm:text-2xl">Select all accounts</span>
             </button>
 
             <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
               {selectablePendingAdAccounts.map((acc) => {
-                const checked = selectedPendingAdAccountIds.includes(acc.id);
+                const checked = selectedPendingAdAccountIdSet.has(acc.id);
                 const status = getPendingAccountStatusBadge(Number(acc.account_status));
                 return (
                   <button
                     key={acc.id}
                     type="button"
                     onClick={() => togglePendingAdAccountSelection(acc.id)}
-                    className="flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:bg-slate-100"
+                    aria-pressed={checked}
+                    className={`flex w-full items-center gap-4 rounded-2xl border px-4 py-4 text-left transition duration-150 active:scale-[0.99] ${
+                      checked
+                        ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
+                        : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                    }`}
                   >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      readOnly
-                      className="h-7 w-7 rounded-md border-slate-300 accent-[#5e7ec8]"
-                    />
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition duration-150 ${
+                      checked
+                        ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
+                        : "border-slate-300 bg-white text-transparent"
+                    }`}>
+                      <Check className={`h-4 w-4 transition duration-150 ${checked ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
+                    </span>
 
-                    <span className="flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-[#7587a8]">
+                    <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border transition duration-150 ${
+                      checked
+                        ? "border-[#1877F2]/20 bg-[#1877F2]/10 text-[#1877F2]"
+                        : "border-slate-200 bg-slate-100 text-[#7587a8]"
+                    }`}>
                       <Building2 className="h-6 w-6" />
                     </span>
 
@@ -557,14 +588,14 @@ export default function Connections() {
             <Button
               onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
               disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
-              className="mt-4 h-14 w-full rounded-2xl border border-[#9cb3df] bg-[#c4d1eb]/95 text-2xl font-semibold text-white shadow-[0_10px_24px_rgba(84,112,166,0.22)] hover:bg-[#b8c7e6] disabled:opacity-100"
+              className="mt-4 h-14 w-full rounded-2xl border border-[#1877F2]/70 bg-[#1877F2] text-lg font-semibold text-white shadow-[0_12px_28px_rgba(24,119,242,0.26)] transition duration-150 hover:bg-[#166fe5] active:scale-[0.99] disabled:cursor-not-allowed disabled:border-[#1877F2]/15 disabled:bg-[#1877F2]/35 disabled:text-white/75 disabled:shadow-none disabled:opacity-100 sm:text-xl"
               data-testid="button-confirm-pending-ad-accounts"
             >
               {confirmPendingAccountsMutation.isPending ? (
                 <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
               ) : null}
               Confirm selection ({selectedPendingAdAccountIds.length})
-              <span className="material-symbols-outlined ml-1 text-xl">chevron_right</span>
+              <ChevronRight className="ml-1 h-5 w-5" />
             </Button>
           </div>
         </DialogContent>

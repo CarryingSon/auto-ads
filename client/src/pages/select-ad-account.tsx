@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Building2, Loader2, Plug, ShieldCheck } from "lucide-react";
+import { Building2, Check, ChevronRight, Loader2, Plug, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -74,16 +74,30 @@ export default function SelectAdAccountPage() {
     staleTime: 0,
   });
 
-  const pendingAdAccounts = pendingAdAccountsData?.accounts || [];
-  const selectablePendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified !== false);
-  const blockedPendingAdAccounts = pendingAdAccounts.filter((acc) => acc?.access_verified === false);
+  const pendingAdAccounts = useMemo(
+    () => pendingAdAccountsData?.accounts || [],
+    [pendingAdAccountsData?.accounts],
+  );
+  const selectablePendingAdAccounts = useMemo(
+    () => pendingAdAccounts.filter((acc) => acc?.access_verified !== false),
+    [pendingAdAccounts],
+  );
+  const blockedPendingAdAccounts = useMemo(
+    () => pendingAdAccounts.filter((acc) => acc?.access_verified === false),
+    [pendingAdAccounts],
+  );
   const selectableIds = useMemo(
     () => selectablePendingAdAccounts.map((acc) => acc.id),
     [selectablePendingAdAccounts],
   );
+  const selectableIdSet = useMemo(() => new Set(selectableIds), [selectableIds]);
+  const selectedPendingAdAccountIdSet = useMemo(
+    () => new Set(selectedPendingAdAccountIds),
+    [selectedPendingAdAccountIds],
+  );
   const allSelected =
     selectableIds.length > 0 &&
-    selectableIds.every((id) => selectedPendingAdAccountIds.includes(id));
+    selectableIds.every((id) => selectedPendingAdAccountIdSet.has(id));
 
   useEffect(() => {
     if (!isSidebarDataLoading && !hasPendingAccounts && !isSidebarDataError) {
@@ -92,10 +106,11 @@ export default function SelectAdAccountPage() {
   }, [hasPendingAccounts, isSidebarDataLoading, isSidebarDataError, setLocation]);
 
   useEffect(() => {
-    setSelectedPendingAdAccountIds((prev) =>
-      prev.filter((id) => selectablePendingAdAccounts.some((acc) => acc.id === id)),
-    );
-  }, [selectablePendingAdAccounts]);
+    setSelectedPendingAdAccountIds((prev) => {
+      const next = prev.filter((id) => selectableIdSet.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectableIdSet]);
 
   const confirmPendingAccountsMutation = useMutation({
     mutationFn: async (adAccountIds: string[]) => {
@@ -213,30 +228,52 @@ export default function SelectAdAccountPage() {
               <button
                 type="button"
                 onClick={toggleSelectAll}
-                className="flex w-full items-center gap-4 rounded-xl border border-white/55 bg-white/35 px-2 py-2 text-left backdrop-blur-sm transition hover:bg-white/50 dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10"
+                aria-pressed={allSelected}
+                className={`flex w-full items-center gap-4 rounded-xl border px-2 py-2 text-left backdrop-blur-sm transition duration-150 active:scale-[0.99] dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10 ${
+                  allSelected
+                    ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
+                    : "border-white/55 bg-white/35 hover:bg-white/50"
+                }`}
               >
-                <span className={`flex h-7 w-7 items-center justify-center rounded-full border ${allSelected ? "border-[#6d84c9] bg-[#dfe8ff]" : "border-slate-300 bg-white"}`}>
-                  {allSelected ? <span className="material-symbols-outlined text-[16px] text-[#4864b2]">check</span> : null}
+                <span className={`flex h-8 w-8 items-center justify-center rounded-full border transition duration-150 ${
+                  allSelected
+                    ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
+                    : "border-slate-300 bg-white text-transparent"
+                }`}>
+                  <Check className={`h-4 w-4 transition duration-150 ${allSelected ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
                 </span>
-                <span className="text-[22px] leading-none font-medium text-[#31405e]">Select all accounts</span>
+                <span className="text-xl leading-none font-medium text-[#31405e] sm:text-[22px]">Select all accounts</span>
               </button>
 
               <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
                 {selectablePendingAdAccounts.map((acc) => {
-                  const checked = selectedPendingAdAccountIds.includes(acc.id);
+                  const checked = selectedPendingAdAccountIdSet.has(acc.id);
                   const status = getAccountStatusBadge(Number(acc.account_status));
                   return (
                     <button
                       key={acc.id}
                       type="button"
                       onClick={() => toggleAccount(acc.id)}
-                      className="flex w-full items-center gap-3 rounded-xl border border-white/55 bg-white/35 px-2 py-2.5 text-left backdrop-blur-sm transition hover:bg-white/50 dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10"
+                      aria-pressed={checked}
+                      className={`flex w-full items-center gap-3 rounded-xl border px-2 py-2.5 text-left backdrop-blur-sm transition duration-150 active:scale-[0.99] dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10 ${
+                        checked
+                          ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
+                          : "border-white/55 bg-white/35 hover:bg-white/50"
+                      }`}
                     >
-                      <span className={`flex h-7 w-7 items-center justify-center rounded-full border ${checked ? "border-[#6d84c9] bg-[#dfe8ff]" : "border-slate-300 bg-white"}`}>
-                        {checked ? <span className="material-symbols-outlined text-[16px] text-[#4864b2]">check</span> : null}
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition duration-150 ${
+                        checked
+                          ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
+                          : "border-slate-300 bg-white text-transparent"
+                      }`}>
+                        <Check className={`h-4 w-4 transition duration-150 ${checked ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
                       </span>
 
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/70 text-[#6b7b99] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition duration-150 ${
+                        checked
+                          ? "border-[#1877F2]/20 bg-[#1877F2]/10 text-[#1877F2]"
+                          : "border-white/60 bg-white/70 text-[#6b7b99]"
+                      }`}>
                         <Building2 className="h-5 w-5" />
                       </span>
 
@@ -271,14 +308,14 @@ export default function SelectAdAccountPage() {
               <Button
                 onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
                 disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
-                className="mt-4 h-14 w-full rounded-2xl border border-[#9cb3df] bg-[#c4d1eb]/95 text-2xl font-semibold text-white shadow-[0_10px_24px_rgba(84,112,166,0.22)] backdrop-blur-sm hover:bg-[#b8c7e6] disabled:opacity-100"
+                className="mt-4 h-14 w-full rounded-2xl border border-[#1877F2]/70 bg-[#1877F2] text-lg font-semibold text-white shadow-[0_12px_28px_rgba(24,119,242,0.26)] transition duration-150 hover:bg-[#166fe5] active:scale-[0.99] disabled:cursor-not-allowed disabled:border-[#1877F2]/15 disabled:bg-[#1877F2]/35 disabled:text-white/75 disabled:shadow-none disabled:opacity-100 sm:text-xl"
                 data-testid="button-confirm-select-ad-account"
               >
                 {confirmPendingAccountsMutation.isPending ? (
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                 ) : null}
                 Confirm selection ({selectedPendingAdAccountIds.length})
-                <span className="material-symbols-outlined ml-1 text-xl">chevron_right</span>
+                <ChevronRight className="ml-1 h-5 w-5" />
               </Button>
             </div>
           )}
