@@ -360,7 +360,6 @@ router.get("/meta/start", async (req: Request, res: Response) => {
     // - pages_manage_metadata: For reading Page metadata and connected Page integrations
     // - pages_read_engagement: For promote_pages API and page insights
     // - ads_management, ads_read: For creating and reading ads
-    // - instagram_basic: For linked Instagram account metadata
     const scopeArray = [
       "public_profile",
       "email",
@@ -369,7 +368,6 @@ router.get("/meta/start", async (req: Request, res: Response) => {
       "pages_read_engagement",
       "ads_management",
       "ads_read",
-      "instagram_basic",
     ];
     const scopeRaw = scopeArray.join(",");
     
@@ -831,7 +829,6 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       "pages_read_engagement",
       "ads_management",
       "ads_read",
-      "instagram_basic",
     ];
 
     // Hard-replace meta connection rows so reconnect always uses the newest token
@@ -1376,7 +1373,6 @@ router.get("/status", async (req: Request, res: Response) => {
       "pages_read_engagement",
       "ads_management",
       "ads_read",
-      "instagram_basic",
     ];
     const metaScopes = Array.isArray(metaConnection?.scopes) ? metaConnection.scopes : [];
     const missingMetaScopes = requiredMetaScopes.filter((scope) => !metaScopes.includes(scope));
