@@ -184,9 +184,13 @@ export async function claimLaunchQueueItems(workerId: string, limit = 1): Promis
       SELECT id
       FROM job_queue
       WHERE queue_type = 'launch'
-        AND status IN ('queued', 'retrying')
+        AND (
+          status IN ('queued', 'retrying')
+          OR (status = 'processing' AND locked_until IS NOT NULL AND locked_until < NOW())
+        )
         AND next_run_at <= NOW()
         AND (locked_until IS NULL OR locked_until < NOW())
+        AND attempts < max_attempts
       ORDER BY created_at ASC
       FOR UPDATE SKIP LOCKED
       LIMIT ${limit}
@@ -241,9 +245,13 @@ export async function claimLaunchQueueItemById(workerId: string, queueId: string
       updated_at = NOW()
     WHERE q.id = ${queueId}
       AND q.queue_type = 'launch'
-      AND q.status IN ('queued', 'retrying')
+      AND (
+        q.status IN ('queued', 'retrying')
+        OR (q.status = 'processing' AND q.locked_until IS NOT NULL AND q.locked_until < NOW())
+      )
       AND q.next_run_at <= NOW()
       AND (q.locked_until IS NULL OR q.locked_until < NOW())
+      AND q.attempts < q.max_attempts
     RETURNING q.id;
   `);
 
@@ -405,5 +413,5 @@ export async function clearQueueForJob(jobId: string): Promise<void> {
 
   await db
     .delete(jobQueue)
-    .where(and(eq(jobQueue.jobId, jobId), inArray(jobQueue.status, ["queued", "retrying"])));
+    .where(and(eq(jobQueue.jobId, jobId), inArray(jobQueue.status, ["queued", "retrying", "processing"])));
 }

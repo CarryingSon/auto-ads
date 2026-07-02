@@ -660,6 +660,11 @@ function isTerminalJobStatus(status?: string | null): boolean {
 }
 
 function mapProgressStatus(jobStatus: string | null | undefined, queueStatus?: string | null): string {
+  const normalized = jobStatus ? String(jobStatus).toLowerCase() : "";
+
+  if (normalized === "done" || normalized === "completed") return "completed";
+  if (normalized === "error" || normalized === "failed") return "failed";
+
   if (queueStatus === "queued") return "queued";
   if (queueStatus === "processing") return "processing";
   if (queueStatus === "retrying") return "retrying";
@@ -667,11 +672,6 @@ function mapProgressStatus(jobStatus: string | null | undefined, queueStatus?: s
   if (queueStatus === "completed") return "completed";
 
   if (!jobStatus) return "pending";
-
-  const normalized = String(jobStatus).toLowerCase();
-
-  if (normalized === "done" || normalized === "completed") return "completed";
-  if (normalized === "error" || normalized === "failed") return "failed";
 
   if (
     normalized === "draft" ||
@@ -691,6 +691,80 @@ function mapProgressStatus(jobStatus: string | null | undefined, queueStatus?: s
   }
 
   return normalized;
+}
+
+function parseDateLike(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function isLaunchQueueDue(queue: {
+  status?: string | null;
+  attempts?: number | null;
+  maxAttempts?: number | null;
+  nextRunAt?: Date | string | null;
+  lockedUntil?: Date | string | null;
+} | null | undefined, now = new Date()): boolean {
+  if (!queue) return false;
+  const status = queue.status;
+  const attempts = Number(queue.attempts ?? 0);
+  const maxAttempts = Number(queue.maxAttempts ?? 3);
+  const nextRunAt = parseDateLike(queue.nextRunAt);
+  const lockedUntil = parseDateLike(queue.lockedUntil);
+  const nextRunDue = !nextRunAt || nextRunAt <= now;
+  const lockExpired = !!lockedUntil && lockedUntil <= now;
+  const canRetry = attempts < maxAttempts;
+
+  if (!canRetry || !nextRunDue) return false;
+  if (status === "queued" || status === "retrying") {
+    return !lockedUntil || lockExpired;
+  }
+  return status === "processing" && lockExpired;
+}
+
+function isExhaustedStaleLaunchQueue(queue: {
+  status?: string | null;
+  attempts?: number | null;
+  maxAttempts?: number | null;
+  lockedUntil?: Date | string | null;
+} | null | undefined, now = new Date()): boolean {
+  if (!queue || queue.status !== "processing") return false;
+  const lockedUntil = parseDateLike(queue.lockedUntil);
+  if (!lockedUntil || lockedUntil > now) return false;
+  return Number(queue.attempts ?? 0) >= Number(queue.maxAttempts ?? 3);
+}
+
+function triggerLaunchWorker(req: Request, queueId: string, jobId: string, reason: string): "requested" | "waiting_for_worker" {
+  const cronSecret = process.env.CRON_SECRET;
+  const host = req.get("host");
+  const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+  const protocol = forwardedProto || (req.secure ? "https" : "http");
+
+  if (!cronSecret || !host) {
+    const missing = !cronSecret ? "CRON_SECRET missing" : "host missing";
+    console.warn(`[Launch] Worker trigger skipped for job ${jobId} (${reason}, ${missing})`);
+    return "waiting_for_worker";
+  }
+
+  const workerUrl = `${protocol}://${host}/api/workers/launch?queueId=${encodeURIComponent(queueId)}`;
+  void fetch(workerUrl, {
+    method: "POST",
+    headers: {
+      "x-cron-secret": cronSecret,
+    },
+  })
+    .then(async (workerResponse) => {
+      const responseText = await workerResponse.text().catch(() => "");
+      console.log(
+        `[Launch] Worker trigger (${reason}) for job ${jobId} queue ${queueId}: ${workerResponse.status} ${responseText}`,
+      );
+    })
+    .catch((triggerError) => {
+      console.error(`[Launch] Failed to trigger worker for job ${jobId} (${reason}):`, triggerError);
+    });
+
+  return "requested";
 }
 
 const ALLOWED_GLOBAL_SETTINGS_PATCH_KEYS = new Set([
@@ -1249,7 +1323,30 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Job not found" });
       }
 
-      const latestQueue = await getLatestQueueForJob(jobId);
+      let latestQueue = await getLatestQueueForJob(jobId);
+      let workerTrigger: "requested" | "waiting_for_worker" | null = null;
+      if (latestQueue && !isTerminalJobStatus(job.status)) {
+        if (isExhaustedStaleLaunchQueue(latestQueue)) {
+          const errorMessage = "Launch worker stopped before finishing after all retry attempts were used.";
+          await markQueueFailed(latestQueue.id, errorMessage, {
+            reason: "stale_processing_lock_exhausted",
+            lockedUntil: latestQueue.lockedUntil?.toISOString?.() ?? latestQueue.lockedUntil,
+          });
+          await storage.updateJob(jobId, {
+            status: "failed",
+            errorMessage,
+          });
+          emitJobLog(jobId, errorMessage, "error", {
+            event: "queue_stale_processing_exhausted",
+            queueId: latestQueue.id,
+            attempts: latestQueue.attempts,
+            maxAttempts: latestQueue.maxAttempts,
+          });
+          latestQueue = await getLatestQueueForJob(jobId);
+        } else if (isLaunchQueueDue(latestQueue)) {
+          workerTrigger = triggerLaunchWorker(req, latestQueue.id, jobId, "progress_poll_recovery");
+        }
+      }
       const metaObjects = await storage.getMetaObjectsByJob(job.id);
       const structuredLogs = (await storage.getJobLogsByJob(job.id)).slice(0, 200).reverse();
 
@@ -1285,6 +1382,7 @@ export async function registerRoutes(
         queueMaxAttempts: latestQueue?.maxAttempts ?? null,
         nextRunAt: latestQueue?.nextRunAt ?? null,
         lastError: latestQueue?.lastError ?? null,
+        workerTrigger,
         adSetProgress,
         totalAdSets,
         completedAdSets,
@@ -1668,12 +1766,15 @@ export async function registerRoutes(
       // it is already queued/processing/retrying.
       const latestQueueForJob = await getLatestQueueForJob(jobId);
       if (latestQueueForJob && ["queued", "processing", "retrying"].includes(latestQueueForJob.status)) {
+        const workerTrigger = !isTerminalJobStatus(job.status) && isLaunchQueueDue(latestQueueForJob)
+          ? triggerLaunchWorker(req, latestQueueForJob.id, jobId, "launch_idempotency_recovery")
+          : "waiting_for_worker";
         return res.status(202).json({
           success: true,
           jobId,
           queued: true,
           queueId: latestQueueForJob.id,
-          workerTrigger: "waiting_for_worker",
+          workerTrigger,
           alreadyQueued: true,
         });
       }
@@ -2018,32 +2119,9 @@ export async function registerRoutes(
 
       // Hobby Vercel plans do not support minute-level Cron jobs. Trigger worker
       // immediately after enqueue so processing starts without waiting for cron.
-      const cronSecret = process.env.CRON_SECRET;
-      const host = req.get("host");
-      const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
-      const protocol = forwardedProto || (req.secure ? "https" : "http");
-      let workerTrigger: "requested" | "waiting_for_worker" = "waiting_for_worker";
-
-      if (cronSecret && host) {
-        workerTrigger = "requested";
-        const workerUrl = `${protocol}://${host}/api/workers/launch?queueId=${encodeURIComponent(queueItem.id)}`;
-        void fetch(workerUrl, {
-          method: "POST",
-          headers: {
-            "x-cron-secret": cronSecret,
-          },
-        })
-          .then(async (workerResponse) => {
-            const responseText = await workerResponse.text().catch(() => "");
-            console.log(
-              `[Launch] Immediate worker trigger for job ${jobId} queue ${queueItem.id}: ${workerResponse.status} ${responseText}`,
-            );
-          })
-          .catch((triggerError) => {
-            console.error(`[Launch] Failed to trigger worker for job ${jobId}:`, triggerError);
-          });
-      } else {
-        const reason = !cronSecret ? "CRON_SECRET missing" : "host missing";
+      const workerTrigger = triggerLaunchWorker(req, queueItem.id, jobId, "launch_enqueue");
+      if (workerTrigger === "waiting_for_worker") {
+        const reason = !process.env.CRON_SECRET ? "CRON_SECRET missing" : "host missing";
         console.warn(
           `[Launch] Skipping immediate worker trigger for job ${jobId} (${reason})`,
         );
@@ -2321,6 +2399,23 @@ export async function registerRoutes(
         });
         emitJobLog(jobId, message, type, { ...baseDetails, ...details }, adsetId);
       };
+      const launchStartedAt = Date.now();
+      const configuredSoftDeadlineMs = Number(process.env.LAUNCH_WORKER_SOFT_DEADLINE_MS || 240000);
+      const workerSoftDeadlineMs = Number.isFinite(configuredSoftDeadlineMs)
+        ? Math.max(30000, Math.floor(configuredSoftDeadlineMs))
+        : 240000;
+      const assertWorkerTimeBudget = (stage: string) => {
+        const elapsedMs = Date.now() - launchStartedAt;
+        if (elapsedMs <= workerSoftDeadlineMs) return;
+        const elapsedSeconds = Math.round(elapsedMs / 1000);
+        log(`Worker time budget reached after ${elapsedSeconds}s — retrying remaining work`, "warning", {
+          event: "worker_soft_deadline_reached",
+          stage,
+          elapsedMs,
+          workerSoftDeadlineMs,
+        });
+        throw new Error("Worker time budget reached; retrying remaining ad sets");
+      };
 
       log(`Ad upload mode: ${effectiveUploadMode}`, "info", {
         event: "launch_started",
@@ -2370,6 +2465,11 @@ export async function registerRoutes(
 
       // Create ad sets and ads for each adset
       const adSetIds: string[] = [];
+      const addAdSetId = (id: string | null | undefined) => {
+        if (id && !adSetIds.includes(id)) {
+          adSetIds.push(id);
+        }
+      };
       let totalAdsCreated = 0;
       
       // Safeguards against runaway processes
@@ -2388,6 +2488,8 @@ export async function registerRoutes(
       }
 
       for (const adset of jobAdsets) {
+        assertWorkerTimeBudget(`starting ad set ${adset.name}`);
+
         if (cancelledJobs.has(jobId)) {
           log("Upload cancelled by user — stopping", "error");
           await storage.updateJob(jobId, { status: "error", errorMessage: "Upload cancelled by user" });
@@ -2403,6 +2505,25 @@ export async function registerRoutes(
         
         if (adsetAssets.length === 0) {
           log(`Skipping adset ${adset.name}: no valid assets`);
+          continue;
+        }
+
+        const existingMetaObjectsForAdset = (await storage.getMetaObjectsByJob(jobId))
+          .filter((obj) => obj.adsetId === adset.id);
+        const existingAdSetObject = existingMetaObjectsForAdset.find((obj) => obj.objectType === "adset" && obj.metaId);
+        const existingCreatedAds = existingMetaObjectsForAdset.filter(
+          (obj) => obj.objectType === "ad" && obj.status === "created",
+        );
+
+        if (existingAdSetObject?.status === "created" && existingCreatedAds.length > 0) {
+          addAdSetId(existingAdSetObject.metaId);
+          totalAdsCreated += existingCreatedAds.length;
+          log(`Skipping ad set "${adset.name}" — already completed in a previous attempt`, "success", {
+            event: "adset_already_completed",
+            adsetName: adset.name,
+            metaAdSetId: existingAdSetObject.metaId,
+            existingAds: existingCreatedAds.length,
+          }, adset.id);
           continue;
         }
 
@@ -2625,45 +2746,56 @@ export async function registerRoutes(
           }
           log(`Instagram placement enabled with ID: ${instagramAccountId}`, "success");
           
-          const adSetResult = await metaApi.createAdSet({
-            campaignId: finalCampaignId!,
-            name: adSetName || adset.name,
-            status: "ACTIVE",
-            // Only set budget on ad set level if creating new campaign OR using existing ABO campaign
-            dailyBudget: needsAdSetBudget && campaignSettings.budgetType === "DAILY" ? campaignSettings.budgetAmount : undefined,
-            lifetimeBudget: needsAdSetBudget && campaignSettings.budgetType === "LIFETIME" ? campaignSettings.budgetAmount : undefined,
-            startTime,
-            endTime,
-            billingEvent: adSetSettings.billingEvent || "IMPRESSIONS",
-            optimizationGoal,
-            dailyMinSpendTarget: effectiveDailyMinSpendTarget,
-            dailySpendCap: adSetSettings.dailySpendCap,
-            lifetimeSpendCap: adSetSettings.lifetimeSpendCap,
-            targeting: Object.keys(targeting).length > 0 ? targeting : undefined,
-            promotedObject,
-            // DSA/OCHA compliance - use settings if available, otherwise fallback to page name
-            dsaBeneficiary: globalSettingsRecord?.beneficiaryName || pageName,
-            dsaPayor: globalSettingsRecord?.payerName || pageName,
-            // IMPORTANT: VEDNO regular AdSet (is_dynamic_creative=false)
-            // Dynamic Creative zahteva asset_feed_spec kar omejuje na 1 ad per adset
-            // Flexible format deluje na ad-level z object_story_spec, NE z asset_feed_spec
-            isDynamicCreative: false,
-            // Instagram is required for launch; keep Instagram placements enabled.
-            hasInstagramAccount: true,
-          });
-          metaAdSetId = adSetResult.id;
-          adSetIds.push(metaAdSetId);
-          log(`Ad set created: ${metaAdSetId}`);
+          if (existingAdSetObject?.metaId) {
+            metaAdSetId = existingAdSetObject.metaId;
+            addAdSetId(metaAdSetId);
+            log(`Reusing existing ad set: ${metaAdSetId}`, "info", {
+              event: "adset_reused",
+              adsetName: adset.name,
+              metaAdSetId,
+              previousStatus: existingAdSetObject.status,
+            }, adset.id);
+          } else {
+            const adSetResult = await metaApi.createAdSet({
+              campaignId: finalCampaignId!,
+              name: adSetName || adset.name,
+              status: "ACTIVE",
+              // Only set budget on ad set level if creating new campaign OR using existing ABO campaign
+              dailyBudget: needsAdSetBudget && campaignSettings.budgetType === "DAILY" ? campaignSettings.budgetAmount : undefined,
+              lifetimeBudget: needsAdSetBudget && campaignSettings.budgetType === "LIFETIME" ? campaignSettings.budgetAmount : undefined,
+              startTime,
+              endTime,
+              billingEvent: adSetSettings.billingEvent || "IMPRESSIONS",
+              optimizationGoal,
+              dailyMinSpendTarget: effectiveDailyMinSpendTarget,
+              dailySpendCap: adSetSettings.dailySpendCap,
+              lifetimeSpendCap: adSetSettings.lifetimeSpendCap,
+              targeting: Object.keys(targeting).length > 0 ? targeting : undefined,
+              promotedObject,
+              // DSA/OCHA compliance - use settings if available, otherwise fallback to page name
+              dsaBeneficiary: globalSettingsRecord?.beneficiaryName || pageName,
+              dsaPayor: globalSettingsRecord?.payerName || pageName,
+              // IMPORTANT: VEDNO regular AdSet (is_dynamic_creative=false)
+              // Dynamic Creative zahteva asset_feed_spec kar omejuje na 1 ad per adset
+              // Flexible format deluje na ad-level z object_story_spec, NE z asset_feed_spec
+              isDynamicCreative: false,
+              // Instagram is required for launch; keep Instagram placements enabled.
+              hasInstagramAccount: true,
+            });
+            metaAdSetId = adSetResult.id;
+            addAdSetId(metaAdSetId);
+            log(`Ad set created: ${metaAdSetId}`);
 
-          await storage.createMetaObject({
-            jobId,
-            adsetId: adset.id,
-            adIndex: adset.sortOrder + 1,
-            objectType: "adset",
-            metaId: metaAdSetId,
-            name: adSetName || adset.name,
-            status: "creating",
-          });
+            await storage.createMetaObject({
+              jobId,
+              adsetId: adset.id,
+              adIndex: adset.sortOrder + 1,
+              objectType: "adset",
+              metaId: metaAdSetId,
+              name: adSetName || adset.name,
+              status: "creating",
+            });
+          }
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : "Unknown error";
           log(`Error creating ad set ${adset.name}: ${errorMessage}`);
@@ -2794,6 +2926,15 @@ export async function registerRoutes(
             const batch = imageAssets.slice(i, i + IMAGE_PARALLEL_LIMIT);
             const batchResults = await Promise.all(batch.map(async (asset) => {
               try {
+                if (asset.metaCreativeId) {
+                  log(`Reusing uploaded image: ${asset.originalFilename}`, "info", {
+                    event: "image_upload_reused",
+                    assetId: asset.id,
+                    filename: asset.originalFilename,
+                    metaImageHash: asset.metaCreativeId,
+                  }, adset.id);
+                  return { type: 'image' as const, mediaId: asset.metaCreativeId, name: asset.originalFilename };
+                }
                 log(`Uploading image: ${asset.originalFilename}...`, "info", {
                   event: "image_upload_started",
                   assetId: asset.id,
@@ -2832,6 +2973,16 @@ export async function registerRoutes(
           const uploadVideoOnly = async (asset: typeof videoAssets[0]) => {
             let videoLocalPath: string | undefined;
             try {
+              if (asset.metaCreativeId) {
+                log(`Reusing uploaded video: ${asset.originalFilename}`, "info", {
+                  event: "video_upload_reused",
+                  assetId: asset.id,
+                  filename: asset.originalFilename,
+                  metaVideoId: asset.metaCreativeId,
+                }, adset.id);
+                pendingVideoIds.push({ videoId: asset.metaCreativeId, name: asset.originalFilename, assetId: asset.id });
+                return;
+              }
               const videoStartTime = Date.now();
               log(`Uploading video: ${asset.originalFilename}...`, "info", {
                 event: "video_upload_started",
@@ -2925,6 +3076,7 @@ export async function registerRoutes(
           
           // Batch-check video readiness (2 at a time to avoid rate limits)
           if (pendingVideoIds.length > 0) {
+            assertWorkerTimeBudget(`waiting for videos in ad set ${adset.name}`);
             log(`Waiting for ${pendingVideoIds.length} videos to finish processing on Meta...`, "info", {
               event: "video_ready_wait_started",
               videoCount: pendingVideoIds.length,
@@ -2961,6 +3113,11 @@ export async function registerRoutes(
           
           // Create ads with text variations
           if (allAssetInfo.length > 0) {
+            const existingAdNames = new Set(
+              (await storage.getMetaObjectsByJob(jobId))
+                .filter((obj) => obj.objectType === "ad" && obj.adsetId === adset.id && obj.status === "created" && obj.name)
+                .map((obj) => obj.name as string),
+            );
             if (useSinglePerCombination) {
               // SINGLE MODE: Create separate ad for each ASSET × PRIMARY TEXT combination
               // Each ad has 1 video/image + 1 primary text + all headlines/descriptions for A/B testing
@@ -2981,6 +3138,18 @@ export async function registerRoutes(
                   
                   // Create unique ad name with asset name and primary text index
                   const adName = `${adset.name} - ${assetInfo.name} - PT${textIdx + 1}`;
+
+                  if (existingAdNames.has(adName)) {
+                    log(`Skipping existing ad: ${adName}`, "info", {
+                      event: "ad_already_created",
+                      adName,
+                      adsetName: adset.name,
+                    }, adset.id);
+                    totalAdsCreated++;
+                    adsCreatedForThisAdSet++;
+                    continue;
+                  }
+                  assertWorkerTimeBudget(`creating ads in ad set ${adset.name}`);
                   
                   try {
                     log(`Creating ad ${adIndex}/${totalCombinations}: ${assetInfo.name} + Primary Text ${textIdx + 1}...`);
@@ -3035,6 +3204,7 @@ export async function registerRoutes(
 
                     totalAdsCreated++;
                     adsCreatedForThisAdSet++;
+                    existingAdNames.add(adName);
                   } catch (err) {
                     log(`Error creating ad for ${assetInfo.name} + PT${textIdx + 1}: ${err instanceof Error ? err.message : "Unknown"}`);
                   }
@@ -3056,6 +3226,18 @@ export async function registerRoutes(
               for (let i = 0; i < allAssetInfo.length; i++) {
                 const assetInfo = allAssetInfo[i];
                 const adName = `${adset.name} - ${assetInfo.name}`;
+
+                if (existingAdNames.has(adName)) {
+                  log(`Skipping existing ad: ${adName}`, "info", {
+                    event: "ad_already_created",
+                    adName,
+                    adsetName: adset.name,
+                  }, adset.id);
+                  totalAdsCreated++;
+                  adsCreatedForThisAdSet++;
+                  continue;
+                }
+                assertWorkerTimeBudget(`creating ads in ad set ${adset.name}`);
                 
                 try {
                   log(`Creating ad ${i + 1}/${allAssetInfo.length}: ${assetInfo.name}...`);
@@ -3110,6 +3292,7 @@ export async function registerRoutes(
 
                   totalAdsCreated++;
                   adsCreatedForThisAdSet++;
+                  existingAdNames.add(adName);
                 } catch (err) {
                   log(`Error creating ad for ${assetInfo.name}: ${err instanceof Error ? err.message : "Unknown"}`);
                 }
