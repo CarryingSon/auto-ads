@@ -5167,25 +5167,14 @@ export default function BulkAds() {
             </div>
 
             <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-blue-500 text-lg">description</span>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">DOCX Ad Copy Format</h4>
-                    <p className="text-[11px] text-slate-400">Use numbered fields. Separate A/B variants with _1, _2, etc.</p>
-                  </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-blue-500 text-lg">description</span>
                 </div>
-                <a
-                  href="/template_adcopy.docx"
-                  download="template_adcopy.docx"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-[#1877F2] bg-[#1877F2]/5 hover:bg-[#1877F2]/10 transition-all shrink-0"
-                  data-testid="link-download-template"
-                >
-                  <span className="material-symbols-outlined text-sm">download</span>
-                  Template
-                </a>
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">DOCX Ad Copy Format</h4>
+                  <p className="text-[11px] text-slate-400">Use numbered fields. Separate A/B variants with _1, _2, etc.</p>
+                </div>
               </div>
               <div className="rounded-lg bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 p-4 font-mono text-xs text-slate-600 dark:text-slate-400 leading-relaxed overflow-x-auto">
 {`DCT 161:
@@ -5220,19 +5209,18 @@ Your description`}
                   Campaign Folder/
                 </div>
                 <div className="ml-5 space-y-0.5">
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 161 - Spring_Sale_Images/</div>
-                  <div className="ml-7 text-slate-400">image1.jpg, image2.png</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 162 - Comparison_Images/</div>
-                  <div className="ml-7 text-slate-400">image1.jpg</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 161 - Spring_Sale/</div>
+                  <div className="ml-7 text-slate-400">creative files</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 162 - Comparison/</div>
+                  <div className="ml-7 text-slate-400">creative files</div>
                   <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 163 - Video_Ads/</div>
                   <div className="ml-7 text-slate-400">video1.mp4</div>
                   <div className="flex items-center gap-2 text-[#1877F2]"><span className="material-symbols-outlined text-sm">description</span>ad_copy.docx</div>
                 </div>
               </div>
-              <img src="/help_folder_structure.png" alt="Example folder structure" className="rounded-xl border border-slate-100 dark:border-slate-800 w-full" />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div>
               <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-md bg-green-500/10 flex items-center justify-center">
@@ -5242,19 +5230,6 @@ Your description`}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {[".mp4", ".mov", ".avi", ".mkv"].map(f => (
-                    <span key={f} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 text-[11px] font-mono text-slate-500">{f}</span>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-4 space-y-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-md bg-violet-500/10 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-violet-500 text-sm">image</span>
-                  </div>
-                  <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300">Images</h4>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {[".jpg", ".jpeg", ".png", ".gif", ".webp"].map(f => (
                     <span key={f} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 text-[11px] font-mono text-slate-500">{f}</span>
                   ))}
                 </div>
