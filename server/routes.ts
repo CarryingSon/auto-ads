@@ -489,11 +489,6 @@ async function fetchInstagramAccountsForPage(params: {
   return dedupeInstagramAccounts(accounts);
 }
 
-function isInstagramRequiredError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error || "");
-  return message.toLowerCase().includes("instagram_required");
-}
-
 type JobLogType = "info" | "success" | "error" | "warning";
 
 function emitStructuredConsole(
@@ -1966,37 +1961,28 @@ export async function registerRoutes(
       }
 
       const savedInstagramId = globalSettingsRecord?.instagramPageId || undefined;
-      const chosenInstagramAccount = savedInstagramId
+      let chosenInstagramAccount: InstagramAccountRecord | undefined = savedInstagramId
         ? resolvedInstagramAccounts.find((account) => account.id === savedInstagramId) || resolvedInstagramAccounts[0]
         : resolvedInstagramAccounts[0];
 
       if (!chosenInstagramAccount) {
-        return res.status(400).json({
-          code: "instagram_required",
-          error: `Instagram account is required for launch. Connect a Professional Instagram account to Facebook Page ${pageName || pageId} and retry.`,
-          details: [
-            "Select a Facebook Page that has a linked Professional Instagram account (Business or Creator).",
-            "If already linked, reconnect Meta and refresh pages to renew access.",
-          ],
-        });
-      }
-
-      const validateIgData = await cachedMetaFetch(
-        `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
-        `ig_adaccount_preflight_${adAccountId}`,
-      );
-      const authorizedIgIds = Array.isArray(validateIgData?.data)
-        ? validateIgData.data.map((ig: any) => ig.id)
-        : [];
-      if (authorizedIgIds.length > 0 && !authorizedIgIds.includes(chosenInstagramAccount.id)) {
-        return res.status(400).json({
-          code: "instagram_required",
-          error: `Instagram account ${chosenInstagramAccount.id} is not authorized for ad account ${adAccountId}.`,
-          details: [
-            "Grant this ad account access to the Instagram account in Meta Business settings.",
-            "Or choose a Facebook Page linked to an Instagram account already available to this ad account.",
-          ],
-        });
+        console.warn(
+          `[Launch] No Instagram account linked to Facebook Page ${pageName || pageId}; continuing with Facebook-only placements.`,
+        );
+      } else {
+        const validateIgData = await cachedMetaFetch(
+          `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
+          `ig_adaccount_preflight_${adAccountId}`,
+        );
+        const authorizedIgIds = Array.isArray(validateIgData?.data)
+          ? validateIgData.data.map((ig: any) => ig.id)
+          : [];
+        if (authorizedIgIds.length > 0 && !authorizedIgIds.includes(chosenInstagramAccount.id)) {
+          console.warn(
+            `[Launch] Instagram account ${chosenInstagramAccount.id} is not authorized for ad account ${adAccountId}; continuing with Facebook-only placements.`,
+          );
+          chosenInstagramAccount = undefined;
+        }
       }
 
       // ===== PRE-FLIGHT VALIDATION =====
@@ -2727,24 +2713,29 @@ export async function registerRoutes(
           }
 
           if (!instagramAccountId) {
-            throw new Error(
-              `instagram_required: No Instagram account is linked to Facebook Page ${pageId}. Connect a Professional Instagram account and retry.`,
+            log(
+              `No Instagram account linked to Facebook Page ${pageId}; continuing with Facebook-only placements.`,
+              "warning",
             );
-          }
-
-          const validateData = await cachedMetaFetch(
-            `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
-            `ig_adaccount_${adAccountId}`,
-          );
-          const authorizedIgIds = Array.isArray(validateData?.data)
-            ? validateData.data.map((ig: any) => ig.id)
-            : [];
-          if (authorizedIgIds.length > 0 && !authorizedIgIds.includes(instagramAccountId)) {
-            throw new Error(
-              `instagram_required: Instagram account ${instagramAccountId} is not authorized for ad account ${adAccountId}.`,
+          } else {
+            const validateData = await cachedMetaFetch(
+              `https://graph.facebook.com/v21.0/${adAccountId}/instagram_accounts?fields=id,username&access_token=${userAccessToken}`,
+              `ig_adaccount_${adAccountId}`,
             );
+            const authorizedIgIds = Array.isArray(validateData?.data)
+              ? validateData.data.map((ig: any) => ig.id)
+              : [];
+            if (authorizedIgIds.length > 0 && !authorizedIgIds.includes(instagramAccountId)) {
+              log(
+                `Instagram account ${instagramAccountId} is not authorized for ad account ${adAccountId}; continuing with Facebook-only placements.`,
+                "warning",
+              );
+              instagramAccountId = undefined;
+            }
           }
-          log(`Instagram placement enabled with ID: ${instagramAccountId}`, "success");
+          if (instagramAccountId) {
+            log(`Instagram placement enabled with ID: ${instagramAccountId}`, "success");
+          }
           
           if (existingAdSetObject?.metaId) {
             metaAdSetId = existingAdSetObject.metaId;
@@ -2779,8 +2770,7 @@ export async function registerRoutes(
               // Dynamic Creative zahteva asset_feed_spec kar omejuje na 1 ad per adset
               // Flexible format deluje na ad-level z object_story_spec, NE z asset_feed_spec
               isDynamicCreative: false,
-              // Instagram is required for launch; keep Instagram placements enabled.
-              hasInstagramAccount: true,
+              hasInstagramAccount: Boolean(instagramAccountId),
             });
             metaAdSetId = adSetResult.id;
             addAdSetId(metaAdSetId);
@@ -2799,9 +2789,6 @@ export async function registerRoutes(
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : "Unknown error";
           log(`Error creating ad set ${adset.name}: ${errorMessage}`);
-          if (isInstagramRequiredError(err)) {
-            throw err instanceof Error ? err : new Error(errorMessage);
-          }
           continue;
         }
 

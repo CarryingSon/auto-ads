@@ -4177,7 +4177,7 @@ export default function BulkAds() {
             )}
             {selectedPageId && !isInstagramFetching && !hasLinkedInstagram && (
               <div className="rounded-md border border-amber-400/40 bg-amber-50/70 p-3 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
-                Instagram account is required for launch. Connect a Professional Instagram account to this Facebook Page in Meta, then refresh the page selection.
+                No Instagram account is linked to this Facebook Page. Ads will publish to Meta with Facebook-only placements.
               </div>
             )}
 
@@ -4205,9 +4205,7 @@ export default function BulkAds() {
                   !hasSelectedUsableAdAccount ||
                   launchMutation.isPending ||
                   !jobId ||
-                  !selectedPageId ||
-                  isInstagramFetching ||
-                  !hasLinkedInstagram
+                  !selectedPageId
                 }
                 onClick={() => {
                   setCurrentStep(5);

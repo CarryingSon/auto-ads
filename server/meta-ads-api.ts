@@ -1891,9 +1891,12 @@ export class MetaAdsApi {
       };
     }
     
-    // Use Advantage+ placements (automatic) - let Meta optimize across Facebook + Instagram
-    // Don't restrict to specific platforms or positions - Meta will choose the best placements
-    // Note: Instagram account ID is passed at the creative level, not targeting level
+    // Use Advantage+ placements when Instagram is available. If the selected Page
+    // has no usable Instagram identity, keep the ad set Facebook-only so Meta
+    // does not require an instagram_user_id on creatives.
+    if (params.hasInstagramAccount === false) {
+      targeting.publisher_platforms = ['facebook'];
+    }
     
     if (Object.keys(targeting).length > 0) {
       body.append('targeting', JSON.stringify(targeting));
