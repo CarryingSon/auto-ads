@@ -97,7 +97,7 @@ const formatMetaVideoUploadError = (error: any, videoName: string): string => {
   if (code === 351 || subcode === 1363027 || title.toLowerCase().includes("corrupt video")) {
     return [
       `Meta rejected "${videoName}" as unreadable/corrupt${suffix}: ${userMessage}`,
-      "This is a Meta file validation failure, not an app size limit. Re-export or transcode the video to MP4/H.264 video, AAC audio, yuv420p, constant frame rate, and faststart/moov atom at the beginning.",
+      "This is a Meta file validation failure, not an app size limit. The app automatically remuxes/re-encodes videos to MP4/H.264, AAC, yuv420p, constant frame rate, faststart and a max long side of 1920px before upload; if you still see this, Meta rejected the re-encoded file too, so re-export the source from your editor.",
       `${traceId} Raw Meta error: ${JSON.stringify(error)}`,
     ].join(" ");
   }
@@ -2029,6 +2029,113 @@ export class MetaAdsApi {
     }
   }
 
+  private isCorruptVideoError(error: any): boolean {
+    const metaError = error?.metaError ?? error;
+    const message = [metaError?.message, metaError?.error_user_msg, metaError?.error_user_title]
+      .filter((part: any) => typeof part === "string")
+      .join(" ")
+      .toLowerCase();
+
+    return (
+      metaError?.code === 351 ||
+      metaError?.error_subcode === 1363027 ||
+      message.includes("corrupt video")
+    );
+  }
+
+  // Pushes an already-prepared video to Meta. Transcoded/remuxed output and local files go
+  // through Supabase Storage (Meta must be able to fetch them by URL); untouched remote
+  // videos are handed to Meta as the original URL.
+  private async uploadPreparedVideoToMeta(params: {
+    uploadUrl: string;
+    name: string;
+    originalUrl: string;
+    transcodeResult: TranscodeResult;
+    hasLocalPath: boolean;
+  }): Promise<string> {
+    const { uploadUrl, name, originalUrl, transcodeResult, hasLocalPath } = params;
+    const uploadPath = transcodeResult.usedPath;
+    const canUseSupabaseStorage = hasSupabaseStorageConfig();
+
+    if (transcodeResult.transcoded && !canUseSupabaseStorage) {
+      throw new Error(
+        "Video requires transcoding, but Supabase storage is not configured (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET)",
+      );
+    }
+
+    const useSupabase = canUseSupabaseStorage && (transcodeResult.transcoded || hasLocalPath);
+
+    if (!useSupabase) {
+      if (hasLocalPath && !canUseSupabaseStorage) {
+        console.warn(
+          "[MetaAdsApi] Local video available but Supabase storage is not configured; falling back to direct file_url upload",
+        );
+      }
+      console.log('[MetaAdsApi] Video NOT transcoded - using file_url method');
+
+      const uploadParams = new URLSearchParams({
+        file_url: originalUrl,
+        title: name,
+        access_token: this.accessToken!,
+      });
+
+      const metaUploadStart = Date.now();
+      const videoId = await this.uploadVideoFileUrlWithRetry({
+        uploadUrl,
+        uploadParams,
+        name,
+        sourceLabel: "direct_file_url",
+      });
+      const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
+      console.log(`[MetaAdsApi] META API UPLOAD (direct): video_id ${videoId} in ${metaUploadTime}s`);
+      return videoId;
+    }
+
+    const sourceLabel = transcodeResult.transcoded ? "transcoded_supabase" : "raw_supabase";
+    const prefix = transcodeResult.transcoded ? "transcoded-videos" : "raw-videos";
+    console.log(
+      `[MetaAdsApi] Uploading ${transcodeResult.transcoded ? (transcodeResult.remuxed ? "remuxed" : "transcoded") : "raw local"} video to Supabase Storage first`,
+    );
+
+    const videoBuffer = fs.readFileSync(uploadPath);
+    const fileSizeMB = videoBuffer.length / (1024 * 1024);
+    console.log('[MetaAdsApi] Prepared video size:', videoBuffer.length, `(${fileSizeMB.toFixed(2)} MB)`);
+
+    const uniqueId = crypto.randomBytes(8).toString('hex');
+    const objectName = `${prefix}/${uniqueId}.mp4`;
+
+    const objectStorageStart = Date.now();
+    await uploadBufferToSupabaseStorage({
+      objectPath: objectName,
+      contentType: "video/mp4",
+      buffer: videoBuffer,
+    });
+
+    const signedUrl = await createSignedSupabaseDownloadUrl({
+      objectPath: objectName,
+      expiresInSeconds: 3600,
+    });
+    const objectStorageTime = ((Date.now() - objectStorageStart) / 1000).toFixed(2);
+    console.log(`[MetaAdsApi] SUPABASE STORAGE UPLOAD: ${fileSizeMB.toFixed(2)}MB in ${objectStorageTime}s`);
+
+    const uploadParams = new URLSearchParams({
+      file_url: signedUrl,
+      title: name,
+      access_token: this.accessToken!,
+    });
+
+    const metaUploadStart = Date.now();
+    const videoId = await this.uploadVideoFileUrlWithRetry({
+      uploadUrl,
+      uploadParams,
+      name,
+      sourceLabel,
+    });
+    const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
+    console.log(`[MetaAdsApi] META API UPLOAD (${sourceLabel}): video_id ${videoId} in ${metaUploadTime}s`);
+    return videoId;
+  }
+
   // Core video upload logic shared by uploadVideo and uploadVideoNoWait
   private async uploadVideoCore(videoUrlOrPath: string, name: string, options?: { localPath?: string }): Promise<{ id: string; transcodeResult?: TranscodeResult }> {
     const uploadStartTime = Date.now();
@@ -2059,6 +2166,7 @@ export class MetaAdsApi {
           console.log('[MetaAdsApi] Transcode result:', { 
             ok: transcodeResult.ok, 
             transcoded: transcodeResult.transcoded,
+            remuxed: transcodeResult.remuxed,
             reasons: transcodeResult.reasons 
           });
 
@@ -2093,126 +2201,57 @@ export class MetaAdsApi {
         throw new Error("Video preparation failed: no transcode result");
       }
 
-      const uploadPath = transcodeResult.usedPath;
       if (transcodeResult.transcoded) {
-        transcodedPath = uploadPath;
+        transcodedPath = transcodeResult.usedPath;
       }
 
       const uploadUrl = `${META_VIDEO_URL}/${adAccountFormatted}/advideos`;
-      const canUseSupabaseStorage = hasSupabaseStorageConfig();
       let video_id: string | undefined;
-      
-      if (transcodeResult.transcoded) {
-        if (!canUseSupabaseStorage) {
-          throw new Error(
-            "Video requires transcoding, but Supabase storage is not configured (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET)",
+
+      try {
+        video_id = await this.uploadPreparedVideoToMeta({
+          uploadUrl,
+          name,
+          originalUrl: videoUrlOrPath,
+          transcodeResult,
+          hasLocalPath: Boolean(options?.localPath),
+        });
+      } catch (uploadError: any) {
+        // Meta's validator rejects some files that decode perfectly everywhere else
+        // (code 351 / subcode 1363027). Our static checks cannot catch every case, so when
+        // Meta says "corrupt", re-encode the source from scratch and try once more instead
+        // of failing the whole launch.
+        const canRepair = this.isCorruptVideoError(uploadError) && Boolean(downloadedPath) && !transcodeResult.reasons.includes('forced_after_meta_rejection');
+        if (!canRepair) throw uploadError;
+
+        console.warn(
+          `[MetaAdsApi] Meta rejected "${name}" as corrupt - forcing a full re-encode and retrying once`,
+        );
+
+        const repaired = await prepareVideoForMeta(downloadedPath!, name, 1.0, { force: true });
+        if (!repaired.ok) {
+          console.error(
+            `[MetaAdsApi] Forced re-encode failed for "${name}": ${repaired.logs.error || repaired.reasons.join(', ')}`,
           );
+          throw uploadError;
         }
-        console.log('[MetaAdsApi] Video was transcoded - uploading to Supabase Storage first');
-        
-        const videoBuffer = fs.readFileSync(uploadPath);
-        const fileSizeMB = videoBuffer.length / (1024 * 1024);
-        console.log('[MetaAdsApi] Transcoded video size:', videoBuffer.length, `(${fileSizeMB.toFixed(2)} MB)`);
-        
-        const uniqueId = crypto.randomBytes(8).toString('hex');
-        const objectName = `transcoded-videos/${uniqueId}.mp4`;
-        
-        const objectStorageStart = Date.now();
-        await uploadBufferToSupabaseStorage({
-          objectPath: objectName,
-          contentType: "video/mp4",
-          buffer: videoBuffer,
-        });
 
-        const signedUrl = await createSignedSupabaseDownloadUrl({
-          objectPath: objectName,
-          expiresInSeconds: 3600,
-        });
-        const objectStorageTime = ((Date.now() - objectStorageStart) / 1000).toFixed(2);
-        console.log(`[MetaAdsApi] SUPABASE STORAGE UPLOAD: ${fileSizeMB.toFixed(2)}MB in ${objectStorageTime}s`);
-        
-        const uploadParams = new URLSearchParams({
-          file_url: signedUrl,
-          title: name,
-          access_token: this.accessToken!,
-        });
-        
-        const metaUploadStart = Date.now();
-        video_id = await this.uploadVideoFileUrlWithRetry({
-          uploadUrl,
-          uploadParams,
-          name,
-          sourceLabel: "transcoded_supabase",
-        });
-        const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
-        console.log(`[MetaAdsApi] META API UPLOAD: video_id ${video_id} in ${metaUploadTime}s`);
-        
-        if (downloadedPath) { await cleanupTempFile(downloadedPath); downloadedPath = null; }
-        if (transcodedPath && transcodedPath !== downloadedPath) { await cleanupTempFile(transcodedPath); transcodedPath = null; }
-      } else if (options?.localPath && canUseSupabaseStorage) {
-        console.log('[MetaAdsApi] Video NOT transcoded (local path) - uploading via Supabase Storage');
-        
-        const videoBuffer = fs.readFileSync(uploadPath);
-        const fileSizeMB = videoBuffer.length / (1024 * 1024);
-
-        const uniqueId = crypto.randomBytes(8).toString('hex');
-        const objectName = `raw-videos/${uniqueId}.mp4`;
-
-        await uploadBufferToSupabaseStorage({
-          objectPath: objectName,
-          contentType: "video/mp4",
-          buffer: videoBuffer,
-        });
-        const signedUrl = await createSignedSupabaseDownloadUrl({
-          objectPath: objectName,
-          expiresInSeconds: 3600,
-        });
-        console.log(`[MetaAdsApi] Uploaded ${fileSizeMB.toFixed(2)}MB to Supabase Storage for Meta`);
-        
-        if (downloadedPath) { await cleanupTempFile(downloadedPath); downloadedPath = null; }
-        
-        const uploadParams = new URLSearchParams({
-          file_url: signedUrl,
-          title: name,
-          access_token: this.accessToken,
-        });
-        
-        const metaUploadStart = Date.now();
-        video_id = await this.uploadVideoFileUrlWithRetry({
-          uploadUrl,
-          uploadParams,
-          name,
-          sourceLabel: "raw_supabase",
-        });
-        const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
-        console.log(`[MetaAdsApi] META API UPLOAD (local→ObjStorage): video_id ${video_id} in ${metaUploadTime}s`);
-      } else {
-        if (options?.localPath && !canUseSupabaseStorage) {
-          console.warn(
-            "[MetaAdsApi] Local video available but Supabase storage is not configured; falling back to direct file_url upload",
-          );
+        if (transcodedPath && transcodedPath !== repaired.usedPath) {
+          await cleanupTempFile(transcodedPath);
         }
-        console.log('[MetaAdsApi] Video NOT transcoded - using file_url method');
-        
-        if (downloadedPath) { await cleanupTempFile(downloadedPath); downloadedPath = null; }
-        
-        const uploadParams = new URLSearchParams({
-          file_url: videoUrlOrPath,
-          title: name,
-          access_token: this.accessToken,
-        });
-        
-        const metaUploadStart = Date.now();
-        video_id = await this.uploadVideoFileUrlWithRetry({
+        transcodeResult = repaired;
+        transcodedPath = repaired.transcoded ? repaired.usedPath : null;
+
+        video_id = await this.uploadPreparedVideoToMeta({
           uploadUrl,
-          uploadParams,
           name,
-          sourceLabel: "direct_file_url",
+          originalUrl: videoUrlOrPath,
+          transcodeResult: repaired,
+          hasLocalPath: Boolean(options?.localPath),
         });
-        const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
-        console.log(`[MetaAdsApi] META API UPLOAD (direct): video_id ${video_id} in ${metaUploadTime}s`);
+        console.log(`[MetaAdsApi] Recovered from Meta corrupt-video rejection for "${name}" via forced re-encode`);
       }
-      
+
       if (!video_id) {
         throw new Error('Video upload failed: no video_id returned');
       }
@@ -2222,7 +2261,6 @@ export class MetaAdsApi {
       
       return { id: video_id, transcodeResult };
     } finally {
-      // Cleanup any remaining temp files (in case of error before buffer read)
       if (downloadedPath) {
         await cleanupTempFile(downloadedPath);
       }

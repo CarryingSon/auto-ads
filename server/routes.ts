@@ -3008,13 +3008,15 @@ export async function registerRoutes(
               const transcodeInfo = videoResult.transcodeResult;
               if (transcodeInfo?.transcoded) {
                 const transcodeTime = transcodeInfo.logs?.transcodeTimeSeconds?.toFixed(1) || '?';
-                log(`Video sent to Meta: ${videoResult.id} (transcoded: ${transcodeTime}s, upload: ${videoTotalTime}s)`, "success", {
+                const fixLabel = transcodeInfo.remuxed ? "auto-fixed (remux)" : "transcoded";
+                log(`Video sent to Meta: ${videoResult.id} (${fixLabel}: ${transcodeTime}s, upload: ${videoTotalTime}s)`, "success", {
                   event: "video_upload_completed",
                   assetId: asset.id,
                   filename: asset.originalFilename,
                   metaVideoId: videoResult.id,
                   uploadSeconds: Number(videoTotalTime),
                   transcoded: true,
+                  remuxed: transcodeInfo.remuxed,
                   transcodeSeconds: Number(transcodeTime),
                   transcodeReasons: transcodeInfo.reasons,
                 }, adset.id);
