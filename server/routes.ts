@@ -472,7 +472,9 @@ async function fetchInstagramUsernamesFromAdAccount(params: {
 }): Promise<Map<string, InstagramAccountRecord>> {
   const { adAccountId, userAccessToken, apiVersion } = params;
   const byId = new Map<string, InstagramAccountRecord>();
-  const edges = ["instagram_accounts", "advertisable_instagram_profiles"];
+  // advertisable_instagram_profiles is not an ad account edge — Meta answers
+  // code 2500 "Unknown path components" — so instagram_accounts is the only one.
+  const edges = ["instagram_accounts"];
 
   for (const edge of edges) {
     const data = await cachedMetaFetch(
