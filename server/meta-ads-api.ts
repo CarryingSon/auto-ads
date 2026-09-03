@@ -25,6 +25,13 @@ import {
   getMissingSupabaseStorageConfig,
 } from "./supabase-storage.js";
 
+// Meta wants budgets as whole cents. Float maths does not oblige:
+// 20.10 * 100 is 2010.0000000000002 and 1.15 * 100 is 114.99999999999999,
+// so every conversion goes through here rather than being written inline.
+function toCents(amount: number): string {
+  return String(Math.round(amount * 100));
+}
+
 const META_APP_ID = process.env.META_APP_ID || "";
 const META_APP_SECRET = process.env.META_APP_SECRET || "";
 const META_API_VERSION = "v24.0";
@@ -391,7 +398,12 @@ export class MetaAdsApi {
       return false;
     }
 
-    this.accessToken = decrypt(connection[0].accessToken);
+    const decryptedAccessToken = decrypt(connection[0].accessToken);
+    if (decryptedAccessToken === null) {
+      console.error("[MetaAdsApi] Stored access token could not be decrypted; treating Meta as disconnected");
+      return false;
+    }
+    this.accessToken = decryptedAccessToken;
 
     // Check if token is expired and refresh if needed
     if (connection[0].tokenExpiresAt && new Date(connection[0].tokenExpiresAt) < new Date()) {
@@ -425,6 +437,10 @@ export class MetaAdsApi {
 
     try {
       const decryptedRefresh = decrypt(refreshToken);
+      if (decryptedRefresh === null) {
+        console.error("[MetaAdsApi] Stored refresh token could not be decrypted; re-authorization required");
+        return false;
+      }
       const response = await fetch(
         `${META_GRAPH_URL}/oauth/access_token?` +
         `grant_type=fb_exchange_token&` +
@@ -461,6 +477,37 @@ export class MetaAdsApi {
       console.error("Token refresh error:", err);
       return false;
     }
+  }
+
+  /**
+   * Follows paging.next until the collection is exhausted. Meta caps a single
+   * response at the requested limit and offers the rest behind a cursor, so a
+   * plain apiRequest silently returned a truncated list — an account with more
+   * campaigns than the limit simply appeared to have fewer.
+   */
+  private async apiRequestAllPages(
+    endpoint: string,
+    params: Record<string, string> = {},
+    maxPages = 20,
+  ): Promise<any[]> {
+    const collected: any[] = [];
+    let page = await this.apiRequest<{ data: any[]; paging?: { cursors?: { after?: string } } }>(
+      endpoint,
+      params,
+    );
+    collected.push(...(page.data || []));
+
+    for (let i = 1; i < maxPages; i++) {
+      const after = page.paging?.cursors?.after;
+      if (!after || !(page.data || []).length) break;
+      page = await this.apiRequest<{ data: any[]; paging?: { cursors?: { after?: string } } }>(
+        endpoint,
+        { ...params, after },
+      );
+      collected.push(...(page.data || []));
+    }
+
+    return collected;
   }
 
   private async apiRequest<T>(endpoint: string, params: Record<string, string> = {}): Promise<T> {
@@ -568,7 +615,7 @@ export class MetaAdsApi {
     }
 
     // Get campaigns excluding ARCHIVED and DELETED
-    const data = await this.apiRequest<{ data: any[] }>(
+    const data = await this.apiRequestAllPages(
       `act_${this.adAccountId.replace('act_', '')}/campaigns`,
       {
         fields: "id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,created_time,updated_time",
@@ -581,7 +628,7 @@ export class MetaAdsApi {
       }
     );
 
-    return data.data || [];
+    return data;
   }
 
   async createCampaign(params: {
@@ -613,7 +660,7 @@ export class MetaAdsApi {
     if (isCBO && params.dailyBudget) {
       // CBO: Campaign Budget Optimization - budget at campaign level
       // dailyBudget is in EUR, Meta API expects cents
-      body.append('daily_budget', String(Math.round(params.dailyBudget * 100)));
+      body.append('daily_budget', toCents(params.dailyBudget));
     } else {
       // ABO: Ad Set Budget Optimization - required field for non-CBO campaigns
       body.append('is_adset_budget_sharing_enabled', 'false');
@@ -650,7 +697,7 @@ export class MetaAdsApi {
       ? `${campaignId}/adsets`
       : `act_${this.adAccountId.replace('act_', '')}/adsets`;
 
-    const data = await this.apiRequest<{ data: any[] }>(
+    const data = await this.apiRequestAllPages(
       endpoint,
       {
         // Include a broad set of ad set settings so import can run fully from DB cache after sync.
@@ -675,7 +722,7 @@ export class MetaAdsApi {
       }
     );
 
-    return data.data || [];
+    return data;
   }
 
   async getAds(adsetId?: string): Promise<any[]> {
@@ -753,7 +800,7 @@ export class MetaAdsApi {
 
     // Fetch ad sets with full targeting info including DSA fields for beneficiary/payer
     // Only fetch ACTIVE/PAUSED ad sets to reduce API calls and avoid rate limits
-    const adSetsData = await this.apiRequest<{ data: any[] }>(
+    const adSetsData = await this.apiRequestAllPages(
       `${campaignId}/adsets`,
       {
         fields: "id,name,status,effective_status,daily_budget,lifetime_budget,daily_min_spend_target,daily_spend_cap,lifetime_spend_cap,billing_event,optimization_goal,bid_strategy,targeting,promoted_object,attribution_spec,pacing_type,start_time,end_time,dsa_beneficiary,dsa_payor",
@@ -777,7 +824,7 @@ export class MetaAdsApi {
       }
     );
 
-    const adSets = adSetsData.data || [];
+    const adSets = adSetsData;
 
     let ads: any[] = [];
     try {
@@ -1848,10 +1895,10 @@ export class MetaAdsApi {
     body.append('bid_strategy', 'LOWEST_COST_WITHOUT_CAP');
     
     if (params.dailyBudget) {
-      body.append('daily_budget', (params.dailyBudget * 100).toString());
+      body.append('daily_budget', toCents(params.dailyBudget));
     }
     if (params.lifetimeBudget) {
-      body.append('lifetime_budget', (params.lifetimeBudget * 100).toString());
+      body.append('lifetime_budget', toCents(params.lifetimeBudget));
     }
     if (params.startTime) {
       body.append('start_time', params.startTime);
@@ -1906,13 +1953,13 @@ export class MetaAdsApi {
 
     // Spending limits
     if (params.dailyMinSpendTarget) {
-      body.append('daily_min_spend_target', Math.round(params.dailyMinSpendTarget * 100).toString());
+      body.append('daily_min_spend_target', toCents(params.dailyMinSpendTarget));
     }
     if (params.dailySpendCap) {
-      body.append('daily_spend_cap', Math.round(params.dailySpendCap * 100).toString());
+      body.append('daily_spend_cap', toCents(params.dailySpendCap));
     }
     if (params.lifetimeSpendCap) {
-      body.append('lifetime_spend_cap', (params.lifetimeSpendCap * 100).toString());
+      body.append('lifetime_spend_cap', toCents(params.lifetimeSpendCap));
     }
 
     if (params.promotedObject) {

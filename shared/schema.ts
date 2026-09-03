@@ -185,6 +185,9 @@ export const bulkUploadJobs = pgTable("bulk_upload_jobs", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   completedAt: timestamp("completed_at"),
+  // Set when a user cancels. The worker polls this because it runs in a
+  // different serverless instance than the request that cancels.
+  cancelRequestedAt: timestamp("cancel_requested_at"),
   errorMessage: text("error_message"),
   logs: jsonb("logs").$type<string[]>().default([]),
 });

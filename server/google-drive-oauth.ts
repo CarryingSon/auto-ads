@@ -21,7 +21,12 @@ async function getGoogleTokenForUser(userId: string): Promise<{ accessToken: str
   }
 
   const accessToken = decrypt(connection[0].accessToken);
-  const refreshToken = connection[0].refreshToken ? decrypt(connection[0].refreshToken) : undefined;
+  if (accessToken === null) {
+    throw new Error('Google Drive token could not be decrypted - please reconnect Google Drive in Settings');
+  }
+  const refreshToken = connection[0].refreshToken
+    ? decrypt(connection[0].refreshToken) ?? undefined
+    : undefined;
   const expiresAt = connection[0].tokenExpiresAt;
 
   if (expiresAt && new Date(expiresAt).getTime() < Date.now() && refreshToken) {

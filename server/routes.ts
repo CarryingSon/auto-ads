@@ -55,7 +55,18 @@ import { checkSupabaseStorage } from "./supabase-storage.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
-const cancelledJobs = new Set<string>();
+// Cancellation is persisted on the job row, not held in memory: the request
+// that cancels and the worker that must notice run in separate serverless
+// instances, so an in-process Set never reached the worker.
+async function isCancellationRequested(jobId: string): Promise<boolean> {
+  try {
+    const job = await storage.getJob(jobId);
+    return Boolean(job?.cancelRequestedAt);
+  } catch (error) {
+    console.warn(`[Launch] Could not read cancellation flag for job ${jobId}:`, error);
+    return false;
+  }
+}
 
 const metaApiCache = new Map<string, { data: any; expiry: number }>();
 const META_CACHE_TTL = 30 * 60 * 1000;
@@ -951,8 +962,13 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  app.get("/api/drive/connected-email", async (_req: Request, res: Response) => {
+  app.get("/api/drive/connected-email", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { getServiceAccountEmail, isServiceAccountConfigured } = await import("./google-drive-service-account.js");
       if (isServiceAccountConfigured()) {
         const email = getServiceAccountEmail();
@@ -1530,6 +1546,11 @@ export async function registerRoutes(
     { name: "videos", maxCount: 10 },
   ]), async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const files = req.files as { docx?: Express.Multer.File[]; videos?: Express.Multer.File[] };
       
       if (!files.docx || files.docx.length === 0) {
@@ -1544,11 +1565,10 @@ export async function registerRoutes(
         : videoIndexesRaw ? [Number(videoIndexesRaw)] : [];
 
       // Create a new job
-      const userId = (req.session as any)?.userId;
       const job = await storage.createJob({
         status: "draft",
         currentStep: 2,
-        userId: userId || undefined,
+        userId,
       });
 
       // Save DOCX upload record
@@ -2177,6 +2197,10 @@ export async function registerRoutes(
         globalSettingsRecord,
       };
 
+      // A new launch clears any cancellation left over from a previous run,
+      // otherwise the worker would stop on the first ad set.
+      await storage.updateJob(jobId, { cancelRequestedAt: null });
+
       const billingStatus = await getBillingStatusForUser(userId);
       let queueItem;
       if (billingStatus.planType === "free") {
@@ -2657,10 +2681,9 @@ export async function registerRoutes(
       for (const adset of jobAdsets) {
         assertWorkerTimeBudget(`starting ad set ${adset.name}`);
 
-        if (cancelledJobs.has(jobId)) {
+        if (await isCancellationRequested(jobId)) {
           log("Upload cancelled by user — stopping", "error");
           await storage.updateJob(jobId, { status: "error", errorMessage: "Upload cancelled by user" });
-          cancelledJobs.delete(jobId);
           throw new Error("Upload cancelled by user");
         }
 
@@ -3546,38 +3569,46 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Ad set not found" });
       }
 
-      // Update ad set status to processing/creating
+      // Re-run the job through the launch queue. The worker already resumes
+      // rather than duplicates: it reuses ad sets that carry a metaId and
+      // skips ads whose names already exist, so only the failed work is redone.
+      const previousQueue = await getLatestQueueForJob(jobId);
+      if (!previousQueue?.payload) {
+        return res.status(409).json({
+          error:
+            "This upload has no stored launch data to retry from. Start a new upload for these ad sets.",
+        });
+      }
+
       await storage.updateMetaObject(adSetObject.id, {
         status: "creating",
       });
 
-      // Update job status back to creating_creatives if it was in error
-      if (job.status === "error" || job.status === "done") {
-        await storage.updateJob(jobId, {
-          status: "creating_creatives",
-        });
-      }
+      await storage.updateJob(jobId, {
+        status: "creating_creatives",
+        cancelRequestedAt: null,
+        errorMessage: null,
+      });
 
-      // Simulate successful retry (in real implementation, this would trigger actual retry logic)
-      setTimeout(async () => {
-        await storage.updateMetaObject(adSetObject.id, {
-          status: "created",
-        });
-        
-        // Check if all ad sets are now complete
-        const updatedMetaObjects = await storage.getMetaObjectsByJob(jobId);
-        const allAdSets = updatedMetaObjects.filter(obj => obj.objectType === "adset");
-        const allComplete = allAdSets.every(obj => obj.status === "created");
-        
-        if (allComplete) {
-          await storage.updateJob(jobId, {
-            status: "done",
-            completedAt: new Date(),
-          });
-        }
-      }, 2000);
+      const retryQueueItem = await enqueueLaunchJob({
+        jobId,
+        userId,
+        payload: previousQueue.payload as unknown as LaunchQueuePayload,
+      });
 
-      res.json({ success: true, message: "Retry initiated" });
+      const dispatch = triggerLaunchWorker(req, retryQueueItem.id, jobId, "retry_adset");
+
+      emitJobLog(jobId, `Retrying ad set ${adSetObject.name || adsetId}`, "info");
+
+      res.json({
+        success: true,
+        queueId: retryQueueItem.id,
+        dispatch,
+        message:
+          dispatch === "requested"
+            ? "Retry queued and worker started"
+            : "Retry queued — the worker will pick it up shortly",
+      });
     } catch (error) {
       console.error("Error retrying ad set:", error);
       res.status(500).json({ 
@@ -3597,7 +3628,7 @@ export async function registerRoutes(
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
-      cancelledJobs.add(jobId);
+      await storage.updateJob(jobId, { cancelRequestedAt: new Date() });
       console.error(`\n========== [Launch] UPLOAD CANCELLED BY USER ==========`);
       console.error(`Job ID: ${jobId}`);
       console.error(`============================================================\n`);
@@ -3614,17 +3645,24 @@ export async function registerRoutes(
   // Dry run preview
   app.post("/api/bulk-ads/dry-run", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       // Validate request body
       const parseResult = dryRunRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
-        return res.status(400).json({ 
-          error: parseResult.error.errors[0]?.message || "Invalid request" 
+        return res.status(400).json({
+          error: parseResult.error.errors[0]?.message || "Invalid request"
         });
       }
-      
+
       const { jobId, disabledAdSetIds } = parseResult.data;
 
-      const job = await storage.getJob(jobId);
+      // This returns ad copy, creative names and campaign settings, so the
+      // caller has to own the job — not merely know its id.
+      const job = await assertJobOwnership(userId, jobId);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -3718,6 +3756,11 @@ export async function registerRoutes(
   // Import from Google Drive folder URL
   app.post("/api/drive/import", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { folderUrl } = req.body;
       if (!folderUrl || typeof folderUrl !== 'string') {
         return res.status(400).json({ error: "Folder URL is required" });
@@ -3749,7 +3792,6 @@ export async function registerRoutes(
       }
 
       // Create job with new structure
-      const userId = (req.session as any)?.userId;
       const job = await storage.createJob({
         status: "pending",
         currentStep: 1,
@@ -3757,7 +3799,7 @@ export async function registerRoutes(
         campaignName: folderName,
         totalAdSets: subfolders.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
         defaultSettings: {
           dailyBudget: 20,
           ageMin: 18,
@@ -3936,6 +3978,11 @@ export async function registerRoutes(
   // Parse Drive folder URL and return folder info
   app.post("/api/drive/parse-url", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { folderUrl } = req.body;
       if (!folderUrl || typeof folderUrl !== 'string') {
         return res.status(400).json({ error: "Folder URL is required" });
@@ -4078,7 +4125,7 @@ export async function registerRoutes(
         campaignId,
         totalAdSets: dctFolders.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
       });
 
       // Process each DCT folder - use sorted order for matching
@@ -4530,6 +4577,11 @@ export async function registerRoutes(
 
   app.post("/api/drive/parse-docx", upload.single("docx"), async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       if (!req.file) {
         return res.status(400).json({ error: "DOCX file is required" });
       }
@@ -4573,6 +4625,11 @@ export async function registerRoutes(
   // Import from public Drive folder using manifest.json
   app.post("/api/drive/import-public", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { campaignId, driveUrl, manifestFileId } = req.body;
       if (!campaignId || !driveUrl || !manifestFileId) {
         return res.status(400).json({ 
@@ -4614,7 +4671,6 @@ export async function registerRoutes(
       }
 
       // Create job
-      const userId = (req.session as any)?.userId;
       const job = await storage.createJob({
         status: "pending",
         currentStep: 1,
@@ -4624,7 +4680,7 @@ export async function registerRoutes(
         campaignId,
         totalAdSets: manifest.dcts.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
       });
 
       // Parse global DOCX if present
@@ -4755,6 +4811,11 @@ export async function registerRoutes(
 
   app.get("/api/drive/debug", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
       if (!isServiceAccountConfigured()) {
         return res.json({ error: "Service account not configured", connected: false });
@@ -4961,7 +5022,7 @@ export async function registerRoutes(
         campaignId,
         totalAdSets: sortedDctFolders.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
       });
 
       // Process each DCT folder
@@ -6173,8 +6234,8 @@ export async function registerRoutes(
             .limit(1);
 
           const encryptedToken = connection?.accessToken;
-          if (encryptedToken) {
-            const accessToken = decrypt(encryptedToken);
+          const accessToken = encryptedToken ? decrypt(encryptedToken) : null;
+          if (accessToken) {
             const apiVersion = process.env.META_API_VERSION || "v21.0";
 
             const refreshedPendingAccounts = await Promise.all(

@@ -78,14 +78,50 @@ export async function listDriveFiles(folderId?: string, mimeTypes?: string[]) {
   }
   query = query ? `${query} and trashed=false` : 'trashed=false';
 
-  const response = await drive.files.list({
+  return listAllFiles(drive, {
     q: query,
     fields: 'files(id, name, mimeType, size, createdTime)',
     orderBy: 'name',
-    pageSize: 100,
   });
+}
 
-  return response.data.files || [];
+/**
+ * Drive returns at most one page per call. Without following nextPageToken a
+ * folder holding more than pageSize entries was silently truncated — the extra
+ * ad sets or creatives simply never appeared, with nothing in the logs.
+ */
+const DRIVE_PAGE_SIZE = 200;
+const DRIVE_MAX_PAGES = 25;
+
+async function listAllFiles(
+  drive: Awaited<ReturnType<typeof getUncachableGoogleDriveClient>>,
+  params: { q: string; fields: string; orderBy?: string },
+) {
+  const files: any[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+
+  do {
+    const response: any = await drive.files.list({
+      q: params.q,
+      fields: `nextPageToken, ${params.fields}`,
+      orderBy: params.orderBy,
+      pageSize: DRIVE_PAGE_SIZE,
+      pageToken,
+    });
+    files.push(...(response.data.files || []));
+    pageToken = response.data.nextPageToken || undefined;
+    pages += 1;
+    if (pageToken && pages >= DRIVE_MAX_PAGES) {
+      console.warn(
+        `[Drive] Stopped after ${files.length} entries (${pages} pages) for query: ${params.q}. ` +
+          `More results exist but were not fetched.`,
+      );
+      break;
+    }
+  } while (pageToken);
+
+  return files;
 }
 
 // Extract folder ID from Google Drive URL
@@ -122,13 +158,11 @@ export async function getFolderMetadata(folderId: string) {
 // List subfolders (Ad Set folders)
 export async function listSubfolders(parentFolderId: string) {
   const drive = await getUncachableGoogleDriveClient();
-  const response = await drive.files.list({
+  return listAllFiles(drive, {
     q: `'${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
     fields: 'files(id, name, mimeType, createdTime)',
     orderBy: 'name',
-    pageSize: 100,
   });
-  return response.data.files || [];
 }
 
 // List files in a subfolder (videos + docx)
@@ -136,14 +170,11 @@ export async function listAdSetFiles(folderId: string) {
   const drive = await getUncachableGoogleDriveClient();
   
   // Get all files in the folder
-  const response = await drive.files.list({
+  const files = await listAllFiles(drive, {
     q: `'${folderId}' in parents and trashed=false`,
     fields: 'files(id, name, mimeType, size, createdTime)',
     orderBy: 'name',
-    pageSize: 100,
   });
-
-  const files = response.data.files || [];
   
   // Categorize files
   const videos: Array<{
@@ -301,14 +332,11 @@ export async function listDCTFolders(parentFolderId: string) {
 export async function listDCTCreatives(folderId: string) {
   const drive = await getUncachableGoogleDriveClient();
   
-  const response = await drive.files.list({
+  const files = await listAllFiles(drive, {
     q: `'${folderId}' in parents and trashed=false`,
     fields: 'files(id, name, mimeType, size, createdTime, webViewLink)',
     orderBy: 'name',
-    pageSize: 100,
   });
-
-  const files = response.data.files || [];
   
   const creatives: Array<{
     id: string;
