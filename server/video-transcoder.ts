@@ -42,15 +42,18 @@ const require_ = createModuleRequire();
 function resolveBinary(envVar: string, installerPackage: string, fallback: string): string {
   const override = process.env[envVar]?.trim();
   if (override) {
-    console.log(`[VideoTranscoder] Using ${fallback} from ${envVar}: ${override}`);
-    return override;
+    // A bare command name is resolved through PATH by spawn; only fix up real paths.
+    const usable = override.includes(path.sep) ? ensureExecutable(override, fallback) : override;
+    console.log(`[VideoTranscoder] Using ${fallback} from ${envVar}: ${usable}`);
+    return usable;
   }
 
   try {
     const resolved = require_?.(installerPackage)?.path;
     if (typeof resolved === 'string' && resolved.length > 0 && fs.existsSync(resolved)) {
-      console.log(`[VideoTranscoder] Using bundled ${fallback}: ${resolved}`);
-      return resolved;
+      const usable = ensureExecutable(resolved, fallback);
+      console.log(`[VideoTranscoder] Using bundled ${fallback}: ${usable}`);
+      return usable;
     }
   } catch {
     // Package missing or unusable on this platform - fall through to PATH.
@@ -62,6 +65,48 @@ function resolveBinary(envVar: string, installerPackage: string, fallback: strin
     `falling back to "${fallback}" from PATH. Set ${envVar} if the host provides its own binary.`,
   );
   return fallback;
+}
+
+// The only writable location in a serverless runtime.
+const TMP_BIN_DIR = '/tmp/ff-bin';
+
+/**
+ * Package managers can skip dependency install scripts (Vercel's npm gates them behind
+ * allow-scripts), and @ff*-installer sets the executable bit in a postinstall. Without it
+ * spawning the binary fails with EACCES, so restore the bit ourselves.
+ */
+function ensureExecutable(binaryPath: string, name: string): string {
+  try {
+    fs.accessSync(binaryPath, fs.constants.X_OK);
+    return binaryPath;
+  } catch {
+    // Not executable - fall through.
+  }
+
+  try {
+    fs.chmodSync(binaryPath, 0o755);
+    fs.accessSync(binaryPath, fs.constants.X_OK);
+    console.warn(`[VideoTranscoder] ${name} was not executable; fixed permissions in place`);
+    return binaryPath;
+  } catch {
+    // Deployment filesystem is read-only.
+  }
+
+  try {
+    fs.mkdirSync(TMP_BIN_DIR, { recursive: true });
+    const target = path.join(TMP_BIN_DIR, name);
+    const sourceSize = fs.statSync(binaryPath).size;
+    if (!fs.existsSync(target) || fs.statSync(target).size !== sourceSize) {
+      fs.copyFileSync(binaryPath, target);
+    }
+    fs.chmodSync(target, 0o755);
+    fs.accessSync(target, fs.constants.X_OK);
+    console.warn(`[VideoTranscoder] ${name} was not executable in a read-only bundle; copied to ${target}`);
+    return target;
+  } catch (error: any) {
+    console.error(`[VideoTranscoder] Could not make ${name} executable: ${error?.message}`);
+    return binaryPath;
+  }
 }
 
 let cachedFfmpegPath: string | null = null;

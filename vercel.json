@@ -1,12 +1,11 @@
 {
   "version": 2,
   "framework": null,
-  "buildCommand": "npm run build",
+  "buildCommand": "find node_modules/@ffmpeg-installer node_modules/@ffprobe-installer -type f \\( -name ffmpeg -o -name ffprobe \\) -exec chmod 755 {} + || true; npm run build",
   "outputDirectory": "dist/public",
   "functions": {
     "api/index.ts": {
       "maxDuration": 300,
-      "memory": 2048,
       "includeFiles": "node_modules/@ff*-installer/**"
     }
   },
