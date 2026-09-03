@@ -51,6 +51,7 @@ import {
 } from "./billing.js";
 import { checkAdAccountPromotePagesAccess, normalizeMetaAdAccount } from "./meta-oauth-access.js";
 import { checkFfmpegAvailability, runFfmpegSelfTest } from "./video-transcoder.js";
+import { checkSupabaseStorage } from "./supabase-storage.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
@@ -2168,17 +2169,22 @@ export async function registerRoutes(
       const binaries = await checkFfmpegAvailability();
       const binariesOk = binaries.ffmpeg.ok && binaries.ffprobe.ok;
 
+      // Transcoded videos are handed to Meta as a signed URL, so storage has to work too.
+      const storage = await checkSupabaseStorage();
+      const storageOk = storage.configured && storage.reachable === true;
+
       // ?deep=1 also encodes and re-muxes a throwaway clip, which is the only way to prove
       // the build has libx264/AAC and that /tmp is writable.
       const deep = req.query.deep === "1" || req.query.deep === "true";
       const selfTest = deep && binariesOk ? await runFfmpegSelfTest() : null;
-      const ok = binariesOk && (selfTest ? selfTest.ok : true);
+      const ok = binariesOk && storageOk && (selfTest ? selfTest.ok : true);
 
       return res.status(ok ? 200 : 503).json({
         ok,
         platform: `${process.platform}/${process.arch}`,
         node: process.version,
         ...binaries,
+        storage,
         ...(selfTest ? { selfTest } : {}),
       });
     } catch (error) {

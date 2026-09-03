@@ -22,6 +22,7 @@ import {
 import {
   uploadBufferToSupabaseStorage,
   createSignedSupabaseDownloadUrl,
+  getMissingSupabaseStorageConfig,
 } from "./supabase-storage.js";
 
 const META_APP_ID = process.env.META_APP_ID || "";
@@ -2058,8 +2059,13 @@ export class MetaAdsApi {
     const canUseSupabaseStorage = hasSupabaseStorageConfig();
 
     if (transcodeResult.transcoded && !canUseSupabaseStorage) {
+      const missing = getMissingSupabaseStorageConfig();
       throw new Error(
-        "Video requires transcoding, but Supabase storage is not configured (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET)",
+        `"${name}" had to be re-encoded for Meta, but the re-encoded file cannot be handed to Meta ` +
+        `because object storage is not configured. Meta downloads videos by URL, so the prepared file ` +
+        `must be uploaded somewhere first. Missing environment variable${missing.length === 1 ? "" : "s"}: ` +
+        `${missing.join(", ")}. Set ${missing.length === 1 ? "it" : "them"} in the deployment environment ` +
+        `and redeploy. Diagnose with GET /api/workers/ffmpeg-check.`,
       );
     }
 

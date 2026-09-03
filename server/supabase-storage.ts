@@ -16,6 +16,61 @@ function getSupabaseConfig() {
   return { supabaseUrl, serviceRoleKey, bucket };
 }
 
+export const SUPABASE_STORAGE_ENV_KEYS = [
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_STORAGE_BUCKET",
+] as const;
+
+/** Names of the storage variables that are unset or empty, for actionable error messages. */
+export function getMissingSupabaseStorageConfig(): string[] {
+  return SUPABASE_STORAGE_ENV_KEYS.filter((key) => !process.env[key]?.trim());
+}
+
+export interface SupabaseStorageCheck {
+  configured: boolean;
+  missing: string[];
+  bucket?: string;
+  reachable?: boolean;
+  status?: number;
+  error?: string;
+}
+
+/** Diagnostics: confirms the credentials actually authenticate against the bucket. */
+export async function checkSupabaseStorage(): Promise<SupabaseStorageCheck> {
+  const missing = getMissingSupabaseStorageConfig();
+  if (missing.length > 0) {
+    return { configured: false, missing };
+  }
+
+  const { supabaseUrl, serviceRoleKey, bucket } = getSupabaseConfig();
+  try {
+    const response = await fetch(`${supabaseUrl}/storage/v1/bucket/${encodeURIComponent(bucket)}`, {
+      headers: getAuthHeaders(serviceRoleKey),
+    });
+    if (response.ok) {
+      return { configured: true, missing: [], bucket, reachable: true, status: response.status };
+    }
+    const body = await response.text().catch(() => "");
+    return {
+      configured: true,
+      missing: [],
+      bucket,
+      reachable: false,
+      status: response.status,
+      error: body.slice(0, 300) || response.statusText,
+    };
+  } catch (error: any) {
+    return {
+      configured: true,
+      missing: [],
+      bucket,
+      reachable: false,
+      error: error?.message || String(error),
+    };
+  }
+}
+
 function encodeObjectPath(path: string): string {
   return path
     .split("/")
