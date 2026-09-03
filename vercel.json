@@ -5,7 +5,9 @@
   "outputDirectory": "dist/public",
   "functions": {
     "api/index.ts": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "memory": 3009,
+      "includeFiles": "node_modules/@ff*-installer/**"
     }
   },
   "routes": [

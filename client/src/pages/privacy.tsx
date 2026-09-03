@@ -98,8 +98,8 @@ export default function Privacy() {
             <p className="mb-4">We share data only with service providers required to run the App:</p>
             <ul className="list-disc pl-6 space-y-1 mb-4">
               <li><strong>Meta Platforms, Inc.</strong> (Facebook/Instagram) — to create and manage advertising assets using the Meta Marketing API.</li>
-              <li><strong>Hosting / infrastructure provider</strong> (e.g., Replit and associated cloud infrastructure) — to host the App.</li>
-              <li><strong>Database / storage provider:</strong> we store App data using Replit's database/storage (as part of our infrastructure).</li>
+              <li><strong>Hosting / infrastructure provider</strong> (e.g., Vercel and associated cloud infrastructure) — to host the App.</li>
+              <li><strong>Database / storage provider:</strong> we store App data and uploaded media using Supabase (Postgres database and object storage).</li>
               <li><strong>Payment processor</strong> (e.g., Stripe, if subscriptions are enabled) — payments are processed by the payment provider; we do not store full card details.</li>
             </ul>
             <p>We do not share your personal information with third parties for their own marketing.</p>

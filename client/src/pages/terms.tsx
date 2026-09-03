@@ -115,7 +115,7 @@ export default function Terms() {
           <section>
             <h2 className="text-xl font-semibold mb-4">9. Third-Party Services and Meta API Use</h2>
             <p className="mb-4">
-              The Service integrates with third-party platforms and services, including Meta's APIs and hosting/infrastructure providers (e.g., Replit).
+              The Service integrates with third-party platforms and services, including Meta's APIs and hosting/infrastructure providers (e.g., Vercel and Supabase).
             </p>
             <p className="mb-4">
               Your use of Meta products and APIs is also governed by Meta's terms, policies, and platform rules. You are responsible for complying with all applicable Meta policies when using the Service.

@@ -1,4 +1,5 @@
-import { exec, spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
+import { createRequire } from 'module';
 import { promisify } from 'util';
 import { Readable, Transform, pipeline as pipelineCallback } from 'stream';
 import * as fs from 'fs';
@@ -7,7 +8,74 @@ import * as crypto from 'crypto';
 
 const pipeline = promisify(pipelineCallback);
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/**
+ * The server runs both as ESM (tsx, Vercel functions) and as an esbuild CJS bundle
+ * (dist/index.cjs), where `import.meta` is empty. Try every base that could be valid.
+ */
+function createModuleRequire(): NodeRequire | null {
+  const bases = [
+    typeof __filename === 'string' ? __filename : undefined,
+    typeof import.meta?.url === 'string' ? import.meta.url : undefined,
+    path.join(process.cwd(), 'index.js'),
+  ];
+
+  for (const base of bases) {
+    if (!base) continue;
+    try {
+      return createRequire(base);
+    } catch {
+      // Try the next base.
+    }
+  }
+  return null;
+}
+
+const require_ = createModuleRequire();
+
+/**
+ * Vercel's serverless runtime has no ffmpeg on PATH, so the binaries ship with the function
+ * via @ffmpeg-installer / @ffprobe-installer (platform-specific, ~50MB total).
+ * Order: explicit env override -> bundled static binary -> whatever is on PATH.
+ */
+function resolveBinary(envVar: string, installerPackage: string, fallback: string): string {
+  const override = process.env[envVar]?.trim();
+  if (override) {
+    console.log(`[VideoTranscoder] Using ${fallback} from ${envVar}: ${override}`);
+    return override;
+  }
+
+  try {
+    const resolved = require_?.(installerPackage)?.path;
+    if (typeof resolved === 'string' && resolved.length > 0 && fs.existsSync(resolved)) {
+      console.log(`[VideoTranscoder] Using bundled ${fallback}: ${resolved}`);
+      return resolved;
+    }
+  } catch {
+    // Package missing or unusable on this platform - fall through to PATH.
+  }
+
+  // On Vercel nothing is on PATH, so this almost certainly fails at call time. Say so now.
+  console.warn(
+    `[VideoTranscoder] ${installerPackage} did not resolve on ${process.platform}/${process.arch}; ` +
+    `falling back to "${fallback}" from PATH. Set ${envVar} if the host provides its own binary.`,
+  );
+  return fallback;
+}
+
+let cachedFfmpegPath: string | null = null;
+let cachedFfprobePath: string | null = null;
+
+export function getFfmpegPath(): string {
+  cachedFfmpegPath ??= resolveBinary('FFMPEG_PATH', '@ffmpeg-installer/ffmpeg', 'ffmpeg');
+  return cachedFfmpegPath;
+}
+
+export function getFfprobePath(): string {
+  cachedFfprobePath ??= resolveBinary('FFPROBE_PATH', '@ffprobe-installer/ffprobe', 'ffprobe');
+  return cachedFfprobePath;
+}
 
 export interface VideoAnalysis {
   filename: string;
@@ -151,11 +219,16 @@ export async function analyzeVideo(inputPath: string): Promise<VideoAnalysis> {
   const filename = path.basename(inputPath);
   const container = path.extname(inputPath).toLowerCase();
 
-  const cmd = `ffprobe -hide_banner -v error -show_format -show_streams -of json "${inputPath}"`;
-  
   let ffprobeOutput: string;
   try {
-    const { stdout } = await execAsync(cmd);
+    const { stdout } = await execFileAsync(getFfprobePath(), [
+      '-hide_banner',
+      '-v', 'error',
+      '-show_format',
+      '-show_streams',
+      '-of', 'json',
+      inputPath,
+    ], { maxBuffer: 16 * 1024 * 1024 });
     ffprobeOutput = stdout;
   } catch (error: any) {
     throw new Error(`ffprobe failed: ${error.message}`);
@@ -294,7 +367,9 @@ function isMissingBinaryError(message: string): boolean {
   return (
     normalized.includes('command not found') ||
     normalized.includes('enoent') ||
-    normalized.includes('spawn ffprobe')
+    normalized.includes('spawn ffprobe') ||
+    normalized.includes('not executable') ||
+    normalized.includes('eacces')
   );
 }
 
@@ -314,7 +389,13 @@ export async function decideMetaVideoPreparation(
     const isFfprobeUnavailable = errorMessage.includes('ffprobe failed') && isMissingBinaryError(errorMessage);
 
     if (isFfprobeUnavailable) {
-      console.warn('[VideoTranscoder] ffprobe not available in runtime, using direct-upload fallback');
+      // The binaries ship with the deployment, so this means the bundle is broken. Uploading
+      // the untouched file is the only remaining option, but it is exactly the path that
+      // produces Meta's "Corrupt Video" rejection, so make the cause obvious in the logs.
+      console.error(
+        `[VideoTranscoder] ffprobe is unavailable at "${getFfprobePath()}" - falling back to direct upload WITHOUT Meta compatibility fixes. ` +
+        `Check that @ffprobe-installer/ffprobe is bundled with the deployment or set FFPROBE_PATH. Underlying error: ${errorMessage}`,
+      );
       return {
         ok: true,
         shouldTranscode: false,
@@ -389,7 +470,7 @@ export async function decideMetaVideoPreparation(
 
 async function runFfmpeg(args: string[]): Promise<{ success: boolean; stderr: string }> {
   return new Promise((resolve) => {
-    const ffmpeg = spawn('ffmpeg', args);
+    const ffmpeg = spawn(getFfmpegPath(), args);
     let stderr = '';
 
     ffmpeg.stderr.on('data', (data) => {
@@ -636,8 +717,10 @@ export async function prepareVideoForMeta(
   }
 }
 
-const MAX_DOWNLOAD_SIZE = 4 * 1024 * 1024 * 1024; // 4GB max
-const DOWNLOAD_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+// Serverless runtimes cap /tmp (512MB on Vercel) and the source plus the transcoded output
+// both live there, so keep headroom. Raise MAX_VIDEO_DOWNLOAD_BYTES on hosts with a real disk.
+const MAX_DOWNLOAD_SIZE = readPositiveNumberEnv('MAX_VIDEO_DOWNLOAD_BYTES', 350 * 1024 * 1024);
+const DOWNLOAD_TIMEOUT = readPositiveNumberEnv('VIDEO_DOWNLOAD_TIMEOUT_MS', 10 * 60 * 1000);
 
 export async function downloadToTemp(url: string, filename: string): Promise<string> {
   const downloadStart = Date.now();
@@ -671,7 +754,10 @@ export async function downloadToTemp(url: string, filename: string): Promise<str
 
     const contentLength = response.headers.get('content-length');
     if (contentLength && parseInt(contentLength) > MAX_DOWNLOAD_SIZE) {
-      throw new Error(`File too large: ${contentLength} bytes exceeds ${MAX_DOWNLOAD_SIZE} limit`);
+      throw new Error(
+        `File too large: ${(parseInt(contentLength) / 1024 / 1024).toFixed(1)}MB exceeds the ` +
+        `${(MAX_DOWNLOAD_SIZE / 1024 / 1024).toFixed(0)}MB limit (raise MAX_VIDEO_DOWNLOAD_BYTES if the host has the disk space)`,
+      );
     }
 
     if (!response.body) {
@@ -683,7 +769,10 @@ export async function downloadToTemp(url: string, filename: string): Promise<str
       transform(chunk, encoding, callback) {
         totalSize += chunk.length;
         if (totalSize > MAX_DOWNLOAD_SIZE) {
-          callback(new Error(`Download exceeded max size of ${MAX_DOWNLOAD_SIZE} bytes`));
+          callback(new Error(
+            `Download exceeded the ${(MAX_DOWNLOAD_SIZE / 1024 / 1024).toFixed(0)}MB limit ` +
+            `(raise MAX_VIDEO_DOWNLOAD_BYTES if the host has the disk space)`,
+          ));
         } else {
           callback(null, chunk);
         }
