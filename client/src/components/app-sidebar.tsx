@@ -528,9 +528,9 @@ export function AppSidebar() {
         <div className="glass-card p-3 rounded-xl border-none space-y-2">
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase">
+              <span className="text-[10px] text-muted-foreground font-semibold uppercase">
                 Ad Account
-                {hasActiveJob && <Lock className="h-3 w-3 text-slate-400 inline ml-1" />}
+                {hasActiveJob && <Lock className="h-3 w-3 text-muted-foreground inline ml-1" />}
               </span>
               {adAccounts.find(a => a.id === selectedAdAccountId)?.hasSettings && (
                 <span className="text-[10px] font-bold text-emerald-500 bg-emerald-100/50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full uppercase" data-testid="badge-ad-account-configured">
@@ -581,14 +581,14 @@ export function AppSidebar() {
           {areBothAccountsReady ? (
             <div className="space-y-2">
               <div>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Facebook Page</p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase mb-1">Facebook Page</p>
                 {!selectedAdAccountId ? (
                   <span className="text-[10px] text-muted-foreground">Select ad account first</span>
                 ) : metaPages.length === 0 ? (
                   <span className="text-[10px] text-muted-foreground">{facebookPagesEmptyMessage}</span>
                 ) : isSingleScopedPage ? (
                   <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-full bg-[#1877F2] flex items-center justify-center text-white shrink-0">
+                    <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-white shrink-0">
                       <SiFacebook className="w-3 h-3" />
                     </div>
                     <span className="text-xs font-medium text-foreground truncate" data-testid="text-facebook-page">
@@ -606,7 +606,7 @@ export function AppSidebar() {
                         >
                           <SelectTrigger className="w-full h-8 text-xs carved-input" data-testid="select-facebook-page">
                             <div className="flex items-center gap-2">
-                              <div className="w-5 h-5 rounded-full bg-[#1877F2] flex items-center justify-center text-white shrink-0">
+                              <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-white shrink-0">
                                 <SiFacebook className="w-3 h-3" />
                               </div>
                               <SelectValue placeholder="Select page">
@@ -618,7 +618,7 @@ export function AppSidebar() {
                             {metaPages.map((page) => (
                               <SelectItem key={page.id} value={page.id}>
                                 <div className="flex items-center gap-2">
-                                  <div className="w-5 h-5 rounded-full bg-[#1877F2] flex items-center justify-center text-white shrink-0">
+                                  <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-white shrink-0">
                                     <SiFacebook className="w-3 h-3" />
                                   </div>
                                   <span>{page.name}</span>
@@ -639,7 +639,7 @@ export function AppSidebar() {
               </div>
 
               <div>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Instagram</p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase mb-1">Instagram</p>
                 {!selectedAdAccountId ? (
                   <span className="text-[10px] text-muted-foreground">Select ad account first</span>
                 ) : metaPages.length === 0 ? (
@@ -707,14 +707,14 @@ export function AppSidebar() {
           ) : (
             <div className="space-y-3">
               <div>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Facebook Page</p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase mb-1">Facebook Page</p>
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                   <span>Loading page...</span>
                 </div>
               </div>
               <div>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold uppercase mb-1">Instagram</p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase mb-1">Instagram</p>
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                   <span>Loading Instagram...</span>
@@ -723,10 +723,10 @@ export function AppSidebar() {
             </div>
           )}
 
-          <div className="mt-3 pt-3 border-t border-slate-200/50 dark:border-white/10">
+          <div className="mt-3 pt-3 border-t border-border/50 dark:border-white/10">
             <div
               className={isProPlan
-                ? "rounded-xl px-2.5 py-2 border border-[#1877F2]/25 bg-gradient-to-br from-[#1877F2]/10 via-white/50 to-[#1877F2]/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_8px_18px_rgba(24,119,242,0.12)]"
+                ? "rounded-xl px-2.5 py-2 border border-primary/25 bg-gradient-to-br from-primary/10 via-white/50 to-primary/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_8px_18px_hsl(var(--primary)/0.12)]"
                 : ""
               }
             >
@@ -735,8 +735,8 @@ export function AppSidebar() {
                   <span
                     className={`text-xs ${
                       isProPlan
-                        ? "font-semibold text-[#143d7a] tracking-[0.01em]"
-                        : "font-medium text-slate-600 dark:text-slate-400"
+                        ? "font-semibold text-[hsl(var(--primary))] tracking-[0.01em]"
+                        : "font-medium text-muted-foreground"
                     }`}
                   >
                     {isProPlan ? "Pro Plan" : "Free Plan"}
@@ -746,8 +746,8 @@ export function AppSidebar() {
                   href="/settings"
                   className={`text-xs font-bold ${
                     isProPlan
-                      ? "text-[#1877F2] hover:text-[#0c5ed1] rounded-md px-1.5 py-0.5 bg-white/55 border border-[#1877F2]/20"
-                      : "text-[#1877F2] hover:text-[#0c5ed1]"
+                      ? "text-meta hover:text-[hsl(var(--primary))] rounded-md px-1.5 py-0.5 bg-white/55 border border-primary/20"
+                      : "text-meta hover:text-[hsl(var(--primary))]"
                   }`}
                   data-testid="link-upgrade"
                 >
@@ -757,15 +757,15 @@ export function AppSidebar() {
               <div
                 className={`w-full rounded-full overflow-hidden ${
                   isProPlan
-                    ? "h-2 bg-[#1877F2]/18 border border-[#1877F2]/22 shadow-[inset_0_1px_2px_rgba(255,255,255,0.35)]"
-                    : "h-1.5 bg-slate-200/50 dark:bg-slate-700/50"
+                    ? "h-2 bg-primary/18 border border-primary/22 shadow-[inset_0_1px_2px_rgba(255,255,255,0.35)]"
+                    : "h-1.5 bg-muted/50"
                 }`}
               >
                 <div
                   className={`h-full rounded-full transition-all ${
                     isProPlan
-                      ? "bg-gradient-to-r from-[#1877F2] via-[#6bb3ff] to-[#1877F2] shadow-[0_0_16px_rgba(24,119,242,0.68)]"
-                      : "bg-[#1877F2] shadow-[0_0_10px_rgba(24,119,242,0.5)]"
+                      ? "bg-gradient-to-r from-primary via-[hsl(224 84% 66%)] to-primary shadow-[0_0_16px_hsl(var(--primary)/0.68)]"
+                      : "bg-primary shadow-[0_0_10px_hsl(var(--primary)/0.5)]"
                   }`}
                   style={{ width: `${progressPercent}%` }}
                 />
@@ -773,8 +773,8 @@ export function AppSidebar() {
               <p
                 className={`text-[10px] mt-1.5 ${
                   isProPlan
-                    ? "font-semibold text-[#4f6c93]"
-                    : "text-slate-400 dark:text-slate-500"
+                    ? "font-semibold text-[hsl(var(--muted-foreground))]"
+                    : "text-muted-foreground"
                 }`}
               >
                 {isProPlan ? "Unlimited uploads" : `${uploadsRemaining ?? 0} free uploads remaining`}

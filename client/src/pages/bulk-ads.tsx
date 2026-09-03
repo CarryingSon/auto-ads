@@ -224,15 +224,15 @@ function WizardStep({ step, currentStep, title, onClick, disabled }: WizardStepP
           isCompleted
             ? "bg-green-500 text-white shadow-lg shadow-green-200/50 hover:scale-110"
             : isCurrent
-            ? "bg-[#1877F2] text-white shadow-[0_0_15px_rgba(24,119,242,0.5)] hover:scale-110"
-            : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
+            ? "bg-primary text-white shadow-[0_0_15px_hsl(var(--primary)/0.5)] hover:scale-110"
+            : "bg-muted text-muted-foreground border border-border"
         }`}
       >
         {isCompleted ? <span className="material-symbols-outlined text-base">check</span> : step}
       </div>
       <span
         className={`text-[10px] font-semibold uppercase tracking-widest ${
-          isCompleted ? "text-green-600" : isCurrent ? "text-[#1877F2]" : "text-slate-400"
+          isCompleted ? "text-green-600" : isCurrent ? "text-meta" : "text-muted-foreground"
         }`}
       >
         {title}
@@ -3108,8 +3108,8 @@ export default function BulkAds() {
       <div className="glass-panel rounded-2xl p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2">
-            <span className="material-symbols-outlined text-[#1877F2] text-lg">ads_click</span>
-            <h2 className="text-base font-semibold text-slate-800 dark:text-white">Select Campaign</h2>
+            <span className="material-symbols-outlined text-meta text-lg">ads_click</span>
+            <h2 className="text-base font-semibold text-foreground">Select Campaign</h2>
           </div>
         </div>
         <p className="text-[13px] text-muted-foreground mb-4">Select existing campaign or create new</p>
@@ -3132,7 +3132,7 @@ export default function BulkAds() {
           >
             <SelectTrigger 
               data-testid="select-campaign-step1" 
-              className="w-full h-auto min-h-[38px] bg-white/40 dark:bg-black/20 backdrop-blur-md border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 shadow-sm hover:border-[#1877F2]/50 transition-all [&>span]:line-clamp-none [&>span]:overflow-visible"
+              className="w-full h-auto min-h-[38px] bg-white/40 dark:bg-black/20 backdrop-blur-md border-border rounded-xl px-4 py-2 shadow-sm hover:border-primary/50 transition-all [&>span]:line-clamp-none [&>span]:overflow-visible"
             >
               <SelectValue placeholder={campaignsLoading ? "Loading campaigns..." : "Select campaign"} />
             </SelectTrigger>
@@ -3144,7 +3144,7 @@ export default function BulkAds() {
                   <SelectItem key={campaign.id} value={campaign.id}>
                     <span className="flex items-center gap-1.5 text-[13px]">
                       {campaign.name}
-                      <span className={`text-[10px] px-1.5 py-px rounded border ${isCBO ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 border-blue-200 dark:border-blue-800" : "bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300 border-gray-200 dark:border-gray-800"}`}>
+                      <span className={`text-[10px] px-1.5 py-px rounded border ${isCBO ? "bg-primary/10 text-primary dark:bg-primary dark:text-primary/70 border-primary/20 border-primary/40" : "bg-muted text-foreground dark:text-muted-foreground/60 border-border"}`}>
                         {isCBO ? "CBO" : "ABO"}
                       </span>
                       <span className={`text-[10px] px-1.5 py-px rounded border ${isActive ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border-green-200 dark:border-green-800" : "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 border-orange-200 dark:border-orange-800"}`}>
@@ -3158,9 +3158,9 @@ export default function BulkAds() {
           </Select>
 
           {!selectedCampaignId && (
-            <div className="rounded-xl border border-[#1877F2]/30 dark:border-[#1877F2]/50 p-3 bg-[#1877F2]/10 dark:bg-[#1877F2]/20 flex items-center gap-2">
-              <span className="material-symbols-outlined text-[#1877F2] text-lg">warning</span>
-              <span className="text-sm text-[#1556b6] dark:text-blue-200">
+            <div className="rounded-xl border border-primary/30 dark:border-primary/50 p-3 bg-primary/10 dark:bg-primary/20 flex items-center gap-2">
+              <span className="material-symbols-outlined text-meta text-lg">warning</span>
+              <span className="text-sm text-primary">
                 Select a campaign to continue
               </span>
             </div>
@@ -3172,11 +3172,11 @@ export default function BulkAds() {
       <div className="glass-panel rounded-2xl p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2">
-            <span className="material-symbols-outlined text-[#1877F2] text-lg">folder_open</span>
-            <h2 className="text-base font-semibold text-slate-800 dark:text-white">Import Ad Folder</h2>
+            <span className="material-symbols-outlined text-meta text-lg">folder_open</span>
+            <h2 className="text-base font-semibold text-foreground">Import Ad Folder</h2>
           </div>
           <button
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/60 hover:bg-muted dark:hover:bg-muted transition-all"
             data-testid="button-help"
             onClick={() => setShowInfoModal(true)}
           >
@@ -3184,25 +3184,25 @@ export default function BulkAds() {
             How it works
           </button>
         </div>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Connect your assets to start the launch</p>
+        <p className="text-sm text-muted-foreground mb-4">Connect your assets to start the launch</p>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
           <button
             type="button"
             disabled={isSyncInProgress}
-            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "private" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
+            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "private" ? "ring-2 ring-primary" : "border-transparent hover:border-border dark:hover:border-border"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
             onClick={() => setDriveMode("private")}
             data-testid="radio-drive-private"
           >
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 shrink-0">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center text-primary shrink-0">
                 <span className="material-symbols-outlined text-lg">lock</span>
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-sm">Private Folder</h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Share with email</p>
+                <p className="text-[11px] text-muted-foreground">Share with email</p>
               </div>
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "private" ? "bg-[#1877F2]" : "border-2 border-slate-200 dark:border-slate-700"}`}>
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "private" ? "bg-primary" : "border-2 border-border"}`}>
                 {driveMode === "private" && <span className="material-symbols-outlined text-white text-[13px]">check</span>}
               </div>
             </div>
@@ -3211,7 +3211,7 @@ export default function BulkAds() {
           <button
             type="button"
             disabled={isSyncInProgress}
-            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "public" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
+            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "public" ? "ring-2 ring-primary" : "border-transparent hover:border-border dark:hover:border-border"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
             onClick={() => setDriveMode("public")}
             data-testid="radio-drive-public"
           >
@@ -3221,9 +3221,9 @@ export default function BulkAds() {
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-sm">Public URL</h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Shared link</p>
+                <p className="text-[11px] text-muted-foreground">Shared link</p>
               </div>
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "public" ? "bg-[#1877F2]" : "border-2 border-slate-200 dark:border-slate-700"}`}>
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "public" ? "bg-primary" : "border-2 border-border"}`}>
                 {driveMode === "public" && <span className="material-symbols-outlined text-white text-[13px]">check</span>}
               </div>
             </div>
@@ -3231,24 +3231,24 @@ export default function BulkAds() {
         </div>
 
         {driveMode === "private" && (
-          <div className="mb-3 p-[1px] bg-gradient-to-r from-blue-500/20 via-emerald-500/20 to-transparent rounded-xl">
-            <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-md rounded-[11px] p-3 flex items-center gap-3 border border-white/40 dark:border-slate-700/40">
-              <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center text-blue-600 shrink-0">
+          <div className="mb-3 p-[1px] bg-gradient-to-r from-primary via-emerald-500/20 to-transparent rounded-xl">
+            <div className="bg-white/60 backdrop-blur-md rounded-[11px] p-3 flex items-center gap-3 border border-white/40">
+              <div className="w-7 h-7 rounded-full bg-primary/10 dark:bg-primary/10 flex items-center justify-center text-primary shrink-0">
                 <span className="material-symbols-outlined text-base">mail</span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Share your folder with</div>
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Share your folder with</div>
                 <div className="flex items-center gap-2 mt-0.5">
                   {driveEmailLoading ? (
                     <div className="flex items-center gap-2">
-                      <Loader2 className="h-3 w-3 animate-spin text-slate-400" />
-                      <span className="text-xs text-slate-400">Loading...</span>
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Loading...</span>
                     </div>
                   ) : driveConnectedEmail ? (
                     <>
-                      <code className="font-semibold text-xs text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded select-all" data-testid="text-service-account-email">{driveConnectedEmail}</code>
+                      <code className="font-semibold text-xs text-foreground bg-muted px-2 py-0.5 rounded select-all" data-testid="text-service-account-email">{driveConnectedEmail}</code>
                       <button
-                        className="text-[#1877F2] hover:text-[#1877F2]/70 transition-colors"
+                        className="text-meta hover:text-meta/70 transition-colors"
                         onClick={() => {
                           navigator.clipboard.writeText(driveConnectedEmail);
                           toast({ title: "Email copied!" });
@@ -3259,7 +3259,7 @@ export default function BulkAds() {
                       </button>
                     </>
                   ) : (
-                    <span className="text-xs text-slate-400">Service account not configured</span>
+                    <span className="text-xs text-muted-foreground">Service account not configured</span>
                   )}
                 </div>
               </div>
@@ -3269,18 +3269,18 @@ export default function BulkAds() {
 
         {/* Folder URL input */}
         <div className="space-y-2 mb-4">
-          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 ml-1">Folder URL</label>
+          <label className="block text-xs font-bold text-muted-foreground ml-1">Folder URL</label>
           <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[16px]">link</span>
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-[16px]">link</span>
             <Input
               data-testid="input-folder-url"
-              className="pl-9 py-2 h-auto text-sm bg-white/40 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 rounded-xl focus-visible:ring-2 focus-visible:ring-[#1877F2]/20 transition-all"
+              className="pl-9 py-2 h-auto text-sm bg-white/40 border-border rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 transition-all"
               placeholder="Paste Google Drive folder URL..."
               value={folderUrl}
               onChange={(e) => setFolderUrl(e.target.value)}
             />
           </div>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 ml-1">
+          <p className="text-[10px] text-muted-foreground ml-1">
             {driveMode === "private" 
               ? "Share your folder with the email above, then paste the folder URL. Each DCT subfolder becomes an Ad Set."
               : "Paste a public folder URL. Each DCT subfolder becomes an Ad Set."}
@@ -3303,10 +3303,10 @@ export default function BulkAds() {
         {/* Geo Split toggle */}
         <div className="flex items-center justify-between px-1 mb-6">
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-sm text-slate-500 dark:text-slate-400">public</span>
+            <span className="material-symbols-outlined text-sm text-muted-foreground">public</span>
             <div>
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">Geo Split</p>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500">Split ad sets by market (US, UK, AU...) in filenames</p>
+              <p className="text-xs font-medium text-foreground">Geo Split</p>
+              <p className="text-[10px] text-muted-foreground">Split ad sets by market (US, UK, AU...) in filenames</p>
             </div>
           </div>
           <button
@@ -3316,7 +3316,7 @@ export default function BulkAds() {
             disabled={isSyncInProgress}
             data-testid="toggle-geo-split"
             onClick={() => setGeoSplit(!geoSplit)}
-            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ${geoSplit ? 'bg-[#1877F2]' : 'bg-slate-200 dark:bg-slate-700'} ${isSyncInProgress ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ${geoSplit ? 'bg-primary' : 'bg-muted'} ${isSyncInProgress ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
           >
             <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${geoSplit ? 'translate-x-4' : 'translate-x-0'}`} />
           </button>
@@ -3324,7 +3324,7 @@ export default function BulkAds() {
 
         {/* Sync button */}
         <Button
-          className="w-full h-10 rounded-xl bg-[#1877F2] text-white font-bold text-xs shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 transition-all mt-auto"
+          className="w-full h-10 rounded-xl bg-primary text-white font-bold text-xs shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all mt-auto"
           data-testid="button-sync-drive"
           onClick={handleDCTSync}
           disabled={(syncStep > 0 && syncStep < 5) || !folderUrl.trim() || (driveMode === "private" && !driveConnectedEmail)}
@@ -3352,7 +3352,7 @@ export default function BulkAds() {
     
     return (
     <div className="glass-panel rounded-2xl p-6 relative overflow-hidden space-y-5">
-      <div className="absolute -top-32 -right-32 w-96 h-96 bg-[#1877F2] opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute -top-32 -right-32 w-96 h-96 bg-primary opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-10 left-10 w-64 h-64 bg-emerald-400 opacity-[0.04] rounded-full blur-[80px] pointer-events-none" />
       <div className="mb-4 relative z-10">
         <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
@@ -3373,13 +3373,13 @@ export default function BulkAds() {
             <div className="text-[11px] text-muted-foreground">Creatives</div>
           </div>
           <div className="text-center">
-            <div className={`text-base font-semibold ${validCount === adSets.length ? "text-green-600" : "text-[#1877F2]"}`}>
+            <div className={`text-base font-semibold ${validCount === adSets.length ? "text-green-600" : "text-meta"}`}>
               {validCount}/{adSets.length}
             </div>
             <div className="text-[11px] text-muted-foreground">Valid</div>
           </div>
           <div className="text-center">
-            <div className={`text-base font-semibold ${withDocx === adSets.length ? "text-green-600" : "text-[#1877F2]"}`}>
+            <div className={`text-base font-semibold ${withDocx === adSets.length ? "text-green-600" : "text-meta"}`}>
               {withDocx}/{adSets.length}
             </div>
             <div className="text-[11px] text-muted-foreground">With text</div>
@@ -3387,10 +3387,10 @@ export default function BulkAds() {
         </div>
         
         {withDocx < adSets.length && adSets.length > 0 && (
-          <div className="rounded-xl border border-dashed border-[#1877F2]/35 dark:border-[#1877F2]/55 bg-[#1877F2]/8 dark:bg-[#1877F2]/18 p-4 space-y-3" data-testid="global-docx-upload-card">
+          <div className="rounded-xl border border-dashed border-primary/35 dark:border-primary/55 bg-primary/8 dark:bg-primary/18 p-4 space-y-3" data-testid="global-docx-upload-card">
             <div className="flex items-center gap-2">
-              <Upload className="h-4 w-4 text-[#1877F2] dark:text-blue-300" />
-              <span className="text-sm font-medium text-[#1556b6] dark:text-blue-200">
+              <Upload className="h-4 w-4 text-meta dark:text-primary/70" />
+              <span className="text-sm font-medium text-primary">
                 Upload ad copy for missing ad sets
               </span>
               <span className="text-xs text-muted-foreground ml-auto">
@@ -3510,7 +3510,7 @@ export default function BulkAds() {
                 </div>
                 <div className="flex items-center gap-2">
                   {adset.geoSplitMarket && (
-                    <Badge variant="outline" className="gap-1 text-[10px] border-blue-300 text-blue-700 dark:border-blue-600 dark:text-blue-400">
+                    <Badge variant="outline" className="gap-1 text-[10px] border-primary/20 text-primary dark:border-primary/50 dark:text-primary">
                       <span className="material-symbols-outlined text-xs">public</span>
                       {adset.geoSplitMarket}
                       {adset.geoTargeting && (
@@ -3631,8 +3631,8 @@ export default function BulkAds() {
         </div>
 
         {invalidAdSets.length > 0 && (
-          <div className="rounded-md bg-[#1877F2]/10 dark:bg-[#1877F2]/20 border border-[#1877F2]/30 dark:border-[#1877F2]/50 p-3">
-            <p className="text-sm text-[#1556b6] dark:text-blue-200">
+          <div className="rounded-md bg-primary/10 dark:bg-primary/20 border border-primary/30 dark:border-primary/50 p-3">
+            <p className="text-sm text-primary">
               <AlertTriangle className="h-4 w-4 inline mr-1" />
               {invalidAdSets.length} Ad Sets have errors and will be skipped.
             </p>
@@ -3645,7 +3645,7 @@ export default function BulkAds() {
 
   const renderStep3 = () => (
     <div className="glass-panel rounded-2xl p-6 relative overflow-hidden space-y-5">
-      <div className="absolute -top-32 -right-32 w-96 h-96 bg-[#1877F2] opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute -top-32 -right-32 w-96 h-96 bg-primary opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-10 left-10 w-64 h-64 bg-emerald-400 opacity-[0.04] rounded-full blur-[80px] pointer-events-none" />
 
       {/* Import Settings from Existing Campaign */}
@@ -3686,7 +3686,7 @@ export default function BulkAds() {
                             <span>{campaign.name}</span>
                             <Badge 
                               variant="outline" 
-                              className={`text-xs ${isCBO ? "bg-blue-500/20 text-blue-400 border-blue-500/50" : "bg-gray-500/20 text-gray-400 border-gray-500/50"}`}
+                              className={`text-xs ${isCBO ? "bg-primary/20 text-primary border-primary/50" : "bg-muted-foreground/20 text-muted-foreground border-border/50"}`}
                             >
                               {isCBO ? "CBO" : "ABO"}
                             </Badge>
@@ -3811,7 +3811,7 @@ export default function BulkAds() {
             </Button>
           </div>
           {effectiveSettings.isImported && (
-            <p className="text-xs text-[#1877F2]">Imported from: {importedAdSet?.name}</p>
+            <p className="text-xs text-meta">Imported from: {importedAdSet?.name}</p>
           )}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="p-3 rounded-lg bg-muted/50 border">
@@ -3839,19 +3839,19 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Countries</p>
-              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {effectiveSettings.geoTargeting.length > 0 ? effectiveSettings.geoTargeting.join(", ") : "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Age</p>
-              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {effectiveSettings.ageMin} - {effectiveSettings.ageMax}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Gender</p>
-              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {effectiveSettings.gender === "MALE" ? "Male" : effectiveSettings.gender === "FEMALE" ? "Female" : "All"}
               </p>
             </div>
@@ -3886,12 +3886,12 @@ export default function BulkAds() {
             </Button>
           </div>
           {effectiveSettings.isImported && effectiveSettings.pixelId && (
-            <p className="text-xs text-[#1877F2]">Pixel imported from: {importedAdSet?.name}</p>
+            <p className="text-xs text-meta">Pixel imported from: {importedAdSet?.name}</p>
           )}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="p-3 rounded-lg bg-muted/50 border">
               <div className="flex items-center gap-1.5 mb-1">
-                <div className="w-4 h-4 rounded-full bg-[#1877F2] flex items-center justify-center flex-shrink-0">
+                <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
                   <SiFacebook className="w-2.5 h-2.5 text-white" />
                 </div>
                 <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Facebook Page</p>
@@ -3902,7 +3902,7 @@ export default function BulkAds() {
                   <p className="text-sm text-muted-foreground">Loading...</p>
                 </div>
               ) : (
-                <p className={`text-sm font-medium truncate ${selectedPage ? "" : "text-[#1877F2]"}`}>
+                <p className={`text-sm font-medium truncate ${selectedPage ? "" : "text-meta"}`}>
                   {selectedPage?.name || "Not set"}
                 </p>
               )}
@@ -3927,7 +3927,7 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Pixel</p>
-              <p className={`text-sm font-medium truncate ${effectiveSettings.pixelId ? (effectiveSettings.isImported && importedPromotedObject?.pixel_id ? "text-[#1877F2]" : "") : "text-[#1877F2]"}`}>
+              <p className={`text-sm font-medium truncate ${effectiveSettings.pixelId ? (effectiveSettings.isImported && importedPromotedObject?.pixel_id ? "text-meta" : "") : "text-meta"}`}>
                 {effectiveSettings.isImported && importedPromotedObject?.pixel_id 
                   ? effectiveSettings.pixelId 
                   : (adAccountSettingsData?.settings?.pixelName || effectiveSettings.pixelId || "Not set")}
@@ -3935,31 +3935,31 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">CTA</p>
-              <p className={`text-sm font-medium ${importedCta && effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${importedCta && effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {defaultSettings.defaultCta || importedCta || adAccountSettingsData?.settings?.defaultCta || "LEARN_MORE"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Website URL</p>
-              <p className={`text-sm font-medium truncate ${!(defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl) ? "text-[#1877F2]" : (importedWebsiteUrl && effectiveSettings.isImported ? "text-[#1877F2]" : "")}`}>
+              <p className={`text-sm font-medium truncate ${!(defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl) ? "text-meta" : (importedWebsiteUrl && effectiveSettings.isImported ? "text-meta" : "")}`}>
                 {defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl || "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Display Link</p>
-              <p className={`text-sm font-medium truncate ${importedDisplayLink && effectiveSettings.isImported ? "text-[#1877F2]" : ((defaultSettings.displayLink || adAccountSettingsData?.settings?.displayLink) ? "" : "text-muted-foreground")}`}>
+              <p className={`text-sm font-medium truncate ${importedDisplayLink && effectiveSettings.isImported ? "text-meta" : ((defaultSettings.displayLink || adAccountSettingsData?.settings?.displayLink) ? "" : "text-muted-foreground")}`}>
                 {defaultSettings.displayLink || importedDisplayLink || adAccountSettingsData?.settings?.displayLink || "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Beneficiary</p>
-              <p className={`text-sm font-medium truncate ${effectiveSettings.beneficiaryName ? (effectiveSettings.isImported && importedAdSet?.dsa_beneficiary ? "text-[#1877F2]" : "") : "text-muted-foreground"}`}>
+              <p className={`text-sm font-medium truncate ${effectiveSettings.beneficiaryName ? (effectiveSettings.isImported && importedAdSet?.dsa_beneficiary ? "text-meta" : "") : "text-muted-foreground"}`}>
                 {effectiveSettings.beneficiaryName || "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Payer</p>
-              <p className={`text-sm font-medium truncate ${effectiveSettings.payerName ? (effectiveSettings.isImported && importedAdSet?.dsa_payor ? "text-[#1877F2]" : "") : "text-muted-foreground"}`}>
+              <p className={`text-sm font-medium truncate ${effectiveSettings.payerName ? (effectiveSettings.isImported && importedAdSet?.dsa_payor ? "text-meta" : "") : "text-muted-foreground"}`}>
                 {effectiveSettings.payerName || "Not set"}
               </p>
             </div>
@@ -4026,7 +4026,7 @@ export default function BulkAds() {
                     )}
                   </div>
                   {adset.geoSplitMarket && (
-                    <Badge variant="outline" className="gap-1 text-[10px] border-blue-300 text-blue-700 dark:border-blue-600 dark:text-blue-400 flex-shrink-0">
+                    <Badge variant="outline" className="gap-1 text-[10px] border-primary/20 text-primary dark:border-primary/50 dark:text-primary flex-shrink-0">
                       <span className="material-symbols-outlined text-xs">public</span>
                       {adset.geoSplitMarket}
                     </Badge>
@@ -4095,11 +4095,11 @@ export default function BulkAds() {
 
   const renderStep4 = () => (
     <div className="glass-panel rounded-2xl p-6 relative overflow-hidden">
-      <div className="absolute -top-32 -right-32 w-96 h-96 bg-[#1877F2] opacity-[0.08] rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute -top-32 -right-32 w-96 h-96 bg-primary opacity-[0.08] rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute top-20 left-10 w-64 h-64 bg-emerald-400 opacity-[0.05] rounded-full blur-[80px] pointer-events-none" />
       <div className="flex items-start justify-between mb-4 relative z-10">
         <div className="flex items-center space-x-3">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/30 dark:to-slate-800 flex items-center justify-center text-[#1877F2] border border-blue-100 dark:border-blue-800 shadow-[0_4px_12px_rgba(24,119,242,0.1)]">
+          <div className="p-2 rounded-xl bg-gradient-to-br from-primary/5 to-card flex items-center justify-center text-meta border border-primary/20 border-primary/40 shadow-[0_4px_12px_hsl(var(--primary)/0.1)]">
             <Rocket className="h-5 w-5" />
           </div>
           <div>
@@ -4140,14 +4140,14 @@ export default function BulkAds() {
                         <span className="text-sm font-semibold text-foreground">{totalAssets}</span>
                         <span className="text-[10px] text-muted-foreground uppercase tracking-wide">creatives</span>
                       </div>
-                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <span className="text-muted-foreground">·</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-semibold text-foreground">{enabledAdSets.length}</span>
                         <span className="text-[10px] text-muted-foreground uppercase tracking-wide">ad sets</span>
                       </div>
-                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <span className="text-muted-foreground">·</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold text-[#1877F2]">~{estimatedAds}</span>
+                        <span className="text-sm font-semibold text-meta">~{estimatedAds}</span>
                         <span className="text-[10px] text-muted-foreground uppercase tracking-wide">ads</span>
                       </div>
                     </div>
@@ -4173,8 +4173,8 @@ export default function BulkAds() {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2.5">
-                      <div className="w-5 h-5 rounded-full border flex items-center justify-center shadow-sm border-blue-200 bg-white dark:bg-slate-800">
-                        <div className="w-2.5 h-2.5 rounded-full bg-[#1877F2] shadow-[0_0_8px_#1877F2]" />
+                      <div className="w-5 h-5 rounded-full border flex items-center justify-center shadow-sm border-primary/20 bg-card">
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" />
                       </div>
                       <span className="text-sm font-semibold text-foreground">Dynamic</span>
                     </div>
@@ -4199,7 +4199,7 @@ export default function BulkAds() {
               </div>
             </div>
 
-            <div className="w-full h-px bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent" />
+            <div className="w-full h-px bg-gradient-to-r from-transparent via-border dark:via-white/10 to-transparent" />
 
             {/* Creative Enhancements Section - Images & Videos */}
             <div className="space-y-4">
@@ -4209,7 +4209,7 @@ export default function BulkAds() {
                   Advantage+ Creative
                 </h3>
                 <button
-                  className="text-[11px] font-medium text-muted-foreground hover:text-[#1877F2] transition-colors px-3 py-1 rounded-lg hover:bg-white/50 dark:hover:bg-white/10"
+                  className="text-[11px] font-medium text-muted-foreground hover:text-meta transition-colors px-3 py-1 rounded-lg hover:bg-white/50 dark:hover:bg-white/10"
                   onClick={() => setCreativeEnhancements({ image: { ...DEFAULT_IMAGE_ENHANCEMENTS }, video: { ...DEFAULT_VIDEO_ENHANCEMENTS } })}
                   data-testid="button-toggle-all-enhancements"
                 >
@@ -4293,7 +4293,7 @@ export default function BulkAds() {
               </div>
             </div>
 
-            <div className="w-full h-px bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent" />
+            <div className="w-full h-px bg-gradient-to-r from-transparent via-border dark:via-white/10 to-transparent" />
 
             {/* Schedule Section - Simplified */}
             <div className="glass-card rounded-xl p-4 space-y-4">
@@ -4302,7 +4302,7 @@ export default function BulkAds() {
                   <span className="material-symbols-outlined mr-2 text-muted-foreground">schedule</span>
                   Schedule
                 </h3>
-                <div className={`glass-tag px-3 py-1.5 rounded-full text-xs font-semibold ${scheduledDate ? "text-[#1877F2]" : "text-muted-foreground"}`}>
+                <div className={`glass-tag px-3 py-1.5 rounded-full text-xs font-semibold ${scheduledDate ? "text-meta" : "text-muted-foreground"}`}>
                   {scheduledDate ? `${scheduledDate} ${scheduledTime || "00:00"}` : "Launch Now"}
                 </div>
               </div>
@@ -4373,7 +4373,7 @@ export default function BulkAds() {
             </div>
 
             {!selectedPageId && (
-              <div className="rounded-md border border-[#1877F2]/30 dark:border-[#1877F2]/50 bg-[#1877F2]/10 dark:bg-[#1877F2]/20 p-3 text-sm text-[#1556b6] dark:text-blue-200">
+              <div className="rounded-md border border-primary/30 dark:border-primary/50 bg-primary/10 dark:bg-primary/20 p-3 text-sm text-primary">
                 Select a Facebook Page in the sidebar to enable launch.
               </div>
             )}
@@ -4517,17 +4517,17 @@ export default function BulkAds() {
         <div>
           <div className="flex items-center gap-2.5 mb-0.5">
             {isRunning ? (
-              <div className="w-5 h-5 border-2 border-[#1877F2]/10 border-t-[#1877F2] rounded-full animate-spin" style={{ filter: "drop-shadow(0 0 4px #1877F2)" }} />
+              <div className="w-5 h-5 border-2 border-primary/10 border-t-primary rounded-full animate-spin" style={{ filter: "drop-shadow(0 0 4px hsl(var(--primary)))" }} />
             ) : isComplete ? (
               hasWarnings ? (
-                <AlertTriangle className="h-5 w-5 text-[#1877F2]" />
+                <AlertTriangle className="h-5 w-5 text-meta" />
               ) : (
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               )
             ) : (
               <XCircle className="h-5 w-5 text-red-500" />
             )}
-            <h2 className="text-base font-semibold tracking-tight text-slate-800 dark:text-white">
+            <h2 className="text-base font-semibold tracking-tight text-foreground">
               {launchStatus === "idle" ? "Preparing..." : launchStatus === "launching" ? "Creating ads..." : isComplete ? (hasWarnings ? "Completed with warnings" : "Ads created successfully") : "Upload failed"}
             </h2>
           </div>
@@ -4542,29 +4542,29 @@ export default function BulkAds() {
           </p>
 
           {/* Progress Section */}
-          <div className="space-y-2 bg-white/40 dark:bg-slate-800/40 p-3 rounded-lg border border-white/40 dark:border-white/5 shadow-inner mt-3">
+          <div className="space-y-2 bg-white/40 p-3 rounded-lg border border-white/40 dark:border-white/5 shadow-inner mt-3">
             <div className="flex justify-between items-end">
-              <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Overall Progress</span>
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Overall Progress</span>
               <div className="flex items-center gap-2">
                 {launchStatus === "launching" && estimatedTimeRemaining !== null && (
-                  <span className={`text-[11px] font-medium ${estimatedTimeRemaining < 0 ? "text-red-500" : "text-slate-400"}`}>
+                  <span className={`text-[11px] font-medium ${estimatedTimeRemaining < 0 ? "text-red-500" : "text-muted-foreground"}`}>
                     {estimatedTimeRemaining >= 0 
                       ? `~${Math.floor(estimatedTimeRemaining / 60)}:${(estimatedTimeRemaining % 60).toString().padStart(2, '0')} remaining`
                       : `+${Math.floor(Math.abs(estimatedTimeRemaining) / 60)}:${(Math.abs(estimatedTimeRemaining) % 60).toString().padStart(2, '0')} over time`
                     }
                   </span>
                 )}
-                <span className="text-base font-black bg-clip-text text-transparent bg-gradient-to-br from-[#1877F2] to-blue-300">{Math.round(launchProgress)}%</span>
+                <span className="text-base font-black bg-clip-text text-transparent bg-gradient-to-br from-primary to-primary">{Math.round(launchProgress)}%</span>
               </div>
             </div>
-            <div className="h-2 w-full bg-slate-200/50 dark:bg-slate-700/30 rounded-full overflow-hidden backdrop-blur-sm p-[2px] border border-white/50 dark:border-white/5 shadow-inner">
+            <div className="h-2 w-full bg-muted/50 rounded-full overflow-hidden backdrop-blur-sm p-[2px] border border-white/50 dark:border-white/5 shadow-inner">
               <div 
                 className="h-full rounded-full relative transition-all duration-500"
                 style={{ 
                   width: `${launchProgress}%`,
                   background: estimatedTimeRemaining !== null && estimatedTimeRemaining < 0 
-                    ? "linear-gradient(90deg, #eab308 0%, #ef4444 100%)"
-                    : "linear-gradient(90deg, #1877F2 0%, #60A5FA 50%, #1877F2 100%)",
+                    ? "linear-gradient(90deg, hsl(var(--warning)) 0%, hsl(var(--destructive)) 100%)"
+                    : "linear-gradient(90deg, hsl(var(--primary)) 0%, hsl(224 84% 66%) 50%, hsl(var(--primary)) 100%)",
                   backgroundSize: "200% 100%",
                   animation: "shimmer 2s linear infinite",
                   boxShadow: "0 0 12px rgba(59, 130, 246, 0.5)",
@@ -4580,21 +4580,21 @@ export default function BulkAds() {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
           {(campaignName || selectedCampaignId) && (
             <div className="md:col-span-7 glass-card rounded-lg p-3 flex items-center gap-3 min-w-0" data-testid="results-campaign-info">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-600/5 flex items-center justify-center text-[#1877F2] shadow-inner border border-white/20 shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-[hsl(224_84%_66%)]/5 flex items-center justify-center text-meta shadow-inner border border-white/20 shrink-0">
                 <Rocket className="h-4 w-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Campaign</p>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{campaignName || selectedCampaignId}</p>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Campaign</p>
+                <p className="text-sm font-semibold text-foreground truncate">{campaignName || selectedCampaignId}</p>
               </div>
               {(launchResults.campaign?.id || selectedCampaignId) && (
                 <button
                   onClick={() => copyToClipboard(launchResults.campaign?.id || selectedCampaignId, "Campaign")}
-                  className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1.5 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                  className="flex items-center gap-1.5 bg-white/50 px-2 py-1.5 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                   data-testid="copy-campaign-id-results"
                 >
-                  <span className="text-[10px] font-mono text-slate-500 hidden sm:inline">{(launchResults.campaign?.id || selectedCampaignId).slice(-8)}</span>
-                  <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                  <span className="text-[10px] font-mono text-muted-foreground hidden sm:inline">{(launchResults.campaign?.id || selectedCampaignId).slice(-8)}</span>
+                  <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                 </button>
               )}
             </div>
@@ -4607,11 +4607,11 @@ export default function BulkAds() {
                   <FolderOpen className="h-4 w-4" />
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Ad Sets</p>
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{enabledAdSets.length} total</p>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Ad Sets</p>
+                  <p className="text-sm font-semibold text-foreground">{enabledAdSets.length} total</p>
                 </div>
               </div>
-              <span className="inline-block px-2 py-1 rounded-md bg-slate-200/60 dark:bg-slate-700/60 text-[11px] font-semibold backdrop-blur-sm shrink-0">
+              <span className="inline-block px-2 py-1 rounded-md bg-muted/60 text-[11px] font-semibold backdrop-blur-sm shrink-0">
                 {enabledAdSets.reduce((sum, a) => sum + (a.videoCount || 0) + (a.imageCount || 0), 0)} CREATIVES
               </span>
             </div>
@@ -4627,7 +4627,7 @@ export default function BulkAds() {
                 className={`flex items-center justify-between p-2.5 rounded-lg transition-colors duration-200 glass-card ${
                   adSetStatuses[adset.id] === "completed" ? "border-emerald-200/40 dark:border-emerald-800/30"
                   : adSetStatuses[adset.id] === "failed" ? "border-red-200/40 dark:border-red-800/30"
-                  : adSetStatuses[adset.id] === "processing" ? "border-blue-200/40 dark:border-blue-800/30"
+                  : adSetStatuses[adset.id] === "processing" ? "border-primary/20 border-primary/40"
                   : ""
                 }`}
                 data-testid={`progress-adset-${idx}`}
@@ -4638,14 +4638,14 @@ export default function BulkAds() {
                   ) : adSetStatuses[adset.id] === "failed" ? (
                     <XCircle className="h-4 w-4 text-red-500" />
                   ) : adSetStatuses[adset.id] === "processing" ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-[#1877F2]" />
+                    <Loader2 className="h-4 w-4 animate-spin text-meta" />
                   ) : (
-                    <Clock className="h-4 w-4 text-slate-400" />
+                    <Clock className="h-4 w-4 text-muted-foreground" />
                   )}
                   <span className="text-sm font-medium">{adset.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="inline-block px-2 py-0.5 rounded-md bg-slate-200/60 dark:bg-slate-700/60 text-[10px] font-semibold backdrop-blur-sm">
+                  <span className="inline-block px-2 py-0.5 rounded-md bg-muted/60 text-[10px] font-semibold backdrop-blur-sm">
                     {(adset.videoCount || 0) + (adset.imageCount || 0)} {((adset.videoCount || 0) + (adset.imageCount || 0)) === 1 ? "CREATIVE" : "CREATIVES"}
                   </span>
                   {adSetStatuses[adset.id] !== "completed" && adSetStatuses[adset.id] !== "failed" && (() => {
@@ -4653,7 +4653,7 @@ export default function BulkAds() {
                     const imgs = adset.imageCount || 0;
                     const secs = Math.ceil(((vids * 90) + (imgs * 10) + ((vids + imgs) * 5) + 10) * 1.2);
                     return (
-                      <span className="text-[10px] font-medium text-slate-400">
+                      <span className="text-[10px] font-medium text-muted-foreground">
                         ~{secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`}
                       </span>
                     );
@@ -4669,7 +4669,7 @@ export default function BulkAds() {
           <div className="space-y-3">
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Activity Log</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activity Log</h3>
                 {isRunning && (
                   <span className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 rounded-full text-[10px] font-semibold border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -4686,9 +4686,9 @@ export default function BulkAds() {
                 )}
               </div>
               <div className="flex gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-300/80 dark:bg-slate-600/80 backdrop-blur-sm" />
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-300/80 dark:bg-slate-600/80 backdrop-blur-sm" />
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-300/80 dark:bg-slate-600/80 backdrop-blur-sm" />
+                <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/80 backdrop-blur-sm" />
+                <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/80 backdrop-blur-sm" />
+                <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/80 backdrop-blur-sm" />
               </div>
             </div>
             <div 
@@ -4708,7 +4708,7 @@ export default function BulkAds() {
               }} />
               <div className="space-y-1.5 relative z-20">
                 {launchLogs.length === 0 ? (
-                  <div className="text-slate-400 flex gap-2">
+                  <div className="text-muted-foreground flex gap-2">
                     <span className="opacity-50 select-none">$</span>
                     <span>{launchStatus === "idle" ? "Connecting to Meta API..." : "Waiting to start..."}<span className="animate-pulse">_</span></span>
                   </div>
@@ -4726,9 +4726,9 @@ export default function BulkAds() {
                         className={`flex gap-2 ${
                           isError ? "text-red-400" :
                           isSuccess ? "text-emerald-400" :
-                          isWarning ? "text-blue-400" :
-                          isAction ? "text-blue-400" :
-                          "text-slate-400"
+                          isWarning ? "text-primary" :
+                          isAction ? "text-primary" :
+                          "text-muted-foreground"
                         }`}
                       >
                         <span className={`select-none ${isSuccess ? "opacity-80" : isAction ? "animate-pulse" : "opacity-50"}`}>
@@ -4746,7 +4746,7 @@ export default function BulkAds() {
             </div>
             {isRunning && (
               <div className="flex items-center justify-between gap-3 mt-3">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Your upload will continue in the background even if you close this page.
                 </p>
                 <button
@@ -4795,7 +4795,7 @@ export default function BulkAds() {
             {launchResults.adSets.length > 0 && (
               <div className="glass-card rounded-xl p-4 relative z-10">
                 <div className="mb-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm">folder_open</span>
                     Ad Sets
                     <Badge variant="secondary" className="text-xs">{launchResults.adSets.length}</Badge>
@@ -4803,18 +4803,18 @@ export default function BulkAds() {
                 </div>
                 <div className="space-y-1.5">
                   {launchResults.adSets.map((adset, idx) => (
-                    <div key={adset.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 dark:bg-slate-800/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
+                    <div key={adset.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
                       <div className="flex items-center gap-2 min-w-0">
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                         <span className="text-xs font-medium truncate">{adset.name}</span>
                       </div>
                       <button
                         onClick={() => copyToClipboard(adset.id, "Ad Set")}
-                        className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                        className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                         data-testid={`copy-adset-id-${idx}`}
                       >
-                        <span className="text-[10px] font-mono text-slate-500">{adset.id.slice(-8)}</span>
-                        <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{adset.id.slice(-8)}</span>
+                        <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                       </button>
                     </div>
                   ))}
@@ -4825,7 +4825,7 @@ export default function BulkAds() {
             {launchResults.creatives.length > 0 && (
               <div className="glass-card rounded-xl p-4 relative z-10">
                 <div className="mb-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm">image</span>
                     Creatives
                     <Badge variant="secondary" className="text-xs">{launchResults.creatives.length}</Badge>
@@ -4833,10 +4833,10 @@ export default function BulkAds() {
                 </div>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
                   {launchResults.creatives.map((creative, idx) => (
-                    <div key={creative.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 dark:bg-slate-800/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
+                    <div key={creative.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
                       <div className="flex items-center gap-2 min-w-0">
                         {creative.type === "video" ? (
-                          <FileVideo className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                          <FileVideo className="h-3.5 w-3.5 text-primary shrink-0" />
                         ) : (
                           <Image className="h-3.5 w-3.5 text-purple-500 shrink-0" />
                         )}
@@ -4844,11 +4844,11 @@ export default function BulkAds() {
                       </div>
                       <button
                         onClick={() => copyToClipboard(creative.id, "Creative")}
-                        className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                        className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                         data-testid={`copy-creative-id-${idx}`}
                       >
-                        <span className="text-[10px] font-mono text-slate-500">{creative.id.slice(-8)}</span>
-                        <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{creative.id.slice(-8)}</span>
+                        <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                       </button>
                     </div>
                   ))}
@@ -4859,7 +4859,7 @@ export default function BulkAds() {
             {launchResults.ads.length > 0 && (
               <div className="glass-card rounded-xl p-4 relative z-10">
                 <div className="mb-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm">description</span>
                     Ads
                     <Badge variant="secondary" className="text-xs">{launchResults.ads.length}</Badge>
@@ -4867,18 +4867,18 @@ export default function BulkAds() {
                 </div>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
                   {launchResults.ads.map((ad, idx) => (
-                    <div key={ad.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 dark:bg-slate-800/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
+                    <div key={ad.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
                       <div className="flex items-center gap-2 min-w-0">
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                         <span className="text-xs truncate">{ad.name}</span>
                       </div>
                       <button
                         onClick={() => copyToClipboard(ad.id, "Ad")}
-                        className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                        className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                         data-testid={`copy-ad-id-${idx}`}
                       >
-                        <span className="text-[10px] font-mono text-slate-500">{ad.id.slice(-8)}</span>
-                        <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{ad.id.slice(-8)}</span>
+                        <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                       </button>
                     </div>
                   ))}
@@ -4890,7 +4890,7 @@ export default function BulkAds() {
               <Button
                 variant="ghost"
                 onClick={() => resetSession()}
-                className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                className="text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/60"
                 data-testid="button-start-new"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -4924,7 +4924,7 @@ export default function BulkAds() {
           <div className="flex justify-end gap-3 mt-2">
             <Button
               variant="ghost"
-              className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              className="text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/60"
               disabled
               data-testid="button-view-analytics-disabled"
             >
@@ -4938,7 +4938,7 @@ export default function BulkAds() {
             <Button
               variant="ghost"
               onClick={() => resetSession()}
-              className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              className="text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/60"
               data-testid="button-start-new-error"
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -5039,8 +5039,8 @@ export default function BulkAds() {
             onClick={() => navigateToStep(1)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 1 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 1 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 1 ? "" : "bg-muted"}`}>
+            {currentStep > 1 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={2} 
@@ -5049,8 +5049,8 @@ export default function BulkAds() {
             onClick={() => navigateToStep(2)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 2 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 2 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 2 ? "" : "bg-muted"}`}>
+            {currentStep > 2 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={3} 
@@ -5059,8 +5059,8 @@ export default function BulkAds() {
             onClick={() => navigateToStep(3)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 3 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 3 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 3 ? "" : "bg-muted"}`}>
+            {currentStep > 3 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={4} 
@@ -5068,8 +5068,8 @@ export default function BulkAds() {
             title="Launch"
             disabled={true}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 4 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 4 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 4 ? "" : "bg-muted"}`}>
+            {currentStep > 4 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={5} 
@@ -5094,7 +5094,7 @@ export default function BulkAds() {
                 <Button
                   variant="outline"
                   size="lg"
-                  className="h-10 px-6 rounded-xl bg-white/80 hover:bg-white dark:bg-slate-800/80 dark:hover:bg-slate-700 border-slate-200/50 dark:border-slate-600/50 shadow-sm font-semibold transition-all"
+                  className="h-10 px-6 rounded-xl bg-white/80 hover:bg-card/80 dark:hover:bg-muted border-border/50 shadow-sm font-semibold transition-all"
                   data-testid="button-prev-step"
                   onClick={() => navigateToStep(currentStep - 1)}
                 >
@@ -5104,7 +5104,7 @@ export default function BulkAds() {
               )}
               <Button
                 variant="outline"
-                className="h-10 px-4 rounded-xl bg-white/60 hover:bg-white dark:bg-slate-800/60 dark:hover:bg-slate-700 border-slate-200/50 dark:border-slate-600/50 shadow-sm font-medium text-xs transition-all"
+                className="h-10 px-4 rounded-xl bg-white/60 hover:bg-card/60 dark:hover:bg-muted border-border/50 shadow-sm font-medium text-xs transition-all"
                 data-testid="button-new-upload"
                 onClick={() => resetSession()}
               >
@@ -5115,7 +5115,7 @@ export default function BulkAds() {
             {currentStep < 4 && launchStatus === "idle" && (
               <div className="flex items-center gap-3">
                 {currentStep === 3 && getStep3Errors().length > 0 && (
-                  <div className="text-xs text-[#1877F2] dark:text-blue-300 text-right max-w-[300px]" data-testid="text-step3-errors">
+                  <div className="text-xs text-meta dark:text-primary/70 text-right max-w-[300px]" data-testid="text-step3-errors">
                     {getStep3Errors().map((err, i) => (
                       <div key={i}>{err}</div>
                     ))}
@@ -5123,7 +5123,7 @@ export default function BulkAds() {
                 )}
                 <Button
                   size="lg"
-                  className="h-10 px-8 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-semibold shadow-[0_15px_30px_-5px_rgba(24,119,242,0.4)] transition-all transform hover:-translate-y-0.5"
+                  className="h-10 px-8 rounded-xl bg-primary hover:bg-primary/90 text-white font-semibold shadow-[0_15px_30px_-5px_hsl(var(--primary)/0.4)] transition-all transform hover:-translate-y-0.5"
                   data-testid="button-next-step"
                   onClick={() => setCurrentStep((s) => Math.min(4, s + 1))}
                   disabled={!canGoNext()}
@@ -5161,7 +5161,7 @@ export default function BulkAds() {
               <textarea
                 id="edit-primary-text"
                 data-testid="input-edit-primary-text"
-                className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-none overflow-hidden"
+                className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-none overflow-hidden"
                 value={editingCopy.primaryText}
                 ref={(el) => autoResizeTextarea(el)}
                 onChange={(e) => {
@@ -5360,7 +5360,7 @@ export default function BulkAds() {
           <div className="px-8 pt-8 pb-4">
             <DialogHeader className="space-y-1">
               <DialogTitle className="text-xl font-semibold tracking-tight">How it works</DialogTitle>
-              <DialogDescription className="text-sm text-slate-400">
+              <DialogDescription className="text-sm text-muted-foreground">
                 A quick guide to importing and launching your ads
               </DialogDescription>
             </DialogHeader>
@@ -5368,47 +5368,47 @@ export default function BulkAds() {
 
           <div className="px-8 pb-8 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-3">
+              <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-[#1877F2]/10 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-[#1877F2] text-lg">lock</span>
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-meta text-lg">lock</span>
                   </div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Private Folder</h4>
+                  <h4 className="text-sm font-semibold text-foreground">Private Folder</h4>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   Share your Google Drive folder with the service account email shown in the app, then paste the folder URL and sync.
                 </p>
-                <ol className="text-xs text-slate-500 dark:text-slate-400 space-y-1.5 list-none">
-                  <li className="flex items-start gap-2"><span className="text-[#1877F2] font-semibold shrink-0">1.</span>Copy the service account email</li>
-                  <li className="flex items-start gap-2"><span className="text-[#1877F2] font-semibold shrink-0">2.</span>Share your Drive folder with that email</li>
-                  <li className="flex items-start gap-2"><span className="text-[#1877F2] font-semibold shrink-0">3.</span>Paste the folder URL & click Sync</li>
+                <ol className="text-xs text-muted-foreground space-y-1.5 list-none">
+                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">1.</span>Copy the service account email</li>
+                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">2.</span>Share your Drive folder with that email</li>
+                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">3.</span>Paste the folder URL & click Sync</li>
                 </ol>
               </div>
 
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-3">
+              <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
                     <span className="material-symbols-outlined text-purple-500 text-lg">public</span>
                   </div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Public URL</h4>
+                  <h4 className="text-sm font-semibold text-foreground">Public URL</h4>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   If your folder is set to "Anyone with the link can view", just paste the URL and sync. No sharing step needed.
                 </p>
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-4">
+            <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-blue-500 text-lg">description</span>
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-primary text-lg">description</span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">DOCX Ad Copy Format</h4>
-                  <p className="text-[11px] text-slate-400">Use numbered fields. Separate A/B variants with _1, _2, etc.</p>
+                  <h4 className="text-sm font-semibold text-foreground">DOCX Ad Copy Format</h4>
+                  <p className="text-[11px] text-muted-foreground">Use numbered fields. Separate A/B variants with _1, _2, etc.</p>
                 </div>
               </div>
-              <div className="rounded-lg bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 p-4 font-mono text-xs text-slate-600 dark:text-slate-400 leading-relaxed overflow-x-auto">
+              <div className="rounded-lg bg-card border border-border p-4 font-mono text-xs text-muted-foreground leading-relaxed overflow-x-auto">
 {`DCT 161:
 
 Primary text_1:
@@ -5425,51 +5425,51 @@ Your description`}
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-4">
+            <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-[#1877F2]/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[#1877F2] text-lg">folder_open</span>
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-meta text-lg">folder_open</span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Folder Structure</h4>
-                  <p className="text-[11px] text-slate-400">Each subfolder becomes an Ad Set. One DOCX file for all ad copy.</p>
+                  <h4 className="text-sm font-semibold text-foreground">Folder Structure</h4>
+                  <p className="text-[11px] text-muted-foreground">Each subfolder becomes an Ad Set. One DOCX file for all ad copy.</p>
                 </div>
               </div>
-              <div className="rounded-lg bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 p-4 font-mono text-xs text-slate-600 dark:text-slate-400 leading-relaxed overflow-x-auto">
-                <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-semibold mb-1">
-                  <span className="material-symbols-outlined text-sm text-[#1877F2]">folder</span>
+              <div className="rounded-lg bg-card border border-border p-4 font-mono text-xs text-muted-foreground leading-relaxed overflow-x-auto">
+                <div className="flex items-center gap-2 text-foreground font-semibold mb-1">
+                  <span className="material-symbols-outlined text-sm text-meta">folder</span>
                   Campaign Folder/
                 </div>
                 <div className="ml-5 space-y-0.5">
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 161 - Spring_Sale/</div>
-                  <div className="ml-7 text-slate-400">creative files</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 162 - Comparison/</div>
-                  <div className="ml-7 text-slate-400">creative files</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 163 - Video_Ads/</div>
-                  <div className="ml-7 text-slate-400">video1.mp4</div>
-                  <div className="flex items-center gap-2 text-[#1877F2]"><span className="material-symbols-outlined text-sm">description</span>ad_copy.docx</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 161 - Spring_Sale/</div>
+                  <div className="ml-7 text-muted-foreground">creative files</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 162 - Comparison/</div>
+                  <div className="ml-7 text-muted-foreground">creative files</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 163 - Video_Ads/</div>
+                  <div className="ml-7 text-muted-foreground">video1.mp4</div>
+                  <div className="flex items-center gap-2 text-meta"><span className="material-symbols-outlined text-sm">description</span>ad_copy.docx</div>
                 </div>
               </div>
             </div>
 
             <div>
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-4 space-y-2">
+              <div className="rounded-xl border border-border bg-muted/50 p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-md bg-green-500/10 flex items-center justify-center">
                     <span className="material-symbols-outlined text-green-500 text-sm">movie</span>
                   </div>
-                  <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300">Videos</h4>
+                  <h4 className="text-xs font-semibold text-foreground">Videos</h4>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {[".mp4", ".mov", ".avi", ".mkv"].map(f => (
-                    <span key={f} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 text-[11px] font-mono text-slate-500">{f}</span>
+                    <span key={f} className="px-2 py-0.5 rounded-md bg-card border border-border text-[11px] font-mono text-muted-foreground">{f}</span>
                   ))}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="px-8 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/30 rounded-b-2xl">
+          <div className="px-8 py-4 border-t border-border bg-muted/30 rounded-b-2xl">
             <Button
               onClick={() => setShowInfoModal(false)}
               className="w-full rounded-xl"
@@ -5499,14 +5499,14 @@ Your description`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-2">
-            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 p-4 space-y-3">
+            <div className="rounded-xl border border-dashed border-input bg-muted/50 p-4 space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Upload className="h-4 w-4" />
                 Paste text
               </div>
               <div className="space-y-2">
                 <textarea
-                  className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-y font-mono"
+                  className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-y font-mono"
                   placeholder={"Primary text: Your ad text here\nHeadline: Your headline\nDescription: Your description\n---\nPrimary text: Second variation\nHeadline: Second headline\nDescription: Second description"}
                   value={pasteText}
                   onChange={(e) => setPasteText(e.target.value)}
@@ -5559,13 +5559,13 @@ Your description`}
               </div>
               <div className="space-y-3">
                 {editingAdSetCopy.primaryTexts.map((text, idx) => (
-                  <div key={idx} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-3 space-y-2">
+                  <div key={idx} className="rounded-xl border border-border bg-muted/50 p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Primary text {idx + 1}</span>
                       {editingAdSetCopy.primaryTexts.length > 1 && (
                         <button
                           type="button"
-                          className="text-slate-400 hover:text-destructive transition-colors"
+                          className="text-muted-foreground hover:text-destructive transition-colors"
                           onClick={() => setEditingAdSetCopy(prev => ({
                             ...prev,
                             primaryTexts: prev.primaryTexts.filter((_, i) => i !== idx),
@@ -5577,7 +5577,7 @@ Your description`}
                       )}
                     </div>
                     <textarea
-                      className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-none overflow-hidden"
+                      className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-none overflow-hidden"
                       value={text}
                       ref={(el) => autoResizeTextarea(el)}
                       onChange={(e) => {
@@ -5615,7 +5615,7 @@ Your description`}
                     <span className="text-[11px] font-medium text-muted-foreground w-5 text-right shrink-0">{idx + 1}.</span>
                     <input
                       type="text"
-                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-card"
                       value={text}
                       onChange={(e) => setEditingAdSetCopy(prev => ({
                         ...prev,
@@ -5627,7 +5627,7 @@ Your description`}
                     {editingAdSetCopy.headlines.length > 1 && (
                       <button
                         type="button"
-                        className="text-slate-400 hover:text-destructive transition-colors shrink-0"
+                        className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
                         onClick={() => setEditingAdSetCopy(prev => ({
                           ...prev,
                           headlines: prev.headlines.filter((_, i) => i !== idx),
@@ -5662,7 +5662,7 @@ Your description`}
                     <span className="text-[11px] font-medium text-muted-foreground w-5 text-right shrink-0">{idx + 1}.</span>
                     <input
                       type="text"
-                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-card"
                       value={text}
                       onChange={(e) => setEditingAdSetCopy(prev => ({
                         ...prev,
@@ -5674,7 +5674,7 @@ Your description`}
                     {editingAdSetCopy.descriptions.length > 1 && (
                       <button
                         type="button"
-                        className="text-slate-400 hover:text-destructive transition-colors shrink-0"
+                        className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
                         onClick={() => setEditingAdSetCopy(prev => ({
                           ...prev,
                           descriptions: prev.descriptions.filter((_, i) => i !== idx),
@@ -5689,7 +5689,7 @@ Your description`}
               </div>
             </div>
           </div>
-          <DialogFooter className="border-t border-slate-100 dark:border-slate-800 pt-4">
+          <DialogFooter className="border-t border-border pt-4">
             <Button
               variant="outline"
               className="rounded-xl"

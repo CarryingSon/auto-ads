@@ -41,6 +41,11 @@ export default {
           DEFAULT: "hsl(var(--warning) / <alpha-value>)",
           foreground: "hsl(var(--warning-foreground) / <alpha-value>)",
         },
+        console: {
+          DEFAULT: "hsl(var(--console) / <alpha-value>)",
+          foreground: "hsl(var(--console-foreground) / <alpha-value>)",
+          border: "hsl(var(--console-border) / <alpha-value>)",
+        },
         // Meta's own blue. Reserved for surfaces that represent Facebook,
         // Instagram or a value imported from Meta — never for our own actions.
         meta: {

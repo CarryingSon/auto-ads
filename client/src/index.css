@@ -30,6 +30,11 @@
      surface actually represents Facebook, Instagram or an imported value. */
   --primary: 224 70% 51%;
   --primary-foreground: 0 0% 100%;
+  /* Log console: committed to a dark ground in both themes, the way a
+     terminal is, so output stays legible whichever theme is active. */
+  --console: 224 55% 7%;
+  --console-foreground: 220 22% 90%;
+  --console-border: 224 28% 20%;
   --meta: 214 89% 52%;
   --meta-hover: 214 82% 45%;
   --meta-foreground: 0 0% 100%;
@@ -298,8 +303,8 @@
 }
 .glass-card.active {
   background: rgba(235, 245, 255, 0.5);
-  border: 1px solid rgba(24, 119, 242, 0.4);
-  box-shadow: 0 0 0 4px rgba(24, 119, 242, 0.05), 0 0 20px rgba(24, 119, 242, 0.15);
+  border: 1px solid hsl(var(--primary) / 0.4);
+  box-shadow: 0 0 0 4px hsl(var(--primary) / 0.05), 0 0 20px hsl(var(--primary) / 0.15);
 }
 .dark .glass-card {
   background: rgba(255, 255, 255, 0.06);
@@ -311,9 +316,9 @@
   border-color: rgba(255, 255, 255, 0.15);
 }
 .dark .glass-card.active {
-  background: rgba(24, 119, 242, 0.1);
-  border: 1px solid rgba(24, 119, 242, 0.3);
-  box-shadow: 0 0 0 4px rgba(24, 119, 242, 0.1), 0 0 20px rgba(24, 119, 242, 0.1);
+  background: hsl(var(--primary) / 0.1);
+  border: 1px solid hsl(var(--primary) / 0.3);
+  box-shadow: 0 0 0 4px hsl(var(--primary) / 0.1), 0 0 20px hsl(var(--primary) / 0.1);
 }
 .glass-tag {
   background: rgba(255, 255, 255, 0.4);

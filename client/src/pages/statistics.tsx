@@ -146,7 +146,7 @@ function formatPercent(value: string | number): string {
 function getStatusDot(status: string) {
   if (status === "ACTIVE") return "bg-emerald-500";
   if (status === "PAUSED") return "bg-amber-400";
-  return "bg-slate-300 dark:bg-slate-600";
+  return "bg-muted-foreground/40";
 }
 
 function sortRows<T>(rows: T[], sortKey: SortKey, sortDir: SortDir, getter: (row: T) => Record<string, any>): T[] {
@@ -186,9 +186,9 @@ function SortHeader({
   const active = sortKey === col.key;
   return (
     <th
-      className={`px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap transition-colors hover:text-blue-500 ${
+      className={`px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap transition-colors hover:text-primary ${
         col.align === "right" ? "text-right" : "text-left"
-      } ${active ? "text-blue-600 dark:text-blue-400" : "text-slate-500 dark:text-slate-400"}`}
+      } ${active ? "text-primary dark:text-primary" : "text-muted-foreground"}`}
       onClick={() => onSort(col.key)}
       data-testid={`sort-${col.key}`}
     >
@@ -217,7 +217,7 @@ function StatusCell({ status }: { status: string }) {
     <td className="px-3 py-2.5">
       <span className="inline-flex items-center gap-1.5">
         <span className={`w-1.5 h-1.5 rounded-full ${getStatusDot(status)}`} />
-        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{status}</span>
+        <span className="text-xs font-medium text-muted-foreground">{status}</span>
       </span>
     </td>
   );
@@ -229,17 +229,17 @@ function TotalsRow({ label, spend, impressions, clicks, ctr, roas, purchases }: 
   const cpc = clicks > 0 ? spend / clicks : 0;
   const cpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
   return (
-    <tr className="border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/60 font-semibold">
-      <td className="px-3 py-2.5 text-xs text-slate-700 dark:text-slate-200">{label}</td>
+    <tr className="border-t-2 border-border bg-muted/80 font-semibold">
+      <td className="px-3 py-2.5 text-xs text-foreground">{label}</td>
       <td className="px-3 py-2.5" />
-      <MetricCell value={formatCurrency(spend)} className="font-semibold text-slate-800 dark:text-slate-100" />
-      <MetricCell value={formatNumber(impressions)} className="text-slate-600 dark:text-slate-300" />
-      <MetricCell value={formatNumber(clicks)} className="text-slate-600 dark:text-slate-300" />
+      <MetricCell value={formatCurrency(spend)} className="font-semibold text-foreground" />
+      <MetricCell value={formatNumber(impressions)} className="text-muted-foreground" />
+      <MetricCell value={formatNumber(clicks)} className="text-muted-foreground" />
       <MetricCell value={formatPercent(ctr)} className="text-emerald-600 dark:text-emerald-400" />
-      <MetricCell value={formatCurrency(cpc)} className="text-slate-600 dark:text-slate-300" />
-      <MetricCell value={formatCurrency(cpm)} className="text-slate-600 dark:text-slate-300" />
-      <MetricCell value={roas != null ? `${roas.toFixed(2)}x` : "—"} className="text-slate-600 dark:text-slate-300" />
-      <MetricCell value={purchases != null && purchases > 0 ? String(purchases) : "—"} className="text-slate-600 dark:text-slate-300" />
+      <MetricCell value={formatCurrency(cpc)} className="text-muted-foreground" />
+      <MetricCell value={formatCurrency(cpm)} className="text-muted-foreground" />
+      <MetricCell value={roas != null ? `${roas.toFixed(2)}x` : "—"} className="text-muted-foreground" />
+      <MetricCell value={purchases != null && purchases > 0 ? String(purchases) : "—"} className="text-muted-foreground" />
     </tr>
   );
 }
@@ -259,7 +259,7 @@ function BreakdownLeaderboard({ items, color, label, icon }: {
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <span className={`material-symbols-outlined text-[16px] ${color}`}>{icon}</span>
-        <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-200">{label} ({sorted.length})</h4>
+        <h4 className="text-xs font-semibold text-foreground">{label} ({sorted.length})</h4>
       </div>
       <div className="space-y-1.5">
         {sorted.map((child, idx) => {
@@ -267,22 +267,22 @@ function BreakdownLeaderboard({ items, color, label, icon }: {
           return (
             <div
               key={idx}
-              className="rounded-lg p-3 border transition-all bg-white/40 dark:bg-slate-800/30 border-slate-100 dark:border-slate-700/40"
+              className="rounded-lg p-3 border transition-all bg-card/40 border-border/40"
               data-testid={`breakdown-${label.toLowerCase()}-${idx}`}
             >
               <div className="flex items-start justify-between gap-3 mb-2">
-                <p className="text-sm leading-snug flex-1 line-clamp-2 text-slate-700 dark:text-slate-200">{child.breakdownValue}</p>
+                <p className="text-sm leading-snug flex-1 line-clamp-2 text-foreground">{child.breakdownValue}</p>
               </div>
-              <div className="h-1.5 bg-slate-100 dark:bg-slate-700/30 rounded-full overflow-hidden mb-2">
-                <div className="h-full rounded-full transition-all" style={{ width: `${spendPct}%`, background: "linear-gradient(90deg, #94A3B8, #CBD5E1)" }} />
+              <div className="h-1.5 bg-muted/30 rounded-full overflow-hidden mb-2">
+                <div className="h-full rounded-full transition-all" style={{ width: `${spendPct}%`, background: "linear-gradient(90deg, hsl(var(--muted-foreground)), hsl(var(--border)))" }} />
               </div>
               <div className="grid grid-cols-6 gap-1 text-center text-[11px]">
-                <div><span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatPercent(child.ctr)}</span><br /><span className="text-slate-400">CTR</span></div>
-                <div><span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(child.spend)}</span><br /><span className="text-slate-400">Spend</span></div>
-                <div><span className="font-semibold text-slate-700 dark:text-slate-200">{formatNumber(child.impressions)}</span><br /><span className="text-slate-400">Impr.</span></div>
-                <div><span className="font-semibold text-slate-700 dark:text-slate-200">{formatNumber(child.clicks)}</span><br /><span className="text-slate-400">Clicks</span></div>
-                <div><span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(child.cpc)}</span><br /><span className="text-slate-400">CPC</span></div>
-                <div><span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(child.cpm)}</span><br /><span className="text-slate-400">CPM</span></div>
+                <div><span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatPercent(child.ctr)}</span><br /><span className="text-muted-foreground">CTR</span></div>
+                <div><span className="font-semibold text-foreground">{formatCurrency(child.spend)}</span><br /><span className="text-muted-foreground">Spend</span></div>
+                <div><span className="font-semibold text-foreground">{formatNumber(child.impressions)}</span><br /><span className="text-muted-foreground">Impr.</span></div>
+                <div><span className="font-semibold text-foreground">{formatNumber(child.clicks)}</span><br /><span className="text-muted-foreground">Clicks</span></div>
+                <div><span className="font-semibold text-foreground">{formatCurrency(child.cpc)}</span><br /><span className="text-muted-foreground">CPC</span></div>
+                <div><span className="font-semibold text-foreground">{formatCurrency(child.cpm)}</span><br /><span className="text-muted-foreground">CPM</span></div>
               </div>
             </div>
           );
@@ -312,21 +312,21 @@ function AdDetailPopup({
     .findIndex(a => a.id === ad.id) + 1;
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto !rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-0 gap-0" aria-describedby="ad-detail-desc">
-        <div className="px-6 pt-5 pb-4 border-b border-slate-100 dark:border-slate-800">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto !rounded-2xl bg-card border border-border shadow-2xl p-0 gap-0" aria-describedby="ad-detail-desc">
+        <div className="px-6 pt-5 pb-4 border-b border-border">
           <DialogHeader className="space-y-0">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <DialogTitle className="text-sm font-semibold text-slate-900 dark:text-white leading-snug break-words" data-testid="dialog-ad-name">
+                <DialogTitle className="text-sm font-semibold text-foreground leading-snug break-words" data-testid="dialog-ad-name">
                   {ad.name}
                 </DialogTitle>
-                <p id="ad-detail-desc" className="text-xs text-slate-400 mt-1" data-testid="dialog-adset-name">
+                <p id="ad-detail-desc" className="text-xs text-muted-foreground mt-1" data-testid="dialog-adset-name">
                   {ad.adSetName} · #{rank} of {adSetAds.length}
                 </p>
               </div>
               <span className="inline-flex items-center gap-1.5 shrink-0 mt-0.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${getStatusDot(ad.status)}`} />
-                <span className="text-[10px] font-semibold text-slate-500">{ad.status}</span>
+                <span className="text-[10px] font-semibold text-muted-foreground">{ad.status}</span>
               </span>
             </div>
           </DialogHeader>
@@ -343,9 +343,9 @@ function AdDetailPopup({
               { label: "CPC", value: formatCurrency(ad.cpc) },
               { label: "CPM", value: formatCurrency(ad.cpm) },
             ].map((m, idx) => (
-              <div key={idx} className="rounded-lg bg-slate-50 dark:bg-slate-800/50 p-2.5 text-center border border-slate-100 dark:border-slate-700/40" data-testid={`metric-${m.label.toLowerCase()}`}>
-                <div className={`text-sm font-semibold ${m.highlight ? "text-emerald-600 dark:text-emerald-400" : "text-slate-800 dark:text-slate-100"}`}>{m.value}</div>
-                <div className="text-[10px] text-slate-400">{m.label}</div>
+              <div key={idx} className="rounded-lg bg-muted/50 p-2.5 text-center border border-border/40" data-testid={`metric-${m.label.toLowerCase()}`}>
+                <div className={`text-sm font-semibold ${m.highlight ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{m.value}</div>
+                <div className="text-[10px] text-muted-foreground">{m.label}</div>
               </div>
             ))}
           </div>
@@ -357,32 +357,32 @@ function AdDetailPopup({
                   <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400" data-testid="metric-roas">
                     {ad.roas != null ? `${ad.roas.toFixed(2)}x` : "N/A"}
                   </div>
-                  <div className="text-[10px] text-slate-400">ROAS</div>
+                  <div className="text-[10px] text-muted-foreground">ROAS</div>
                 </div>
                 <div>
-                  <div className="text-base font-semibold text-slate-800 dark:text-slate-100" data-testid="metric-purchases">
+                  <div className="text-base font-semibold text-foreground" data-testid="metric-purchases">
                     {ad.purchases || 0}
                   </div>
-                  <div className="text-[10px] text-slate-400">Purchases</div>
+                  <div className="text-[10px] text-muted-foreground">Purchases</div>
                 </div>
                 <div>
-                  <div className="text-base font-semibold text-slate-800 dark:text-slate-100" data-testid="metric-purchase-value">
+                  <div className="text-base font-semibold text-foreground" data-testid="metric-purchase-value">
                     {formatCurrency(ad.purchaseValue || 0)}
                   </div>
-                  <div className="text-[10px] text-slate-400">Revenue</div>
+                  <div className="text-[10px] text-muted-foreground">Revenue</div>
                 </div>
               </div>
             </div>
           )}
 
-          <BreakdownLeaderboard items={ad.bodyBreakdown || []} color="text-blue-500" label="Primary Text" icon="description" />
+          <BreakdownLeaderboard items={ad.bodyBreakdown || []} color="text-primary" label="Primary Text" icon="description" />
           <BreakdownLeaderboard items={ad.titleBreakdown || []} color="text-emerald-500" label="Headline" icon="title" />
           <BreakdownLeaderboard items={ad.descriptionBreakdown || []} color="text-purple-500" label="Description" icon="notes" />
 
           {(!ad.bodyBreakdown || ad.bodyBreakdown.length === 0) && (!ad.titleBreakdown || ad.titleBreakdown.length === 0) && (!ad.descriptionBreakdown || ad.descriptionBreakdown.length === 0) && (
-            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-700/40 p-6 text-center">
-              <span className="material-symbols-outlined text-[28px] text-slate-300 dark:text-slate-600 block mb-2">description</span>
-              <p className="text-xs text-slate-400">No text breakdown data — ads need multiple text variants for A/B testing breakdown.</p>
+            <div className="rounded-lg bg-muted/40 border border-border/40 p-6 text-center">
+              <span className="material-symbols-outlined text-[28px] text-muted-foreground block mb-2">description</span>
+              <p className="text-xs text-muted-foreground">No text breakdown data — ads need multiple text variants for A/B testing breakdown.</p>
             </div>
           )}
         </div>
@@ -622,7 +622,7 @@ export default function Statistics() {
         <div className="flex items-center gap-3">
           {viewLevel !== "campaigns" && (
             <button
-              className="w-8 h-8 rounded-lg flex items-center justify-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 text-slate-500 hover:text-blue-500 transition-all"
+              className="w-8 h-8 rounded-lg flex items-center justify-center bg-card border border-border hover:border-primary/20 dark:hover:border-primary/50 text-muted-foreground hover:text-primary transition-all"
               onClick={handleBack}
               data-testid="button-back"
             >
@@ -630,21 +630,21 @@ export default function Statistics() {
             </button>
           )}
           <div>
-            <h1 className="text-base font-semibold text-slate-900 dark:text-white" data-testid="text-page-title">
+            <h1 className="text-base font-semibold text-foreground" data-testid="text-page-title">
               {viewLevel === "campaigns" ? "Campaigns" : viewLevel === "adsets" ? "Ad Sets" : "Ads"}
               {(searchQuery || statusFilter !== "all") && (
-                <span className="ml-2 text-xs font-normal text-slate-400">
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
                   ({viewLevel === "campaigns" ? sortedCampaigns.length : viewLevel === "adsets" ? adSets.length : currentAdSetAds.length} shown)
                 </span>
               )}
             </h1>
             {breadcrumb.length > 0 && (
-              <div className="flex items-center gap-1 text-xs text-slate-400 mt-0.5">
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
                 {breadcrumb.map((part, idx) => (
                   <span key={idx} className="flex items-center gap-1">
                     {idx > 0 && <span className="material-symbols-outlined text-[12px]">chevron_right</span>}
                     {part.onClick ? (
-                      <button onClick={part.onClick} className="hover:text-blue-500 transition-colors truncate max-w-[200px]">{part.label}</button>
+                      <button onClick={part.onClick} className="hover:text-primary transition-colors truncate max-w-[200px]">{part.label}</button>
                     ) : (
                       <span className="truncate max-w-[200px]">{part.label}</span>
                     )}
@@ -657,18 +657,18 @@ export default function Statistics() {
 
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
-            <span className="material-symbols-outlined text-[16px] text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
+            <span className="material-symbols-outlined text-[16px] text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
             <Input
               type="text"
               placeholder={viewLevel === "campaigns" ? "Search campaigns..." : viewLevel === "adsets" ? "Search ad sets..." : "Search ads..."}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-8 w-[180px] text-xs rounded-lg bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 pl-8 pr-7"
+              className="h-8 w-[180px] text-xs rounded-lg bg-card border-border pl-8 pr-7"
               data-testid="input-search"
             />
             {searchQuery && (
               <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground"
                 onClick={() => setSearchQuery("")}
                 data-testid="button-clear-search"
               >
@@ -678,7 +678,7 @@ export default function Statistics() {
           </div>
 
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | "ACTIVE" | "PAUSED")}>
-            <SelectTrigger className="w-[110px] h-8 text-xs rounded-lg bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700" data-testid="select-status-filter">
+            <SelectTrigger className="w-[110px] h-8 text-xs rounded-lg bg-card border-border" data-testid="select-status-filter">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -691,7 +691,7 @@ export default function Statistics() {
           {viewLevel !== "campaigns" && (
             <>
               <Select value={dateRange} onValueChange={setDateRange}>
-                <SelectTrigger className="w-[140px] h-8 text-xs rounded-lg bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700" data-testid="select-date-range">
+                <SelectTrigger className="w-[140px] h-8 text-xs rounded-lg bg-card border-border" data-testid="select-date-range">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -705,7 +705,7 @@ export default function Statistics() {
                   page says how old it is. */}
               {dataAge && !isFetching && (
                 <span
-                  className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap"
+                  className="text-[11px] text-muted-foreground whitespace-nowrap"
                   title="Statistics are cached for this session. Click refresh for current numbers."
                   data-testid="text-stats-age"
                 >
@@ -713,13 +713,13 @@ export default function Statistics() {
                 </span>
               )}
               {isFetching && (
-                <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                <span className="text-[11px] text-muted-foreground whitespace-nowrap">
                   Loading…
                 </span>
               )}
 
               <button
-                className="w-8 h-8 rounded-lg flex items-center justify-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-300 text-slate-500 hover:text-blue-500 transition-all"
+                className="w-8 h-8 rounded-lg flex items-center justify-center bg-card border border-border hover:border-primary/20 text-muted-foreground hover:text-primary transition-all"
                 onClick={() => refetch()}
                 disabled={isFetching}
                 title="Refresh statistics from Meta"
@@ -733,45 +733,45 @@ export default function Statistics() {
       </div>
 
       {viewLevel === "campaigns" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+        <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
           {sortedCampaigns.length === 0 ? (
             <div className="p-10 text-center">
-              <span className="material-symbols-outlined text-[36px] text-slate-200 dark:text-slate-700 block mb-2">
+              <span className="material-symbols-outlined text-[36px] text-muted-foreground/60 block mb-2">
                 {(searchQuery || statusFilter !== "all") ? "filter_list_off" : "bar_chart"}
               </span>
-              <p className="text-sm font-medium text-slate-500 dark:text-slate-400" data-testid="text-no-campaigns">
+              <p className="text-sm font-medium text-muted-foreground" data-testid="text-no-campaigns">
                 {(searchQuery || statusFilter !== "all") ? "No campaigns match your filters" : "No campaigns found"}
               </p>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 {(searchQuery || statusFilter !== "all")
                   ? "Try adjusting your search or status filter."
                   : "Create your first campaign to view statistics."}
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            <div className="divide-y divide-border">
               {sortedCampaigns.map((campaign) => (
                 <div
                   key={campaign.id}
-                  className="px-4 py-3 flex items-center justify-between hover:bg-blue-50/30 dark:hover:bg-blue-900/10 cursor-pointer transition-colors group"
+                  className="px-4 py-3 flex items-center justify-between hover:bg-primary/10 dark:hover:bg-primary/10 cursor-pointer transition-colors group"
                   onClick={() => handleCampaignClick(campaign)}
                   data-testid={`row-campaign-${campaign.id}`}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-[#1877F2]/10 flex items-center justify-center shrink-0">
-                      <span className="material-symbols-outlined text-[#1877F2] text-[18px]">campaign</span>
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-meta text-[18px]">campaign</span>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" data-testid={`text-campaign-name-${campaign.id}`}>
+                      <p className="text-sm font-medium text-foreground group-hover:text-primary dark:group-hover:text-primary transition-colors" data-testid={`text-campaign-name-${campaign.id}`}>
                         {campaign.name}
                       </p>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className={`w-1.5 h-1.5 rounded-full ${getStatusDot(campaign.status)}`} />
-                        <span className="text-[10px] text-slate-400">{campaign.status}</span>
+                        <span className="text-[10px] text-muted-foreground">{campaign.status}</span>
                       </div>
                     </div>
                   </div>
-                  <span className="material-symbols-outlined text-[18px] text-slate-300 group-hover:text-blue-400 transition-all group-hover:translate-x-0.5">chevron_right</span>
+                  <span className="material-symbols-outlined text-[18px] text-muted-foreground/60 group-hover:text-primary transition-all group-hover:translate-x-0.5">chevron_right</span>
                 </div>
               ))}
             </div>
@@ -780,7 +780,7 @@ export default function Statistics() {
       )}
 
       {viewLevel !== "campaigns" && (
-      <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden shadow-sm relative">
+      <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm relative">
         {isLoading ? (
           <div className="p-4">
             <TypewriterProgressBar
@@ -792,7 +792,7 @@ export default function Statistics() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm" data-testid="stats-table">
               <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+                <tr className="border-b border-border bg-muted/50">
                   {columns.map((col) => (
                     <SortHeader key={col.key} col={col} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                   ))}
@@ -805,10 +805,10 @@ export default function Statistics() {
                     {adSets.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="p-10 text-center">
-                          <span className="material-symbols-outlined text-[36px] text-slate-200 dark:text-slate-700 block mb-2">
+                          <span className="material-symbols-outlined text-[36px] text-muted-foreground/60 block mb-2">
                             {(searchQuery || statusFilter !== "all") ? "filter_list_off" : "bar_chart"}
                           </span>
-                          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                          <p className="text-sm font-medium text-muted-foreground">
                             {(searchQuery || statusFilter !== "all") ? "No ad sets match your filters" : "No ad sets found"}
                           </p>
                         </td>
@@ -821,35 +821,35 @@ export default function Statistics() {
                           return (
                             <tr
                               key={adSet.id}
-                              className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-blue-50/30 dark:hover:bg-blue-900/10 cursor-pointer transition-colors group"
+                              className="border-b border-border/50 hover:bg-primary/10 dark:hover:bg-primary/10 cursor-pointer transition-colors group"
                               onClick={() => handleAdSetClick(adSet)}
                               data-testid={`row-adset-${adSet.id}`}
                             >
                               <td className="px-3 py-3">
                                 <div className="flex items-center gap-2.5">
                                   <div className="min-w-0">
-                                    <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate max-w-[280px] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" data-testid={`text-adset-name-${adSet.id}`}>
+                                    <p className="text-sm font-medium text-foreground truncate max-w-[280px] group-hover:text-primary dark:group-hover:text-primary transition-colors" data-testid={`text-adset-name-${adSet.id}`}>
                                       {adSet.name}
                                     </p>
-                                    <p className="text-[10px] text-slate-400">{adCount} ad{adCount !== 1 ? "s" : ""}</p>
+                                    <p className="text-[10px] text-muted-foreground">{adCount} ad{adCount !== 1 ? "s" : ""}</p>
                                   </div>
-                                  <span className="material-symbols-outlined text-[16px] text-slate-300 group-hover:text-blue-400 transition-all group-hover:translate-x-0.5">chevron_right</span>
+                                  <span className="material-symbols-outlined text-[16px] text-muted-foreground/60 group-hover:text-primary transition-all group-hover:translate-x-0.5">chevron_right</span>
                                 </div>
                               </td>
                               <StatusCell status={adSet.status} />
-                              <MetricCell value={formatCurrency(adSet.spend)} className="text-slate-700 dark:text-slate-200 font-medium" />
-                              <MetricCell value={formatNumber(adSet.impressions)} className="text-slate-600 dark:text-slate-300" />
-                              <MetricCell value={formatNumber(adSet.clicks)} className="text-slate-600 dark:text-slate-300" />
+                              <MetricCell value={formatCurrency(adSet.spend)} className="text-foreground font-medium" />
+                              <MetricCell value={formatNumber(adSet.impressions)} className="text-muted-foreground" />
+                              <MetricCell value={formatNumber(adSet.clicks)} className="text-muted-foreground" />
                               <MetricCell value={formatPercent(adSet.ctr)} className="text-emerald-600 dark:text-emerald-400" />
-                              <MetricCell value={formatCurrency(adSet.cpc)} className="text-slate-600 dark:text-slate-300" />
-                              <MetricCell value={formatCurrency(adSet.cpm)} className="text-slate-600 dark:text-slate-300" />
+                              <MetricCell value={formatCurrency(adSet.cpc)} className="text-muted-foreground" />
+                              <MetricCell value={formatCurrency(adSet.cpm)} className="text-muted-foreground" />
                               <MetricCell
                                 value={adSet.roas != null ? `${adSet.roas.toFixed(2)}x` : "—"}
-                                className={bestRoas ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-slate-500 dark:text-slate-400"}
+                                className={bestRoas ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-muted-foreground"}
                               />
                               <MetricCell
                                 value={adSet.purchases > 0 ? String(adSet.purchases) : "—"}
-                                className={adSet.purchases > 0 ? "text-slate-700 dark:text-slate-200 font-medium" : "text-slate-400"}
+                                className={adSet.purchases > 0 ? "text-foreground font-medium" : "text-muted-foreground"}
                               />
                             </tr>
                           );
@@ -873,10 +873,10 @@ export default function Statistics() {
                     {currentAdSetAds.length === 0 ? (
                       <tr>
                         <td colSpan={10} className="p-10 text-center">
-                          <span className="material-symbols-outlined text-[36px] text-slate-200 dark:text-slate-700 block mb-2">
+                          <span className="material-symbols-outlined text-[36px] text-muted-foreground/60 block mb-2">
                             {(searchQuery || statusFilter !== "all") ? "filter_list_off" : "bar_chart"}
                           </span>
-                          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                          <p className="text-sm font-medium text-muted-foreground">
                             {(searchQuery || statusFilter !== "all") ? "No ads match your filters" : "No ads found"}
                           </p>
                         </td>
@@ -889,7 +889,7 @@ export default function Statistics() {
                             return (
                               <tr
                                 key={ad.id}
-                                className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-blue-50/30 dark:hover:bg-blue-900/10 cursor-pointer transition-colors group"
+                                className="border-b border-border/50 hover:bg-primary/10 dark:hover:bg-primary/10 cursor-pointer transition-colors group"
                                 onClick={() => handleAdClick(ad)}
                                 data-testid={`row-ad-${ad.id}`}
                               >
@@ -897,30 +897,30 @@ export default function Statistics() {
                                   <div className="flex items-center gap-2">
                                     <div className="min-w-0">
                                       <div className="flex items-center gap-1.5">
-                                        <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate max-w-[250px] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" data-testid={`text-ad-name-${ad.id}`}>
+                                        <p className="text-sm font-medium text-foreground truncate max-w-[250px] group-hover:text-primary dark:group-hover:text-primary transition-colors" data-testid={`text-ad-name-${ad.id}`}>
                                           {ad.name}
                                         </p>
                                         {hasBreakdown && (
-                                          <span className="material-symbols-outlined text-[14px] text-blue-400" title="Has text breakdowns">description</span>
+                                          <span className="material-symbols-outlined text-[14px] text-primary" title="Has text breakdowns">description</span>
                                         )}
                                       </div>
                                     </div>
                                   </div>
                                 </td>
                                 <StatusCell status={ad.status} />
-                                <MetricCell value={formatCurrency(ad.spend)} className="text-slate-700 dark:text-slate-200 font-medium" />
-                                <MetricCell value={formatNumber(ad.impressions)} className="text-slate-600 dark:text-slate-300" />
-                                <MetricCell value={formatNumber(ad.clicks)} className="text-slate-600 dark:text-slate-300" />
+                                <MetricCell value={formatCurrency(ad.spend)} className="text-foreground font-medium" />
+                                <MetricCell value={formatNumber(ad.impressions)} className="text-muted-foreground" />
+                                <MetricCell value={formatNumber(ad.clicks)} className="text-muted-foreground" />
                                 <MetricCell value={formatPercent(ad.ctr)} className="text-emerald-600 dark:text-emerald-400" />
-                                <MetricCell value={formatCurrency(ad.cpc)} className="text-slate-600 dark:text-slate-300" />
-                                <MetricCell value={formatCurrency(ad.cpm)} className="text-slate-600 dark:text-slate-300" />
+                                <MetricCell value={formatCurrency(ad.cpc)} className="text-muted-foreground" />
+                                <MetricCell value={formatCurrency(ad.cpm)} className="text-muted-foreground" />
                                 <MetricCell
                                   value={ad.roas != null ? `${ad.roas.toFixed(2)}x` : "—"}
-                                  className={ad.roas != null && ad.roas > 2 ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-slate-500 dark:text-slate-400"}
+                                  className={ad.roas != null && ad.roas > 2 ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-muted-foreground"}
                                 />
                                 <MetricCell
                                   value={ad.purchases && ad.purchases > 0 ? String(ad.purchases) : "—"}
-                                  className={ad.purchases && ad.purchases > 0 ? "text-slate-700 dark:text-slate-200 font-medium" : "text-slate-400"}
+                                  className={ad.purchases && ad.purchases > 0 ? "text-foreground font-medium" : "text-muted-foreground"}
                                 />
                               </tr>
                             );
