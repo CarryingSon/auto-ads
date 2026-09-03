@@ -32,11 +32,7 @@ const META_GRAPH_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 const META_VIDEO_URL = `https://graph-video.facebook.com/${META_API_VERSION}`;
 
 function hasSupabaseStorageConfig(): boolean {
-  return Boolean(
-    process.env.SUPABASE_URL &&
-    process.env.SUPABASE_SERVICE_ROLE_KEY &&
-    process.env.SUPABASE_STORAGE_BUCKET
-  );
+  return getMissingSupabaseStorageConfig().length === 0;
 }
 
 function readPositiveNumberEnv(name: string, fallback: number, minimum: number): number {

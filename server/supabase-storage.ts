@@ -1,13 +1,26 @@
+// Supabase renamed the server-side key: legacy projects issue a service_role JWT, newer ones
+// an `sb_secret_...` key documented as SUPABASE_SECRET_KEY. Accept either name.
+const SERVICE_KEY_ENV_KEYS = ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"] as const;
+const SERVICE_KEY_LABEL = SERVICE_KEY_ENV_KEYS.join(" or ");
+
+function readServiceKey(): string | undefined {
+  for (const key of SERVICE_KEY_ENV_KEYS) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
 function getSupabaseConfig() {
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, "");
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey = readServiceKey();
   const bucket = process.env.SUPABASE_STORAGE_BUCKET;
 
   if (!supabaseUrl) {
     throw new Error("SUPABASE_URL is not configured");
   }
   if (!serviceRoleKey) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
+    throw new Error(`${SERVICE_KEY_LABEL} is not configured`);
   }
   if (!bucket) {
     throw new Error("SUPABASE_STORAGE_BUCKET is not configured");
@@ -16,15 +29,13 @@ function getSupabaseConfig() {
   return { supabaseUrl, serviceRoleKey, bucket };
 }
 
-export const SUPABASE_STORAGE_ENV_KEYS = [
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "SUPABASE_STORAGE_BUCKET",
-] as const;
-
 /** Names of the storage variables that are unset or empty, for actionable error messages. */
 export function getMissingSupabaseStorageConfig(): string[] {
-  return SUPABASE_STORAGE_ENV_KEYS.filter((key) => !process.env[key]?.trim());
+  const missing: string[] = [];
+  if (!process.env.SUPABASE_URL?.trim()) missing.push("SUPABASE_URL");
+  if (!readServiceKey()) missing.push(SERVICE_KEY_LABEL);
+  if (!process.env.SUPABASE_STORAGE_BUCKET?.trim()) missing.push("SUPABASE_STORAGE_BUCKET");
+  return missing;
 }
 
 export interface SupabaseStorageCheck {
