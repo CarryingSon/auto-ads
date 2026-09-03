@@ -50,6 +50,7 @@ import {
   verifyStripeWebhookSignature,
 } from "./billing.js";
 import { checkAdAccountPromotePagesAccess, normalizeMetaAdAccount } from "./meta-oauth-access.js";
+import { checkFfmpegAvailability } from "./video-transcoder.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
@@ -542,8 +543,9 @@ function emitJobLog(
 
 // Authentication middleware for API routes
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  // Worker routes authenticate with CRON_SECRET instead of a session.
   if (
-    req.originalUrl.startsWith("/api/workers/launch") ||
+    req.originalUrl.startsWith("/api/workers/") ||
     req.originalUrl.startsWith("/api/stripe/webhook")
   ) {
     return next();
@@ -2144,6 +2146,34 @@ export async function registerRoutes(
       if (!res.headersSent) {
         res.status(500).json({ error: errorMsg });
       }
+    }
+  });
+
+  // Diagnostics: confirms the bundled ffmpeg/ffprobe binaries actually run in the deployed
+  // runtime. Without them every video is uploaded untouched and Meta rejects it as corrupt.
+  app.get("/api/workers/ffmpeg-check", async (req: Request, res: Response) => {
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret) {
+      return res.status(500).json({ error: "CRON_SECRET is not configured" });
+    }
+
+    const authHeader = req.headers.authorization || "";
+    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+    const providedSecret = (req.headers["x-cron-secret"] as string | undefined) || bearerToken;
+    if (providedSecret !== cronSecret) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    try {
+      const binaries = await checkFfmpegAvailability();
+      return res.status(binaries.ffmpeg.ok && binaries.ffprobe.ok ? 200 : 503).json({
+        ok: binaries.ffmpeg.ok && binaries.ffprobe.ok,
+        platform: `${process.platform}/${process.arch}`,
+        node: process.version,
+        ...binaries,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Unknown error" });
     }
   });
 

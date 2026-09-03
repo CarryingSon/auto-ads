@@ -259,6 +259,28 @@ async function readMp4BoxLayout(inputPath: string): Promise<Mp4BoxLayout> {
   }
 }
 
+export interface BinaryCheck {
+  path: string;
+  ok: boolean;
+  version?: string;
+  error?: string;
+}
+
+/** Self-test used by the diagnostics endpoint to prove the binaries run in the deployed runtime. */
+export async function checkFfmpegAvailability(): Promise<{ ffmpeg: BinaryCheck; ffprobe: BinaryCheck }> {
+  const probe = async (binaryPath: string): Promise<BinaryCheck> => {
+    try {
+      const { stdout } = await execFileAsync(binaryPath, ['-version'], { maxBuffer: 1024 * 1024 });
+      return { path: binaryPath, ok: true, version: stdout.split('\n')[0]?.trim() };
+    } catch (error: any) {
+      return { path: binaryPath, ok: false, error: error?.message || String(error) };
+    }
+  };
+
+  const [ffmpeg, ffprobe] = await Promise.all([probe(getFfmpegPath()), probe(getFfprobePath())]);
+  return { ffmpeg, ffprobe };
+}
+
 export async function analyzeVideo(inputPath: string): Promise<VideoAnalysis> {
   const stats = await fs.promises.stat(inputPath);
   const filename = path.basename(inputPath);
