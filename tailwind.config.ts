@@ -31,6 +31,24 @@ export default {
           foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
           border: "var(--primary-border)",
         },
+        // --success and --warning existed in index.css but were never exposed
+        // here, so text-success and friends rendered as nothing at all.
+        success: {
+          DEFAULT: "hsl(var(--success) / <alpha-value>)",
+          foreground: "hsl(var(--success-foreground) / <alpha-value>)",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning) / <alpha-value>)",
+          foreground: "hsl(var(--warning-foreground) / <alpha-value>)",
+        },
+        // Meta's own blue. Reserved for surfaces that represent Facebook,
+        // Instagram or a value imported from Meta — never for our own actions.
+        meta: {
+          DEFAULT: "hsl(var(--meta) / <alpha-value>)",
+          hover: "hsl(var(--meta-hover) / <alpha-value>)",
+          foreground: "hsl(var(--meta-foreground) / <alpha-value>)",
+          subtle: "hsl(var(--meta-subtle) / <alpha-value>)",
+        },
         secondary: {
           DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
           foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",
