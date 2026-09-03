@@ -271,6 +271,22 @@ async function getAccountCache(userId: string, adAccountId: string): Promise<any
   }
 }
 
+async function getUserMetaAccessToken(userId: string): Promise<string | null> {
+  try {
+    const [connection] = await db.select()
+      .from(oauthConnections)
+      .where(and(
+        eq(oauthConnections.userId, userId),
+        eq(oauthConnections.provider, "meta"),
+      ))
+      .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
+      .limit(1);
+    return connection?.accessToken ? decrypt(connection.accessToken) : null;
+  } catch {
+    return null;
+  }
+}
+
 type PageLike = Record<string, unknown> & { id?: string; name?: string };
 
 function sanitizePageForClient(page: PageLike): PageLike {
@@ -430,9 +446,29 @@ function extractInstagramAccountsFromPageRecord(page: any): InstagramAccountReco
   return dedupeInstagramAccounts(accounts);
 }
 
+// Meta answers "you lack permission" and "this Page has no Instagram" with
+// shapes that are easy to confuse, so name the token and the edge that failed.
+function logInstagramLookupError(
+  pageId: string,
+  pageName: string | undefined,
+  tokenSource: string,
+  edge: string,
+  error: any,
+) {
+  console.warn(
+    `[IG] Page ${pageName || pageId} (${pageId}): ${edge} lookup failed with ${tokenSource}. ` +
+      `code=${error?.code ?? "unknown"} subcode=${error?.error_subcode ?? "none"} ` +
+      `type=${error?.type ?? "unknown"} message=${error?.message ?? "unknown"}`,
+  );
+}
+
+// Resolves the Instagram accounts linked to a Page. A Page Access Token is
+// preferred but optional: a user token still resolves the Page's Instagram
+// link, which is the only way to reach pages the user can advertise for but
+// holds no Page role on.
 async function fetchInstagramAccountsForPage(params: {
   pageId: string;
-  pageAccessToken: string;
+  pageAccessToken?: string | null;
   userAccessToken?: string | null;
   pageName?: string;
   apiVersion?: string;
@@ -440,18 +476,24 @@ async function fetchInstagramAccountsForPage(params: {
 }): Promise<InstagramAccountRecord[]> {
   const {
     pageId,
-    pageAccessToken,
+    pageAccessToken = null,
     userAccessToken = null,
     pageName,
     apiVersion = "v21.0",
     cacheKeyPrefix,
   } = params;
   const tokenEntries = [
-    { token: pageAccessToken, source: "page" },
+    { token: pageAccessToken || "", source: "page" },
     { token: userAccessToken || "", source: "user" },
   ]
     .filter((entry) => entry.token)
     .filter((entry, index, arr) => arr.findIndex((candidate) => candidate.token === entry.token) === index);
+  if (tokenEntries.length === 0) {
+    console.warn(
+      `[IG] Page ${pageName || pageId} (${pageId}): no page or user access token available, cannot resolve Instagram`,
+    );
+    return [];
+  }
   const accounts: InstagramAccountRecord[] = [];
   const fieldsQuery =
     "instagram_business_account{id,username,profile_picture_url,name}," +
@@ -464,7 +506,10 @@ async function fetchInstagramAccountsForPage(params: {
       `https://graph.facebook.com/${apiVersion}/${pageId}?fields=${fieldsQuery}&access_token=${entry.token}`,
       `${cachePrefix}_fields_${entry.source}`,
     );
-    if (data?.error) continue;
+    if (data?.error) {
+      logInstagramLookupError(pageId, pageName, `${entry.source} token`, "page fields", data.error);
+      continue;
+    }
     const fieldAccounts = [
       normalizeInstagramAccount(data.instagram_business_account, pageName),
       normalizeInstagramAccount(data.connected_instagram_account, pageName),
@@ -479,13 +524,25 @@ async function fetchInstagramAccountsForPage(params: {
         `https://graph.facebook.com/${apiVersion}/${pageId}/instagram_accounts?fields=id,username,profile_picture_url,name&access_token=${entry.token}`,
         `${cachePrefix}_accounts_${entry.source}`,
       );
-      if (data?.error || !Array.isArray(data?.data)) continue;
+      if (data?.error) {
+        logInstagramLookupError(pageId, pageName, `${entry.source} token`, "instagram_accounts edge", data.error);
+        continue;
+      }
+      if (!Array.isArray(data?.data)) continue;
       for (const account of data.data) {
         const normalized = normalizeInstagramAccount(account, pageName);
         if (normalized) accounts.push(normalized);
       }
       if (accounts.length > 0) break;
     }
+  }
+
+  if (accounts.length === 0) {
+    console.warn(
+      `[IG] Page ${pageName || pageId} (${pageId}): Meta returned no Instagram link using ${tokenEntries
+        .map((entry) => entry.source)
+        .join("+")} token(s)`,
+    );
   }
 
   return dedupeInstagramAccounts(accounts);
@@ -1926,7 +1983,8 @@ export async function registerRoutes(
         }
       }
 
-      if (resolvedInstagramAccounts.length === 0 && pageAccessToken) {
+      // Runs even without a Page token — the user token still resolves the link.
+      if (resolvedInstagramAccounts.length === 0) {
         resolvedInstagramAccounts = await fetchInstagramAccountsForPage({
           pageId,
           pageAccessToken,
@@ -2697,7 +2755,8 @@ export async function registerRoutes(
             );
           }
 
-          if (resolvedAccounts.length === 0 && pageAccessToken) {
+          // Runs even without a Page token — the user token still resolves the link.
+          if (resolvedAccounts.length === 0 && (pageAccessToken || userAccessToken)) {
             resolvedAccounts = await fetchInstagramAccountsForPage({
               pageId,
               pageAccessToken,
@@ -5566,10 +5625,13 @@ export async function registerRoutes(
             // Re-fetch Instagram accounts for each page with valid access token
             // This ensures IG data is always fresh when switching ad accounts.
             for (const page of filteredPages) {
+              // No Page token is not a dead end — the user token still resolves
+              // the Page's Instagram link for pages we can advertise for.
               const pageToken = page.access_token;
               if (!pageToken) {
-                console.log(`[Pages] Page ${page.name} (${page.id}): no access token, skipping IG fetch`);
-                continue;
+                console.log(
+                  `[Pages] Page ${page.name} (${page.id}): no page access token, falling back to user token for IG fetch`,
+                );
               }
               try {
                 const igAccounts = await fetchInstagramAccountsForPage({
@@ -5860,16 +5922,23 @@ export async function registerRoutes(
         return res.json({ data: cachedAccounts, source: "cache" });
       }
 
-      // No cached IG data — need access token for live API call
-      if (!selectedPage.access_token) {
-        console.log(`No access token for page ${pageId}, cannot fetch IG accounts`);
+      // No cached IG data — go live. A missing Page token is fine; the user
+      // token resolves the link for pages we can advertise for but hold no
+      // Page role on.
+      const userAccessToken = await getUserMetaAccessToken(userId);
+      if (!selectedPage.access_token && !userAccessToken) {
+        console.log(`No page or user access token for page ${pageId}, cannot fetch IG accounts`);
         return res.json({ data: [] });
+      }
+      if (!selectedPage.access_token) {
+        console.log(`[IG] No page access token for page ${pageId}, falling back to user token`);
       }
 
       console.log(`[IG] No cached IG data for page ${pageId}, fetching from API...`);
       const accounts = await fetchInstagramAccountsForPage({
         pageId,
         pageAccessToken: selectedPage.access_token,
+        userAccessToken,
         pageName: selectedPage.name,
         apiVersion: "v21.0",
         cacheKeyPrefix: `ig_endpoint_${userId}_${pageId}`,
@@ -5946,10 +6015,14 @@ export async function registerRoutes(
         pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
       }
       
-      // Find the page's access token
+      // Find the page's access token. Missing is fine — the user token from
+      // MetaAdsApi still resolves the Page's Instagram link.
       const selectedPage = pagesJson.find((p) => p.id === selectedPageId);
-      if (!selectedPage || !selectedPage.access_token) {
+      if (!selectedPage) {
         return res.json({ data: [] });
+      }
+      if (!selectedPage.access_token) {
+        console.log(`[IG] No page access token for page ${selectedPageId}, falling back to user token`);
       }
 
       const igAccounts = await fetchInstagramAccountsForPage({
