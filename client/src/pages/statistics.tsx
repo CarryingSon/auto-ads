@@ -95,6 +95,21 @@ const STATS_LOADING_MESSAGES = [
   { after: 50, text: "Almost done, finalizing results..." },
 ];
 
+// Statistics stay in memory for the session. staleTime is already Infinity
+// globally, so this is what actually decides whether leaving the page and
+// coming back costs another round trip.
+const SESSION_CACHE_MS = 30 * 60 * 1000;
+
+function formatDataAge(updatedAt: number): string {
+  if (!updatedAt) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+}
+
 const dateRangeOptions = [
   { value: "today", label: "Today" },
   { value: "yesterday", label: "Yesterday" },
@@ -413,6 +428,7 @@ export default function Statistics() {
       return res.json();
     },
     enabled: !!selectedAdAccountId,
+    gcTime: SESSION_CACHE_MS,
   });
 
   const campaigns = campaignsData?.data || [];
@@ -421,7 +437,7 @@ export default function Statistics() {
     ? `/api/meta/ad-statistics/${selectedCampaign.id}?dateRange=${dateRange}&breakdown=body_asset&adSet=all`
     : null;
 
-  const { data: statsData, isLoading: statsLoading, refetch, isFetching } = useQuery<StatsResponse>({
+  const { data: statsData, isLoading: statsLoading, refetch, isFetching, dataUpdatedAt } = useQuery<StatsResponse>({
     queryKey: ["/api/meta/ad-statistics", selectedAdAccountId, selectedCampaign?.id, dateRange],
     queryFn: async () => {
       const res = await fetch(statsUrl!);
@@ -429,7 +445,20 @@ export default function Statistics() {
       return res.json();
     },
     enabled: !!selectedCampaign && !!statsUrl && !!selectedAdAccountId,
+    // One load costs at least six sequential Meta calls, each preceded by a
+    // 500ms rate-limit delay. The default 5 minute gcTime threw that away
+    // every time the page was left for a few minutes.
+    gcTime: SESSION_CACHE_MS,
   });
+
+  // The age label would otherwise freeze at whatever it read on first paint.
+  const [, setAgeTick] = useState(0);
+  useEffect(() => {
+    if (!dataUpdatedAt) return;
+    const id = setInterval(() => setAgeTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [dataUpdatedAt]);
+  const dataAge = dataUpdatedAt ? formatDataAge(dataUpdatedAt) : "";
 
   const ads = statsData?.ads || [];
   const rawAdSets = statsData?.adSets || [];
@@ -672,10 +701,28 @@ export default function Statistics() {
                 </SelectContent>
               </Select>
 
+              {/* Cached data is indistinguishable from fresh data unless the
+                  page says how old it is. */}
+              {dataAge && !isFetching && (
+                <span
+                  className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap"
+                  title="Statistics are cached for this session. Click refresh for current numbers."
+                  data-testid="text-stats-age"
+                >
+                  Updated {dataAge}
+                </span>
+              )}
+              {isFetching && (
+                <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                  Loading…
+                </span>
+              )}
+
               <button
                 className="w-8 h-8 rounded-lg flex items-center justify-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-300 text-slate-500 hover:text-blue-500 transition-all"
                 onClick={() => refetch()}
                 disabled={isFetching}
+                title="Refresh statistics from Meta"
                 data-testid="button-refresh-stats"
               >
                 <span className={`material-symbols-outlined text-[18px] ${isFetching ? "animate-spin" : ""}`}>refresh</span>
