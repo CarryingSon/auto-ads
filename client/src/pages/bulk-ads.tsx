@@ -522,7 +522,6 @@ interface DefaultSettings {
   pixelId?: string;
   defaultCta?: string;
   websiteUrl?: string;
-  defaultUrl?: string;
   displayLink?: string;
   beneficiaryName?: string;
   payerName?: string;
@@ -532,7 +531,6 @@ interface CreativeDraft {
   pixelId: string;
   defaultCta: string;
   websiteUrl: string;
-  defaultUrl: string;
   displayLink: string;
   beneficiaryName: string;
   payerName: string;
@@ -612,29 +610,17 @@ const CreativeEditDialog = memo(function CreativeEditDialog({
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-website-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Website URL</Label>
-              <Input
-                id="edit-website-url"
-                value={draft.websiteUrl}
-                onChange={(e) => setDraft(prev => ({ ...prev, websiteUrl: e.target.value }))}
-                placeholder="https://example.com"
-                className="rounded-xl"
-                data-testid="input-edit-website-url"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-default-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Default URL</Label>
-              <Input
-                id="edit-default-url"
-                value={draft.defaultUrl}
-                onChange={(e) => setDraft(prev => ({ ...prev, defaultUrl: e.target.value }))}
-                placeholder="https://example.com/landing"
-                className="rounded-xl"
-                data-testid="input-edit-default-url"
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-website-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Website URL</Label>
+            <Input
+              id="edit-website-url"
+              value={draft.websiteUrl}
+              onChange={(e) => setDraft(prev => ({ ...prev, websiteUrl: e.target.value }))}
+              placeholder="https://yourshop.com/product"
+              className="rounded-xl"
+              data-testid="input-edit-website-url"
+            />
+            <p className="text-xs text-muted-foreground">Where the ad sends people</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-display-link" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Display Link</Label>
@@ -686,6 +672,166 @@ const CreativeEditDialog = memo(function CreativeEditDialog({
             data-testid="button-save-creative"
           >
             Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+});
+
+interface TargetingDraft {
+  geoTargeting: string[];
+  ageMin: number;
+  ageMax: number;
+  gender: "ALL" | "MALE" | "FEMALE";
+}
+
+// Holds its own draft so a keystroke re-renders this dialog instead of the
+// whole launch page. Editing in place made every character re-render the
+// entire ad set list, which is what made typing here feel stuck.
+const TargetingEditDialog = memo(function TargetingEditDialog({
+  open,
+  onOpenChange,
+  initialDraft,
+  isSaving,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialDraft: TargetingDraft;
+  isSaving: boolean;
+  onSave: (draft: TargetingDraft) => void;
+}) {
+  const [draft, setDraft] = useState<TargetingDraft>(initialDraft);
+
+  useEffect(() => {
+    if (open) {
+      setDraft(initialDraft);
+    }
+  }, [open, initialDraft]);
+
+  const keepCountryPickerOpen = (event: { target: EventTarget | null; preventDefault: () => void }) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[data-country-picker-popover="true"]')) {
+      event.preventDefault();
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="sm:max-w-2xl rounded-2xl"
+        onPointerDownOutside={keepCountryPickerOpen}
+        onInteractOutside={keepCountryPickerOpen}
+      >
+        <DialogHeader>
+          <DialogTitle className="text-lg font-bold">Edit Targeting</DialogTitle>
+          <DialogDescription>
+            Change audience targeting settings for your ads
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 py-2">
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Countries</Label>
+            <div className="flex flex-wrap gap-1.5 min-h-[40px] p-2.5 border rounded-xl bg-muted/30" data-testid="input-edit-geo">
+              {draft.geoTargeting.map((code) => {
+                const country = META_COUNTRIES.find(c => c.code === code);
+                return (
+                  <Badge key={code} variant="secondary" className="gap-1 text-xs rounded-lg px-2 py-1">
+                    {country ? country.name : code}
+                    <button
+                      type="button"
+                      className="ml-0.5 hover:text-destructive"
+                      onClick={() => setDraft(prev => ({
+                        ...prev,
+                        geoTargeting: prev.geoTargeting.filter(c => c !== code)
+                      }))}
+                      data-testid={`remove-country-${code}`}
+                    >
+                      <XCircle className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                );
+              })}
+            </div>
+            <CountryPicker
+              selectedCountries={draft.geoTargeting}
+              onToggle={(code) => {
+                setDraft(prev => {
+                  const exists = prev.geoTargeting.includes(code);
+                  return {
+                    ...prev,
+                    geoTargeting: exists
+                      ? prev.geoTargeting.filter(c => c !== code)
+                      : [...prev.geoTargeting, code]
+                  };
+                });
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-age-min" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min Age</Label>
+              <Input
+                id="edit-age-min"
+                type="number"
+                min={13}
+                max={65}
+                value={draft.ageMin}
+                onChange={(e) => setDraft(prev => ({ ...prev, ageMin: parseInt(e.target.value) || 18 }))}
+                className="rounded-xl"
+                data-testid="input-edit-age-min"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-age-max" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Max Age</Label>
+              <Input
+                id="edit-age-max"
+                type="number"
+                min={13}
+                max={65}
+                value={draft.ageMax}
+                onChange={(e) => setDraft(prev => ({ ...prev, ageMax: parseInt(e.target.value) || 65 }))}
+                className="rounded-xl"
+                data-testid="input-edit-age-max"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-gender" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gender</Label>
+            <Select
+              value={draft.gender}
+              onValueChange={(val) => setDraft(prev => ({ ...prev, gender: val as "ALL" | "MALE" | "FEMALE" }))}
+            >
+              <SelectTrigger id="edit-gender" className="rounded-xl" data-testid="select-edit-gender">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All</SelectItem>
+                <SelectItem value="MALE">Male</SelectItem>
+                <SelectItem value="FEMALE">Female</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)} data-testid="button-cancel-targeting">
+            Cancel
+          </Button>
+          <Button
+            className="rounded-xl"
+            onClick={() => onSave(draft)}
+            disabled={isSaving}
+            data-testid="button-save-targeting"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Saving...
+              </>
+            ) : (
+              "Save"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -852,6 +998,7 @@ export default function BulkAds() {
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null);
   const [initialEstimatedTime, setInitialEstimatedTime] = useState<number | null>(null);
   const [launchStartTime, setLaunchStartTime] = useState<number | null>(null);
+  const [adSetNameDrafts, setAdSetNameDrafts] = useState<Record<string, string>>({});
   const [adSetOverrides, setAdSetOverrides] = useState<Record<string, { 
     name?: string; 
     dailyBudget?: number;
@@ -935,7 +1082,6 @@ export default function BulkAds() {
     pixelId: "",
     defaultCta: "LEARN_MORE",
     websiteUrl: "",
-    defaultUrl: "",
     displayLink: "",
     beneficiaryName: "",
     payerName: "",
@@ -1005,7 +1151,6 @@ export default function BulkAds() {
       pixelId?: string;
       pixelName?: string;
       websiteUrl?: string;
-      defaultUrl?: string;
       displayLink?: string;
       isConfigured?: boolean;
       geoTargeting?: string[];
@@ -1476,7 +1621,9 @@ export default function BulkAds() {
     queryFn: async () => { const res = await fetch("/api/meta/pixels", { credentials: "include" }); if (!res.ok) throw new Error("Failed to fetch pixels"); return res.json(); },
     enabled: !!selectedAdAccountId && hasSelectedUsableAdAccount,
   });
-  const availablePixels = pixelsData?.data || [];
+  // Memoized so the fallback [] keeps its identity between renders — a fresh
+  // array every render defeats memo() on the dialogs that receive it.
+  const availablePixels = useMemo(() => pixelsData?.data || [], [pixelsData?.data]);
 
   // Compute effective settings - use imported ad set values if selected, otherwise use ad account settings
   const importedAdSet = importAdSetId ? importAdSets.find(a => a.id === importAdSetId) : null;
@@ -1996,6 +2143,49 @@ export default function BulkAds() {
     },
   });
 
+  // Ad set names are edited locally while typing and saved on blur, so a
+  // rename costs one request instead of one per keystroke.
+  const setAdSetNameDraft = (adsetId: string, value: string) => {
+    setAdSetNameDrafts((prev) => ({ ...prev, [adsetId]: value }));
+  };
+
+  const commitAdSetName = (adsetId: string, currentName: string) => {
+    const draft = adSetNameDrafts[adsetId];
+    if (draft === undefined) return;
+
+    const trimmed = draft.trim();
+    if (trimmed === currentName) {
+      setAdSetNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[adsetId];
+        return next;
+      });
+      return;
+    }
+
+    if (!trimmed) {
+      toast({
+        title: "Ad set name cannot be empty",
+        description: "Reverted to the previous name.",
+        variant: "destructive",
+      });
+      setAdSetNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[adsetId];
+        return next;
+      });
+      return;
+    }
+
+    setAdSets((prev) => prev.map((a) => (a.id === adsetId ? { ...a, name: trimmed } : a)));
+    setAdSetNameDrafts((prev) => {
+      const next = { ...prev };
+      delete next[adsetId];
+      return next;
+    });
+    updateAdSetMutation.mutate({ adsetId, updates: { name: trimmed } });
+  };
+
   const updateAdSetDailyMinSpendTarget = (adsetId: string, rawValue: string) => {
     const trimmed = rawValue.trim();
     const dailyMinSpendTarget = trimmed === "" ? null : Number(trimmed);
@@ -2382,7 +2572,6 @@ export default function BulkAds() {
       }
       if (importedWebsiteUrl) {
         settingsUpdate.websiteUrl = importedWebsiteUrl;
-        settingsUpdate.defaultUrl = importedDisplayLink || importedWebsiteUrl;
       }
       if (importedCta) {
         settingsUpdate.defaultCta = importedCta;
@@ -2412,7 +2601,6 @@ export default function BulkAds() {
         payerName: importedAdSet?.dsa_payor || prev.payerName,
         defaultCta: importedCta || prev.defaultCta,
         websiteUrl: importedWebsiteUrl || prev.websiteUrl,
-        defaultUrl: importedDisplayLink || importedWebsiteUrl || prev.defaultUrl,
         displayLink: importedDisplayLink || prev.displayLink,
       }));
       
@@ -2488,8 +2676,8 @@ export default function BulkAds() {
       if (ads.defaultCta && !editingCopy.cta) {
         setEditingCopy((prev) => ({ ...prev, cta: ads.defaultCta! }));
       }
-      if (ads.defaultUrl && !editingCopy.url) {
-        setEditingCopy((prev) => ({ ...prev, url: ads.defaultUrl! }));
+      if (ads.websiteUrl && !editingCopy.url) {
+        setEditingCopy((prev) => ({ ...prev, url: ads.websiteUrl! }));
       }
       if (ads.defaultUtm && !editingCopy.utm) {
         setEditingCopy((prev) => ({ ...prev, utm: ads.defaultUtm! }));
@@ -3685,7 +3873,6 @@ export default function BulkAds() {
                   pixelId: effectiveSettings.pixelId || "",
                   defaultCta: importedCta || adAccountSettingsData?.settings?.defaultCta || "LEARN_MORE",
                   websiteUrl: importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl || "",
-                  defaultUrl: adAccountSettingsData?.settings?.defaultUrl || "",
                   displayLink: importedDisplayLink || adAccountSettingsData?.settings?.displayLink || "",
                   beneficiaryName: effectiveSettings.beneficiaryName || "",
                   payerName: effectiveSettings.payerName || "",
@@ -3759,12 +3946,6 @@ export default function BulkAds() {
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Default URL</p>
-              <p className={`text-sm font-medium truncate ${(defaultSettings.defaultUrl || adAccountSettingsData?.settings?.defaultUrl) ? "" : "text-muted-foreground"}`}>
-                {defaultSettings.defaultUrl || adAccountSettingsData?.settings?.defaultUrl || "Not set"}
-              </p>
-            </div>
-            <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Display Link</p>
               <p className={`text-sm font-medium truncate ${importedDisplayLink && effectiveSettings.isImported ? "text-[#1877F2]" : ((defaultSettings.displayLink || adAccountSettingsData?.settings?.displayLink) ? "" : "text-muted-foreground")}`}>
                 {defaultSettings.displayLink || importedDisplayLink || adAccountSettingsData?.settings?.displayLink || "Not set"}
@@ -3807,10 +3988,26 @@ export default function BulkAds() {
                 data-testid={`adset-row-${adset.id}`}
               >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <div className="min-w-0">
-                    <span className={`font-medium truncate block ${isDisabled ? "line-through text-muted-foreground" : ""}`}>{adset.name}</span>
-                    {adset.folderName && adset.folderName !== adset.name && (
-                      <span className="text-xs text-muted-foreground truncate block">{adset.folderName}</span>
+                  <div className="min-w-0 flex-1">
+                    <Input
+                      aria-label={`Ad set name for ${adset.folderName || adset.name}`}
+                      data-testid={`input-adset-name-${adset.id}`}
+                      value={adSetNameDrafts[adset.id] ?? adset.name}
+                      disabled={isDisabled}
+                      onChange={(event) => setAdSetNameDraft(adset.id, event.target.value)}
+                      onBlur={() => commitAdSetName(adset.id, adset.name)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.currentTarget.blur();
+                        } else if (event.key === "Escape") {
+                          setAdSetNameDraft(adset.id, adset.name);
+                          event.currentTarget.blur();
+                        }
+                      }}
+                      className={`h-8 px-2 font-medium border-transparent bg-transparent hover:border-input focus-visible:border-input focus-visible:bg-background transition-colors ${isDisabled ? "line-through text-muted-foreground" : ""}`}
+                    />
+                    {adset.folderName && adset.folderName !== (adSetNameDrafts[adset.id] ?? adset.name) && (
+                      <span className="text-xs text-muted-foreground truncate block px-2">{adset.folderName}</span>
                     )}
                   </div>
                   {adset.geoSplitMarket && (
@@ -4746,8 +4943,8 @@ export default function BulkAds() {
     if (!selectedPageId) errors.push("Facebook Page is required");
     const effectiveCta = defaultSettings.defaultCta || importedCta || adAccountSettingsData?.settings?.defaultCta;
     if (!effectiveCta) errors.push("CTA is required");
-    const effectiveUrl = defaultSettings.defaultUrl || defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.defaultUrl || adAccountSettingsData?.settings?.websiteUrl;
-    if (!effectiveUrl) errors.push("Website URL or Default URL is required");
+    const effectiveUrl = defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl;
+    if (!effectiveUrl) errors.push("Website URL is required");
     if (!((selectedCampaignId && selectedCampaignId !== "__create_new__") || campaignName.trim().length > 0)) {
       errors.push("Campaign name is required");
     }
@@ -4767,13 +4964,36 @@ export default function BulkAds() {
     }
   };
 
+  const handleTargetingSave = useCallback((draft: TargetingDraft) => {
+    const normalizedGeoTargeting = Array.from(
+      new Set(
+        (draft.geoTargeting || [])
+          .map((code) => String(code || "").trim().toUpperCase())
+          .filter((code) => /^[A-Z]{2}$/.test(code)),
+      ),
+    );
+
+    if (normalizedGeoTargeting.length === 0) {
+      toast({
+        title: "Select at least one country",
+        description: "Geo targeting is required before launch.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    saveTargetingSettingsMutation.mutate({
+      ...draft,
+      geoTargeting: normalizedGeoTargeting,
+    });
+  }, [saveTargetingSettingsMutation, toast]);
+
   const handleCreativeSave = useCallback((draft: CreativeDraft) => {
     setDefaultSettings(prev => ({
       ...prev,
       pixelId: draft.pixelId,
       defaultCta: draft.defaultCta,
       websiteUrl: draft.websiteUrl,
-      defaultUrl: draft.defaultUrl,
       displayLink: draft.displayLink,
       beneficiaryName: draft.beneficiaryName,
       payerName: draft.payerName,
@@ -4783,7 +5003,6 @@ export default function BulkAds() {
       pixelId: draft.pixelId,
       defaultCta: draft.defaultCta,
       websiteUrl: draft.websiteUrl,
-      defaultUrl: draft.defaultUrl,
       displayLink: draft.displayLink,
       beneficiaryName: draft.beneficiaryName,
       payerName: draft.payerName,
@@ -5498,157 +5717,13 @@ Your description`}
         </DialogContent>
       </Dialog>
 
-      {/* Targeting Edit Dialog */}
-      <Dialog open={showTargetingEditDialog} onOpenChange={setShowTargetingEditDialog}>
-        <DialogContent
-          className="sm:max-w-2xl rounded-2xl"
-          onPointerDownOutside={(event) => {
-            const target = event.target as HTMLElement | null;
-            if (target?.closest('[data-country-picker-popover="true"]')) {
-              event.preventDefault();
-            }
-          }}
-          onInteractOutside={(event) => {
-            const target = event.target as HTMLElement | null;
-            if (target?.closest('[data-country-picker-popover="true"]')) {
-              event.preventDefault();
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">Edit Targeting</DialogTitle>
-            <DialogDescription>
-              Change audience targeting settings for your ads
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5 py-2">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Countries</Label>
-              <div className="flex flex-wrap gap-1.5 min-h-[40px] p-2.5 border rounded-xl bg-muted/30" data-testid="input-edit-geo">
-                {editingTargeting.geoTargeting.map((code) => {
-                  const country = META_COUNTRIES.find(c => c.code === code);
-                  return (
-                    <Badge key={code} variant="secondary" className="gap-1 text-xs rounded-lg px-2 py-1">
-                      {country ? country.name : code}
-                      <button
-                        type="button"
-                        className="ml-0.5 hover:text-destructive"
-                        onClick={() => setEditingTargeting(prev => ({
-                          ...prev,
-                          geoTargeting: prev.geoTargeting.filter(c => c !== code)
-                        }))}
-                        data-testid={`remove-country-${code}`}
-                      >
-                        <XCircle className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  );
-                })}
-              </div>
-              <CountryPicker
-                selectedCountries={editingTargeting.geoTargeting}
-                onToggle={(code) => {
-                  setEditingTargeting(prev => {
-                    const exists = prev.geoTargeting.includes(code);
-                    return {
-                      ...prev,
-                      geoTargeting: exists
-                        ? prev.geoTargeting.filter(c => c !== code)
-                        : [...prev.geoTargeting, code]
-                    };
-                  });
-                }}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-age-min" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min Age</Label>
-                <Input
-                  id="edit-age-min"
-                  type="number"
-                  min={13}
-                  max={65}
-                  value={editingTargeting.ageMin}
-                  onChange={(e) => setEditingTargeting(prev => ({ ...prev, ageMin: parseInt(e.target.value) || 18 }))}
-                  className="rounded-xl"
-                  data-testid="input-edit-age-min"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-age-max" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Max Age</Label>
-                <Input
-                  id="edit-age-max"
-                  type="number"
-                  min={13}
-                  max={65}
-                  value={editingTargeting.ageMax}
-                  onChange={(e) => setEditingTargeting(prev => ({ ...prev, ageMax: parseInt(e.target.value) || 65 }))}
-                  className="rounded-xl"
-                  data-testid="input-edit-age-max"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-gender" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gender</Label>
-              <Select
-                value={editingTargeting.gender}
-                onValueChange={(val) => setEditingTargeting(prev => ({ ...prev, gender: val as "ALL" | "MALE" | "FEMALE" }))}
-              >
-                <SelectTrigger id="edit-gender" className="rounded-xl" data-testid="select-edit-gender">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All</SelectItem>
-                  <SelectItem value="MALE">Male</SelectItem>
-                  <SelectItem value="FEMALE">Female</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" className="rounded-xl" onClick={() => setShowTargetingEditDialog(false)} data-testid="button-cancel-targeting">
-              Cancel
-            </Button>
-            <Button
-              className="rounded-xl"
-              onClick={() => {
-                const normalizedGeoTargeting = Array.from(
-                  new Set(
-                    (editingTargeting.geoTargeting || [])
-                      .map((code) => String(code || "").trim().toUpperCase())
-                      .filter((code) => /^[A-Z]{2}$/.test(code)),
-                  ),
-                );
-
-                if (normalizedGeoTargeting.length === 0) {
-                  toast({
-                    title: "Select at least one country",
-                    description: "Geo targeting is required before launch.",
-                    variant: "destructive",
-                  });
-                  return;
-                }
-
-                saveTargetingSettingsMutation.mutate({
-                  ...editingTargeting,
-                  geoTargeting: normalizedGeoTargeting,
-                });
-              }}
-              disabled={saveTargetingSettingsMutation.isPending}
-              data-testid="button-save-targeting"
-            >
-              {saveTargetingSettingsMutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                "Save"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TargetingEditDialog
+        open={showTargetingEditDialog}
+        onOpenChange={setShowTargetingEditDialog}
+        initialDraft={editingTargeting}
+        isSaving={saveTargetingSettingsMutation.isPending}
+        onSave={handleTargetingSave}
+      />
 
       <CreativeEditDialog
         open={showCreativeEditDialog}

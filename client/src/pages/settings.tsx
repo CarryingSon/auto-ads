@@ -195,7 +195,6 @@ export default function Settings() {
       lifetimeSpendCap?: number;
       websiteUrl?: string;
       defaultCta?: string;
-      defaultUrl?: string;
       displayLink?: string;
       isConfigured?: boolean;
     } | null;
@@ -361,7 +360,6 @@ export default function Settings() {
   const [lifetimeSpendCap, setLifetimeSpendCap] = useState<string>("");
   
   // Ad settings state
-  const [defaultUrl, setDefaultUrl] = useState<string>("");
   const [defaultUtm, setDefaultUtm] = useState<string>("");
   const [websiteUrl, setWebsiteUrl] = useState<string>("");
   const [displayLink, setDisplayLink] = useState<string>("");
@@ -504,7 +502,6 @@ export default function Settings() {
       setLifetimeSpendCap(s.lifetimeSpendCap?.toString() || "");
       setWebsiteUrl(s.websiteUrl || "");
       setDefaultCta(s.defaultCta || "LEARN_MORE");
-      setDefaultUrl(s.defaultUrl || "");
       setDisplayLink(s.displayLink || "");
     } else {
       // Reset to defaults when no settings exist
@@ -523,7 +520,6 @@ export default function Settings() {
       setLifetimeSpendCap("");
       setWebsiteUrl("");
       setDefaultCta("LEARN_MORE");
-      setDefaultUrl("");
       setDisplayLink("");
     }
   }, [adAccountSettingsData]);
@@ -583,7 +579,6 @@ export default function Settings() {
     updateAdAccountSettingsMutation.mutate({
       websiteUrl: websiteUrl || null,
       defaultCta: defaultCta || null,
-      defaultUrl: defaultUrl || null,
       displayLink: displayLink || null,
     });
   };
@@ -605,7 +600,6 @@ export default function Settings() {
     lifetimeSpendCap: string;
     websiteUrl: string;
     defaultCta: string;
-    defaultUrl: string;
     displayLink: string;
   }, callbacks?: { onSuccess?: () => void; onError?: (error: Error) => void }) => {
     const geoArray = values.geoTargeting.split(",").map(s => s.trim()).filter(s => s);
@@ -634,7 +628,6 @@ export default function Settings() {
       lifetimeSpendCap: values.lifetimeSpendCap ? parseFloat(values.lifetimeSpendCap) : null,
       websiteUrl: values.websiteUrl || null,
       defaultCta: values.defaultCta || null,
-      defaultUrl: values.defaultUrl || null,
       displayLink: values.displayLink || null,
     }, callbacks);
   };
@@ -657,7 +650,6 @@ export default function Settings() {
       lifetimeSpendCap,
       websiteUrl,
       defaultCta,
-      defaultUrl,
       displayLink,
     });
   };
@@ -805,17 +797,14 @@ export default function Settings() {
     const assetFeedSpec = ad?.creative?.asset_feed_spec;
     const ctaFromAssetFeed = assetFeedSpec?.call_to_action_types?.[0];
     
-    // URL extraction: separate website URL (destination) and default URL (display/fallback)
-    // Website URL = main destination URL where clicks go
+    // Website URL = the destination where clicks go. Display Link is the
+    // visible text on the ad and never affects where people land.
     const websiteUrlFromLinkData = ad?.creative?.object_story_spec?.link_data?.link;
     const websiteUrlFromVideoData = ad?.creative?.object_story_spec?.video_data?.call_to_action?.value?.link;
     const websiteUrlFromAssetFeed = assetFeedSpec?.link_urls?.[0]?.website_url;
     const extractedWebsiteUrl = websiteUrlFromLinkData || websiteUrlFromVideoData || websiteUrlFromAssetFeed || websiteUrl || "";
     
-    // Default URL = display URL for link_data ads only (display_link is validated URL field)
-    // For video ads and DCT ads, defaultUrl equals websiteUrl since no separate display URL exists
     const displayUrlFromLinkData = ad?.creative?.object_story_spec?.link_data?.display_link;
-    const extractedDefaultUrl = displayUrlFromLinkData || defaultUrl || extractedWebsiteUrl;
     
     // Display Link - the visual URL shown on the ad (e.g., "www.example.com")
     const extractedDisplayLink = displayUrlFromLinkData || displayLink || "";
@@ -837,7 +826,6 @@ export default function Settings() {
     setLifetimeSpendCap(extractedLifetimeSpendCap);
     setDefaultCta(extractedCta);
     setWebsiteUrl(extractedWebsiteUrl);
-    setDefaultUrl(extractedDefaultUrl);
     setDisplayLink(extractedDisplayLink);
     
     // ===== STEP 3: Validate required fields before auto-saving =====
@@ -865,7 +853,6 @@ export default function Settings() {
       lifetimeSpendCap: extractedLifetimeSpendCap,
       websiteUrl: extractedWebsiteUrl,
       defaultCta: extractedCta,
-      defaultUrl: extractedDefaultUrl,
       displayLink: extractedDisplayLink,
     }, {
       onSuccess: () => {

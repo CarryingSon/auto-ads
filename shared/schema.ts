@@ -770,7 +770,6 @@ export type CreativeSettings = z.infer<typeof creativeSettingsSchema>;
 
 export const adSettingsSchema = z.object({
   defaultCta: ctaEnumSchema.optional(),
-  defaultUrl: z.string().optional(),
   defaultUtm: z.string().optional(),
   primaryTextTemplate: z.string().optional(),
   headlineTemplate: z.string().optional(),
@@ -837,7 +836,8 @@ export const adAccountSettings = pgTable("ad_account_settings", {
   // Ad defaults
   websiteUrl: text("website_url"),
   defaultCta: text("default_cta"),
-  defaultUrl: text("default_url"),
+  // default_url is retained in the database but no longer read or written.
+  // Website URL is the destination; Display Link is the visible text.
   displayLink: text("display_link"),
   // Creative enhancements (auto-saved from last upload)
   creativeEnhancements: jsonb("creative_enhancements"),

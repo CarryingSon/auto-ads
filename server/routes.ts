@@ -1790,7 +1790,7 @@ export async function registerRoutes(
         
         // Check Ad Settings (required)
         if (!adAccountSettingsRecord.defaultCta) validationErrors.push("Default CTA not set");
-        if (!adAccountSettingsRecord.defaultUrl) validationErrors.push("Default URL not set");
+        if (!adAccountSettingsRecord.websiteUrl) validationErrors.push("Website URL not set");
       }
       
       // If any validation errors, return them all
@@ -1868,9 +1868,8 @@ export async function registerRoutes(
       };
       const adSettings = {
         defaultCta: adAccountSettingsRecord!.defaultCta!,
-        defaultUrl: adAccountSettingsRecord!.defaultUrl!,
         adFormat: "FLEXIBLE" as const,
-        websiteUrl: adAccountSettingsRecord!.websiteUrl || undefined,
+        websiteUrl: adAccountSettingsRecord!.websiteUrl!,
         displayLink: adAccountSettingsRecord!.displayLink || undefined,
       };
       
@@ -2622,7 +2621,14 @@ export async function registerRoutes(
 
       // Find a default description from any ad that has one (for fallback)
       const defaultDescription = extractedAds.find((a: any) => a.description && a.description.trim())?.description || "";
-      const defaultUrl = adSettings.defaultUrl || adSettings.websiteUrl || "https://example.com";
+      // The destination link. Never fall back to a placeholder: shipping ads
+      // that point at example.com is worse than not shipping them.
+      const destinationUrl = adSettings.websiteUrl?.trim();
+      if (!destinationUrl) {
+        throw new Error(
+          "Website URL is not set for this ad account. Set it under Settings before launching.",
+        );
+      }
 
       // Create ad sets and ads for each adset
       const adSetIds: string[] = [];
@@ -3003,7 +3009,7 @@ export async function registerRoutes(
         const descriptions = normText(rawDescription).split(/\n\n---\n\n|\n---\n|---/).map(t => t.trim()).filter(t => t.length > 0).slice(0, 5);
         
         const finalCta = override?.cta || adSettings.defaultCta || "LEARN_MORE";
-        const finalUrl = override?.url || defaultUrl;
+        const finalUrl = override?.url || destinationUrl;
 
         // Always use the original selected pageId (never switch to different page)
         const effectivePageId = pageId;
@@ -5462,7 +5468,6 @@ export async function registerRoutes(
     // Ad settings
     websiteUrl: z.string().nullable().optional(),
     defaultCta: z.string().nullable().optional(),
-    defaultUrl: z.string().nullable().optional(),
     displayLink: z.string().nullable().optional(),
     beneficiaryName: z.string().nullable().optional(),
     payerName: z.string().nullable().optional(),
@@ -5519,7 +5524,7 @@ export async function registerRoutes(
         hasPositiveNumber(merged.budgetAmount) &&
         hasGeoTargeting &&
         hasString(merged.defaultCta) &&
-        hasString(merged.defaultUrl);
+        hasString(merged.websiteUrl);
       
       const settings = await storage.upsertAdAccountSettings(userId, adAccountId, {
         adAccountName: adAccount?.name,
