@@ -462,6 +462,46 @@ function logInstagramLookupError(
   );
 }
 
+// Page edges only return an Instagram username with instagram_basic. The ad
+// account's own Instagram edges run on ads_management, so they can name the
+// accounts a Page lookup could only give us an id for.
+async function fetchInstagramUsernamesFromAdAccount(params: {
+  adAccountId: string;
+  userAccessToken: string;
+  apiVersion: string;
+}): Promise<Map<string, InstagramAccountRecord>> {
+  const { adAccountId, userAccessToken, apiVersion } = params;
+  const byId = new Map<string, InstagramAccountRecord>();
+  const edges = ["instagram_accounts", "advertisable_instagram_profiles"];
+
+  for (const edge of edges) {
+    const data = await cachedMetaFetch(
+      `https://graph.facebook.com/${apiVersion}/${adAccountId}/${edge}?fields=id,username,profile_picture_url,name&access_token=${userAccessToken}`,
+      `ig_names_${adAccountId}_${edge}`,
+    );
+    if (data?.error) {
+      console.warn(
+        `[IG] Ad account ${adAccountId}: ${edge} lookup failed. ` +
+          `code=${data.error?.code ?? "unknown"} message=${data.error?.message ?? "unknown"}`,
+      );
+      continue;
+    }
+    if (!Array.isArray(data?.data)) continue;
+    for (const account of data.data) {
+      const normalized = normalizeInstagramAccount(account);
+      if (normalized?.username && !byId.has(normalized.id)) {
+        byId.set(normalized.id, normalized);
+      }
+    }
+  }
+
+  console.log(
+    `[IG] Ad account ${adAccountId}: resolved ${byId.size} named Instagram account(s): ` +
+      `${Array.from(byId.values()).map((a) => `${a.id} (@${a.username})`).join(", ") || "none"}`,
+  );
+  return byId;
+}
+
 // Resolves the Instagram accounts linked to a Page. A Page Access Token is
 // preferred but optional: a user token still resolves the Page's Instagram
 // link, which is the only way to reach pages the user can advertise for but
@@ -470,6 +510,7 @@ async function fetchInstagramAccountsForPage(params: {
   pageId: string;
   pageAccessToken?: string | null;
   userAccessToken?: string | null;
+  adAccountId?: string | null;
   pageName?: string;
   apiVersion?: string;
   cacheKeyPrefix?: string;
@@ -478,6 +519,7 @@ async function fetchInstagramAccountsForPage(params: {
     pageId,
     pageAccessToken = null,
     userAccessToken = null,
+    adAccountId = null,
     pageName,
     apiVersion = "v21.0",
     cacheKeyPrefix,
@@ -545,7 +587,34 @@ async function fetchInstagramAccountsForPage(params: {
     );
   }
 
-  return dedupeInstagramAccounts(accounts);
+  const resolved = dedupeInstagramAccounts(accounts);
+
+  // Without instagram_basic the Page edges answer with an id but no username,
+  // which surfaces as a nameless "@?" account. Name it from the ad account.
+  const unnamed = resolved.filter((account) => !account.username);
+  if (unnamed.length > 0 && adAccountId && userAccessToken) {
+    const named = await fetchInstagramUsernamesFromAdAccount({
+      adAccountId,
+      userAccessToken,
+      apiVersion,
+    });
+    for (const account of resolved) {
+      const match = named.get(account.id);
+      if (!match) continue;
+      account.username = account.username || match.username;
+      account.profile_picture_url = account.profile_picture_url || match.profile_picture_url;
+      if (match.name) account.name = match.name;
+    }
+    const stillUnnamed = resolved.filter((account) => !account.username);
+    if (stillUnnamed.length > 0) {
+      console.warn(
+        `[IG] Page ${pageName || pageId} (${pageId}): ${stillUnnamed.length} account(s) remain unnamed ` +
+          `(${stillUnnamed.map((a) => a.id).join(", ")}); ad account ${adAccountId} does not list them`,
+      );
+    }
+  }
+
+  return resolved;
 }
 
 type JobLogType = "info" | "success" | "error" | "warning";
@@ -1991,6 +2060,7 @@ export async function registerRoutes(
           userAccessToken,
           pageName,
           apiVersion: "v21.0",
+          adAccountId,
           cacheKeyPrefix: `ig_preflight_${jobId}_${pageId}`,
         });
       }
@@ -2763,6 +2833,7 @@ export async function registerRoutes(
               userAccessToken,
               pageName: storedPage?.name || pageName,
               apiVersion: "v21.0",
+              adAccountId,
               cacheKeyPrefix: `ig_launch_${jobId}_${pageId}`,
             });
             if (resolvedAccounts.length > 0) {
@@ -5640,6 +5711,7 @@ export async function registerRoutes(
                   userAccessToken: accessToken,
                   pageName: page.name,
                   apiVersion: "v21.0",
+                  adAccountId: selectedAdAccountId,
                   cacheKeyPrefix: `ig_prefetch_${userId}_${selectedAdAccountId}_${page.id}`,
                 });
                 if (igAccounts.length > 0) {
@@ -5917,9 +5989,17 @@ export async function registerRoutes(
       // First check if Instagram accounts were fetched during OAuth or page refresh (stored in pagesJson)
       const pageWithIg = selectedPage as any;
       const cachedAccounts = extractInstagramAccountsFromPageRecord(pageWithIg);
-      if (cachedAccounts.length > 0) {
+      // A cached account with no username was resolved before we could name it.
+      // Re-resolve so the ad account gets a chance to supply the handle.
+      const cachedIsNamed = cachedAccounts.every((account) => account.username);
+      if (cachedAccounts.length > 0 && cachedIsNamed) {
         console.log(`[IG] Serving ${cachedAccounts.length} IG account(s) from DB cache for page ${pageId}`);
         return res.json({ data: cachedAccounts, source: "cache" });
+      }
+      if (cachedAccounts.length > 0) {
+        console.log(
+          `[IG] Cached IG account(s) for page ${pageId} have no username, re-resolving to name them`,
+        );
       }
 
       // No cached IG data — go live. A missing Page token is fine; the user
@@ -5941,6 +6021,7 @@ export async function registerRoutes(
         userAccessToken,
         pageName: selectedPage.name,
         apiVersion: "v21.0",
+        adAccountId: selectedAdAccountId,
         cacheKeyPrefix: `ig_endpoint_${userId}_${pageId}`,
       });
 
@@ -6031,6 +6112,7 @@ export async function registerRoutes(
         userAccessToken: api.getAccessToken(),
         pageName: selectedPage.name,
         apiVersion: "v21.0",
+        adAccountId: selectedAdAccountId,
         cacheKeyPrefix: `ig_legacy_${userId}_${selectedPageId}`,
       });
       if (selectedAdAccountId && igAccounts.length > 0) {
