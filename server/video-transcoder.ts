@@ -202,6 +202,9 @@ const META_LIMITS = {
   maxBitRate: readPositiveNumberEnv('META_VIDEO_MAX_BITRATE', 16_000_000),
   // H.264 level as reported by ffprobe (51 = 5.1). Above 5.1 Meta's decoder can bail out.
   maxLevel: readPositiveNumberEnv('META_VIDEO_MAX_H264_LEVEL', 51),
+  // The prepared file is staged in object storage before Meta fetches it, and storage
+  // enforces a per-file limit (50MB on Supabase's free plan). Keep the output under it.
+  targetMaxBytes: readPositiveNumberEnv('META_VIDEO_TARGET_MAX_BYTES', 45 * 1024 * 1024),
 };
 
 // Reasons that a lossless `-c copy` remux fully resolves (container-level only).
@@ -565,6 +568,25 @@ export interface TranscodeOptions {
   remuxOnly?: boolean;
   /** Downscale so neither side exceeds this many pixels. */
   maxLongSide?: number;
+  /** Source duration in seconds, used to size the bitrate against the storage limit. */
+  durationSeconds?: number;
+}
+
+const AUDIO_BITRATE = 128_000;
+
+/**
+ * Highest video bitrate that still lands under the storage per-file limit, capped by
+ * META_LIMITS.maxBitRate. Combined with CRF this only binds on long or high-motion clips;
+ * short videos stay at their natural (smaller) size.
+ */
+function resolveMaxVideoBitrate(durationSeconds?: number): number {
+  if (!durationSeconds || durationSeconds <= 0) return META_LIMITS.maxBitRate;
+
+  const budgetBits = META_LIMITS.targetMaxBytes * 8 - AUDIO_BITRATE * durationSeconds;
+  const budgetBitrate = budgetBits / durationSeconds;
+  // Never drop below something that still looks acceptable at 1080p.
+  const floor = 800_000;
+  return Math.round(Math.min(META_LIMITS.maxBitRate, Math.max(floor, budgetBitrate)));
 }
 
 export async function transcodeForMeta(
@@ -599,10 +621,12 @@ export async function transcodeForMeta(
     `scale='if(gt(max(iw,ih),${maxLongSide}),if(gte(iw,ih),${maxLongSide},-2),iw)':` +
     `'if(gt(max(iw,ih),${maxLongSide}),if(gte(iw,ih),-2,${maxLongSide}),ih)'`;
 
+  const maxVideoBitrate = resolveMaxVideoBitrate(options.durationSeconds);
   const videoArgs = [
     '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high', '-level', '4.1', '-pix_fmt', 'yuv420p',
     '-vf', scaleFilter,
-    '-maxrate', String(Math.round(META_LIMITS.maxBitRate)), '-bufsize', String(Math.round(META_LIMITS.maxBitRate * 2)),
+    '-crf', '23',
+    '-maxrate', String(maxVideoBitrate), '-bufsize', String(maxVideoBitrate * 2),
     '-r', '30', '-vsync', 'cfr', '-g', '60', '-keyint_min', '60',
   ];
 
@@ -681,6 +705,15 @@ export async function validateTranscodedVideo(
   if (analysis.duration < minDuration) {
     throw new Error(`Post-validation failed: duration ${analysis.duration}s < ${minDuration}s minimum`);
   }
+
+  // A remux keeps the source size, so this only guards the re-encode path.
+  if (!options.remuxed && analysis.size > META_LIMITS.targetMaxBytes) {
+    throw new Error(
+      `Post-validation failed: output is ${(analysis.size / 1024 / 1024).toFixed(1)}MB, above the ` +
+      `${(META_LIMITS.targetMaxBytes / 1024 / 1024).toFixed(0)}MB staging limit ` +
+      `(raise META_VIDEO_TARGET_MAX_BYTES together with the storage bucket's file size limit)`,
+    );
+  }
 }
 
 export async function prepareVideoForMeta(
@@ -737,6 +770,7 @@ export async function prepareVideoForMeta(
 
     const { outputPath, ffmpegStderr, remuxed } = await transcodeForMeta(inputPath, hasAudio, {
       remuxOnly: decision.remuxOnly,
+      durationSeconds: inputAnalysis.duration,
     });
 
     const transcodeTime = ((Date.now() - transcodeStart) / 1000).toFixed(2);
