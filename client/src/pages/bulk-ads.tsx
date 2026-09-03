@@ -63,7 +63,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Pencil } from "lucide-react";
 import type { Connection, CampaignSettings, AdSetSettings, AdSettings } from "@shared/schema";
 
 const META_COUNTRIES = [
@@ -3989,23 +3989,38 @@ export default function BulkAds() {
               >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <div className="min-w-0 flex-1">
-                    <Input
-                      aria-label={`Ad set name for ${adset.folderName || adset.name}`}
-                      data-testid={`input-adset-name-${adset.id}`}
-                      value={adSetNameDrafts[adset.id] ?? adset.name}
-                      disabled={isDisabled}
-                      onChange={(event) => setAdSetNameDraft(adset.id, event.target.value)}
-                      onBlur={() => commitAdSetName(adset.id, adset.name)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.currentTarget.blur();
-                        } else if (event.key === "Escape") {
-                          setAdSetNameDraft(adset.id, adset.name);
-                          event.currentTarget.blur();
-                        }
-                      }}
-                      className={`h-8 px-2 font-medium border-transparent bg-transparent hover:border-input focus-visible:border-input focus-visible:bg-background transition-colors ${isDisabled ? "line-through text-muted-foreground" : ""}`}
-                    />
+                    {/* Reads as an editable field at rest — a dashed underline
+                        plus a pencil — rather than looking like plain text. */}
+                    <div className="group/name relative">
+                      <Input
+                        aria-label={`Ad set name for ${adset.folderName || adset.name}`}
+                        title="Click to rename this ad set"
+                        data-testid={`input-adset-name-${adset.id}`}
+                        value={adSetNameDrafts[adset.id] ?? adset.name}
+                        disabled={isDisabled}
+                        onChange={(event) => setAdSetNameDraft(adset.id, event.target.value)}
+                        onBlur={() => commitAdSetName(adset.id, adset.name)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.currentTarget.blur();
+                          } else if (event.key === "Escape") {
+                            setAdSetNameDraft(adset.id, adset.name);
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        className={`h-8 pl-2 pr-8 font-medium cursor-text rounded-md
+                          border-0 border-b border-dashed border-muted-foreground/40 bg-transparent
+                          hover:border-solid hover:border-input hover:bg-muted/40
+                          focus-visible:border-solid focus-visible:border-input focus-visible:bg-background
+                          transition-colors ${isDisabled ? "line-through text-muted-foreground" : ""}`}
+                      />
+                      <Pencil
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5
+                          text-muted-foreground/50 opacity-0 transition-opacity
+                          group-hover/name:opacity-100 group-focus-within/name:opacity-100"
+                      />
+                    </div>
                     {adset.folderName && adset.folderName !== (adSetNameDrafts[adset.id] ?? adset.name) && (
                       <span className="text-xs text-muted-foreground truncate block px-2">{adset.folderName}</span>
                     )}
