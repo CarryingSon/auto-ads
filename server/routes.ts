@@ -50,7 +50,7 @@ import {
   verifyStripeWebhookSignature,
 } from "./billing.js";
 import { checkAdAccountPromotePagesAccess, normalizeMetaAdAccount } from "./meta-oauth-access.js";
-import { checkFfmpegAvailability } from "./video-transcoder.js";
+import { checkFfmpegAvailability, runFfmpegSelfTest } from "./video-transcoder.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
@@ -2166,11 +2166,20 @@ export async function registerRoutes(
 
     try {
       const binaries = await checkFfmpegAvailability();
-      return res.status(binaries.ffmpeg.ok && binaries.ffprobe.ok ? 200 : 503).json({
-        ok: binaries.ffmpeg.ok && binaries.ffprobe.ok,
+      const binariesOk = binaries.ffmpeg.ok && binaries.ffprobe.ok;
+
+      // ?deep=1 also encodes and re-muxes a throwaway clip, which is the only way to prove
+      // the build has libx264/AAC and that /tmp is writable.
+      const deep = req.query.deep === "1" || req.query.deep === "true";
+      const selfTest = deep && binariesOk ? await runFfmpegSelfTest() : null;
+      const ok = binariesOk && (selfTest ? selfTest.ok : true);
+
+      return res.status(ok ? 200 : 503).json({
+        ok,
         platform: `${process.platform}/${process.arch}`,
         node: process.version,
         ...binaries,
+        ...(selfTest ? { selfTest } : {}),
       });
     } catch (error) {
       return res.status(500).json({ error: error instanceof Error ? error.message : "Unknown error" });

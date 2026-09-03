@@ -789,6 +789,76 @@ export async function prepareVideoForMeta(
 const MAX_DOWNLOAD_SIZE = readPositiveNumberEnv('MAX_VIDEO_DOWNLOAD_BYTES', 350 * 1024 * 1024);
 const DOWNLOAD_TIMEOUT = readPositiveNumberEnv('VIDEO_DOWNLOAD_TIMEOUT_MS', 10 * 60 * 1000);
 
+export interface SelfTestResult {
+  ok: boolean;
+  steps: Record<string, unknown>;
+  error?: string;
+}
+
+/**
+ * End-to-end check that the deployed ffmpeg can actually do the work: encode H.264/AAC,
+ * write to /tmp, and produce a faststart MP4. Verifying `-version` alone would not catch a
+ * build without libx264.
+ */
+export async function runFfmpegSelfTest(): Promise<SelfTestResult> {
+  const dir = '/tmp/ff-selftest';
+  const input = path.join(dir, `src_${crypto.randomBytes(6).toString('hex')}.mp4`);
+  const steps: Record<string, unknown> = {};
+  let preparedPath: string | null = null;
+
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+
+    const generated = await runFfmpeg([
+      '-y',
+      '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=30:duration=2',
+      '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '64k', '-shortest',
+      input,
+    ]);
+    steps.generateSource = generated.success;
+    if (!generated.success) {
+      return { ok: false, steps, error: `Could not encode a test clip: ${generated.stderr.slice(-800)}` };
+    }
+
+    const prepared = await prepareVideoForMeta(input, 'ffmpeg-selftest.mp4', 1.0, { force: true });
+    preparedPath = prepared.transcoded ? prepared.usedPath : null;
+    steps.prepare = {
+      ok: prepared.ok,
+      transcoded: prepared.transcoded,
+      reasons: prepared.reasons,
+      error: prepared.logs.error,
+    };
+    if (!prepared.ok) {
+      return { ok: false, steps, error: prepared.logs.error || 'Video preparation failed' };
+    }
+
+    const output = prepared.logs.output;
+    steps.output = output && {
+      codec: output.video?.codec,
+      pixFmt: output.video?.pixFmt,
+      audio: output.audio?.codec,
+      faststart: output.faststart,
+      size: output.size,
+    };
+
+    const ok = Boolean(
+      prepared.transcoded &&
+      output?.video?.codec === 'h264' &&
+      output?.video?.pixFmt === 'yuv420p' &&
+      output?.audio?.codec === 'aac' &&
+      output?.faststart === true,
+    );
+    return ok ? { ok, steps } : { ok, steps, error: 'Transcoded output did not meet Meta requirements' };
+  } catch (error: any) {
+    return { ok: false, steps, error: error?.message || String(error) };
+  } finally {
+    await fs.promises.unlink(input).catch(() => {});
+    if (preparedPath) await cleanupTempFile(preparedPath);
+  }
+}
+
 export async function downloadToTemp(url: string, filename: string): Promise<string> {
   const downloadStart = Date.now();
   const hash = crypto.createHash('md5').update(url).digest('hex').slice(0, 8);
