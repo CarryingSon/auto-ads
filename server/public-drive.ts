@@ -35,9 +35,14 @@ export function extractFolderIdFromUrl(url: string): string | null {
   return null;
 }
 
-// Generate public download URL for a file
+// Generate public download URL for a file.
+//
+// drive.google.com/uc redirects anything above ~100MB to an HTML "Virus scan warning" page
+// instead of the bytes. A third party that fetches the URL itself - Meta, when it downloads
+// an ad video - receives that HTML and reports the file as unreadable or malicious.
+// drive.usercontent.google.com serves the file directly with Range support and no interstitial.
 export function getPublicDownloadUrl(fileId: string): string {
-  return `https://drive.google.com/uc?export=download&id=${fileId}`;
+  return `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
 }
 
 // Generate public view URL for manifest.json

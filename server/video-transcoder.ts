@@ -401,6 +401,12 @@ export function needsTranscode(
     reasons.push(`h264_level_too_high=${analysis.video.level}`);
   }
 
+  // The prepared file is staged in object storage before Meta fetches it, so it has to fit
+  // under the bucket's per-file limit even when nothing else is wrong with it.
+  if (analysis.size > META_LIMITS.targetMaxBytes) {
+    reasons.push(`too_large_to_stage=${(analysis.size / 1024 / 1024).toFixed(1)}MB`);
+  }
+
   // Only transcode .mov if codec is NOT h264 (most .mov with h264 work fine on Meta)
   if (analysis.container === '.mov' && analysis.video.codec !== 'h264') {
     reasons.push('mov_non_h264');
@@ -443,11 +449,18 @@ function isMissingBinaryError(message: string): boolean {
   );
 }
 
+export interface PrepareOptions {
+  /** Always re-encode, whatever the checks say. */
+  force?: boolean;
+  /** Re-encode only if the checks found nothing - used after Meta rejected the untouched file. */
+  forceIfClean?: boolean;
+}
+
 export async function decideMetaVideoPreparation(
   inputPath: string,
   originalFilename: string,
   minDuration: number = 1.0,
-  options: { force?: boolean } = {}
+  options: PrepareOptions = {}
 ): Promise<MetaVideoPreparationDecision> {
   let inputAnalysis: VideoAnalysis;
 
@@ -515,9 +528,9 @@ export async function decideMetaVideoPreparation(
   const { needed, reasons, remuxOnly } = needsTranscode(inputAnalysis, originalFilename);
   console.log('[VideoTranscoder] Transcode check:', { needed, reasons, remuxOnly, force: options.force === true });
 
-  // `force` is set when Meta already rejected this exact file as corrupt: re-encode it in
-  // full even if every individual check passed, since the checks clearly missed something.
-  if (options.force) {
+  // Meta rejected the untouched file but the checks see nothing wrong, so they missed
+  // something: re-encode from scratch rather than hand Meta the same bytes again.
+  if (options.force || (options.forceIfClean && !needed)) {
     return {
       ok: true,
       shouldTranscode: true,
@@ -720,10 +733,15 @@ export async function prepareVideoForMeta(
   inputPath: string,
   originalFilename: string,
   minDuration: number = 1.0,
-  options: { force?: boolean } = {}
+  options: PrepareOptions = {}
 ): Promise<TranscodeResult> {
   const startTime = Date.now();
-  console.log('[VideoTranscoder] Preparing video for Meta:', { inputPath, originalFilename, force: options.force === true });
+  console.log('[VideoTranscoder] Preparing video for Meta:', {
+    inputPath,
+    originalFilename,
+    force: options.force === true,
+    forceIfClean: options.forceIfClean === true,
+  });
 
   const decision = await decideMetaVideoPreparation(inputPath, originalFilename, minDuration, options);
   if (!decision.ok) {

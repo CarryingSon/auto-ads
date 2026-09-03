@@ -2040,70 +2040,26 @@ export class MetaAdsApi {
     );
   }
 
-  // Pushes an already-prepared video to Meta. Transcoded/remuxed output and local files go
-  // through Supabase Storage (Meta must be able to fetch them by URL); untouched remote
-  // videos are handed to Meta as the original URL.
+  // Pushes a locally prepared video to Meta. Meta can only fetch by URL, so the file is
+  // staged in object storage and handed over as a short-lived signed URL.
   private async uploadPreparedVideoToMeta(params: {
     uploadUrl: string;
     name: string;
-    originalUrl: string;
     transcodeResult: TranscodeResult;
-    hasLocalPath: boolean;
   }): Promise<string> {
-    const { uploadUrl, name, originalUrl, transcodeResult, hasLocalPath } = params;
-    const uploadPath = transcodeResult.usedPath;
-    const canUseSupabaseStorage = hasSupabaseStorageConfig();
-
-    if (transcodeResult.transcoded && !canUseSupabaseStorage) {
-      const missing = getMissingSupabaseStorageConfig();
-      throw new Error(
-        `"${name}" had to be re-encoded for Meta, but the re-encoded file cannot be handed to Meta ` +
-        `because object storage is not configured. Meta downloads videos by URL, so the prepared file ` +
-        `must be uploaded somewhere first. Missing environment variable${missing.length === 1 ? "" : "s"}: ` +
-        `${missing.join(", ")}. Set ${missing.length === 1 ? "it" : "them"} in the deployment environment ` +
-        `and redeploy. Diagnose with GET /api/workers/ffmpeg-check.`,
-      );
-    }
-
-    const useSupabase = canUseSupabaseStorage && (transcodeResult.transcoded || hasLocalPath);
-
-    if (!useSupabase) {
-      if (hasLocalPath && !canUseSupabaseStorage) {
-        console.warn(
-          "[MetaAdsApi] Local video available but Supabase storage is not configured; falling back to direct file_url upload",
-        );
-      }
-      console.log('[MetaAdsApi] Video NOT transcoded - using file_url method');
-
-      const uploadParams = new URLSearchParams({
-        file_url: originalUrl,
-        title: name,
-        access_token: this.accessToken!,
-      });
-
-      const metaUploadStart = Date.now();
-      const videoId = await this.uploadVideoFileUrlWithRetry({
-        uploadUrl,
-        uploadParams,
-        name,
-        sourceLabel: "direct_file_url",
-      });
-      const metaUploadTime = ((Date.now() - metaUploadStart) / 1000).toFixed(2);
-      console.log(`[MetaAdsApi] META API UPLOAD (direct): video_id ${videoId} in ${metaUploadTime}s`);
-      return videoId;
-    }
-
-    const sourceLabel = transcodeResult.transcoded ? "transcoded_supabase" : "raw_supabase";
+    const { uploadUrl, name, transcodeResult } = params;
+    const sourceLabel = transcodeResult.transcoded ? "prepared_supabase" : "original_supabase";
     const prefix = transcodeResult.transcoded ? "transcoded-videos" : "raw-videos";
-    console.log(
-      `[MetaAdsApi] Uploading ${transcodeResult.transcoded ? (transcodeResult.remuxed ? "remuxed" : "transcoded") : "raw local"} video to Supabase Storage first`,
-    );
+    const description = transcodeResult.transcoded
+      ? (transcodeResult.remuxed ? "remuxed" : "transcoded")
+      : "unmodified";
+    console.log(`[MetaAdsApi] Staging ${description} video in Supabase Storage for Meta`);
 
-    const videoBuffer = fs.readFileSync(uploadPath);
+    const videoBuffer = fs.readFileSync(transcodeResult.usedPath);
     const fileSizeMB = videoBuffer.length / (1024 * 1024);
-    console.log('[MetaAdsApi] Prepared video size:', videoBuffer.length, `(${fileSizeMB.toFixed(2)} MB)`);
+    console.log("[MetaAdsApi] Prepared video size:", videoBuffer.length, `(${fileSizeMB.toFixed(2)} MB)`);
 
-    const uniqueId = crypto.randomBytes(8).toString('hex');
+    const uniqueId = crypto.randomBytes(8).toString("hex");
     const objectName = `${prefix}/${uniqueId}.mp4`;
 
     const objectStorageStart = Date.now();
@@ -2138,137 +2094,152 @@ export class MetaAdsApi {
     return videoId;
   }
 
-  // Core video upload logic shared by uploadVideo and uploadVideoNoWait
+  /**
+   * Meta downloads the URL we give it, so a URL that answers with an HTML page (Google Drive's
+   * virus-scan interstitial for large files) makes Meta report the video as unreadable. Check
+   * what the URL actually serves before handing it over.
+   */
+  private async probeVideoUrl(url: string): Promise<{ usable: boolean; status?: number; contentType?: string; reason?: string }> {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Range: "bytes=0-0",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        redirect: "follow",
+      });
+      const contentType = (response.headers.get("content-type") || "").toLowerCase();
+
+      if (!response.ok && response.status !== 206) {
+        return { usable: false, status: response.status, contentType, reason: `HTTP ${response.status}` };
+      }
+      if (contentType.includes("text/html")) {
+        return { usable: false, status: response.status, contentType, reason: "URL serves an HTML page, not video bytes" };
+      }
+      return { usable: true, status: response.status, contentType };
+    } catch (error: any) {
+      return { usable: false, reason: error?.message || String(error) };
+    }
+  }
+
+  // Core video upload logic shared by uploadVideo and uploadVideoNoWait.
+  //
+  // Meta gets the original file first: it accepts most exports untouched, and re-encoding
+  // costs quality and time. Only when Meta rejects it (or the source URL cannot serve the
+  // bytes) is the file prepared locally and staged in object storage for a second attempt.
+  // Set META_VIDEO_PREFLIGHT=1 to prepare every video up front instead.
   private async uploadVideoCore(videoUrlOrPath: string, name: string, options?: { localPath?: string }): Promise<{ id: string; transcodeResult?: TranscodeResult }> {
     const uploadStartTime = Date.now();
-    
+
     if (!this.adAccountId || !this.accessToken) {
       throw new Error("No ad account selected or not authenticated");
     }
 
-    const adAccountFormatted = this.adAccountId.startsWith('act_') 
-      ? this.adAccountId 
+    const adAccountFormatted = this.adAccountId.startsWith("act_")
+      ? this.adAccountId
       : `act_${this.adAccountId}`;
+    const uploadUrl = `${META_VIDEO_URL}/${adAccountFormatted}/advideos`;
+    const preflight = process.env.META_VIDEO_PREFLIGHT === "1";
 
-    console.log('[MetaAdsApi] Downloading and analyzing video for Meta compatibility');
-    let downloadedPath: string | null = options?.localPath || null;
+    // Only files this method downloaded are ours to delete; a caller-supplied localPath is not.
+    let downloadedPath: string | null = null;
     let transcodedPath: string | null = null;
-    let transcodeResult: TranscodeResult | undefined;
+    let rejection: any = null;
 
     try {
-      const maxDownloadRetries = 3;
-      for (let attempt = 1; attempt <= maxDownloadRetries; attempt++) {
-        try {
-          if (!downloadedPath) {
-            downloadedPath = await downloadToTemp(videoUrlOrPath, name);
-          }
-          console.log('[MetaAdsApi] Video downloaded to:', downloadedPath);
-
-          transcodeResult = await prepareVideoForMeta(downloadedPath, name);
-          console.log('[MetaAdsApi] Transcode result:', { 
-            ok: transcodeResult.ok, 
-            transcoded: transcodeResult.transcoded,
-            remuxed: transcodeResult.remuxed,
-            reasons: transcodeResult.reasons 
+      if (!preflight) {
+        const probe = await this.probeVideoUrl(videoUrlOrPath);
+        if (probe.usable) {
+          console.log("[MetaAdsApi] Offering the original file to Meta first", {
+            filename: name,
+            contentType: probe.contentType,
           });
-
-          if (!transcodeResult.ok) {
-            const errorMsg = transcodeResult.logs.error || transcodeResult.reasons.join(', ');
-            if (attempt < maxDownloadRetries && (errorMsg.includes('moov atom') || errorMsg.includes('ffprobe failed') || errorMsg.includes('Invalid data'))) {
-              console.warn(`[MetaAdsApi] Video preparation failed (attempt ${attempt}/${maxDownloadRetries}): ${errorMsg} - retrying download...`);
-              if (downloadedPath) {
-                try { fs.unlinkSync(downloadedPath); } catch {}
-              }
-              await new Promise(r => setTimeout(r, 2000 * attempt));
-              continue;
-            }
-            throw new Error(`Video preparation failed: ${errorMsg}`);
+          try {
+            const uploadParams = new URLSearchParams({
+              file_url: videoUrlOrPath,
+              title: name,
+              access_token: this.accessToken,
+            });
+            const video_id = await this.uploadVideoFileUrlWithRetry({
+              uploadUrl,
+              uploadParams,
+              name,
+              sourceLabel: "original_file_url",
+            });
+            const totalTime = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+            console.log(`[MetaAdsApi] Video uploaded untouched: ${video_id} in ${totalTime}s`);
+            return { id: video_id };
+          } catch (uploadError: any) {
+            if (!this.isCorruptVideoError(uploadError)) throw uploadError;
+            rejection = uploadError;
+            console.warn(
+              `[MetaAdsApi] Meta rejected the original "${name}" as corrupt - preparing it locally and retrying once`,
+            );
           }
-          break;
-        } catch (err: any) {
-          if (attempt < maxDownloadRetries && (err.message?.includes('moov atom') || err.message?.includes('ffprobe failed') || err.message?.includes('Invalid data') || err.message?.includes('Download failed') || err.message?.includes('ECONNRESET') || err.message?.includes('ENOENT'))) {
-            console.warn(`[MetaAdsApi] Download/prepare failed (attempt ${attempt}/${maxDownloadRetries}): ${err.message} - retrying...`);
-            if (downloadedPath) {
-              try { fs.unlinkSync(downloadedPath); } catch {}
-              downloadedPath = null;
-            }
-            await new Promise(r => setTimeout(r, 2000 * attempt));
-            continue;
-          }
-          throw err;
+        } else {
+          console.warn(
+            `[MetaAdsApi] Source URL for "${name}" cannot be handed to Meta (${probe.reason}); preparing the file locally instead`,
+          );
         }
       }
 
-      if (!transcodeResult) {
-        throw new Error("Video preparation failed: no transcode result");
+      // Second attempt: prepare the file ourselves and stage it where Meta can fetch it.
+      if (!hasSupabaseStorageConfig()) {
+        const missing = getMissingSupabaseStorageConfig();
+        const cause = rejection
+          ? `Meta rejected "${name}" as corrupt and the re-encoded file cannot be handed back to Meta`
+          : `The source URL for "${name}" cannot serve the video to Meta and the local copy cannot be handed over`;
+        throw new Error(
+          `${cause} because object storage is not configured. Meta downloads videos by URL, so the ` +
+          `prepared file must be uploaded somewhere first. Missing environment variable${missing.length === 1 ? "" : "s"}: ` +
+          `${missing.join(", ")}. Set ${missing.length === 1 ? "it" : "them"} in the deployment environment and redeploy. ` +
+          `Diagnose with GET /api/workers/ffmpeg-check.`,
+        );
+      }
+
+      let localPath = options?.localPath || null;
+      if (!localPath) {
+        downloadedPath = await downloadToTemp(videoUrlOrPath, name);
+        localPath = downloadedPath;
+        console.log("[MetaAdsApi] Video downloaded to:", localPath);
+      }
+
+      const transcodeResult = await prepareVideoForMeta(localPath, name, 1.0, {
+        // Meta already refused these exact bytes, so "nothing wrong" means the checks missed it.
+        forceIfClean: Boolean(rejection),
+      });
+      console.log("[MetaAdsApi] Transcode result:", {
+        ok: transcodeResult.ok,
+        transcoded: transcodeResult.transcoded,
+        remuxed: transcodeResult.remuxed,
+        reasons: transcodeResult.reasons,
+      });
+
+      if (!transcodeResult.ok) {
+        const errorMsg = transcodeResult.logs.error || transcodeResult.reasons.join(", ");
+        if (rejection) throw rejection;
+        throw new Error(`Video preparation failed: ${errorMsg}`);
       }
 
       if (transcodeResult.transcoded) {
         transcodedPath = transcodeResult.usedPath;
       }
 
-      const uploadUrl = `${META_VIDEO_URL}/${adAccountFormatted}/advideos`;
-      let video_id: string | undefined;
-
-      try {
-        video_id = await this.uploadPreparedVideoToMeta({
-          uploadUrl,
-          name,
-          originalUrl: videoUrlOrPath,
-          transcodeResult,
-          hasLocalPath: Boolean(options?.localPath),
-        });
-      } catch (uploadError: any) {
-        // Meta's validator rejects some files that decode perfectly everywhere else
-        // (code 351 / subcode 1363027). Our static checks cannot catch every case, so when
-        // Meta says "corrupt", re-encode the source from scratch and try once more instead
-        // of failing the whole launch.
-        const canRepair = this.isCorruptVideoError(uploadError) && Boolean(downloadedPath) && !transcodeResult.reasons.includes('forced_after_meta_rejection');
-        if (!canRepair) throw uploadError;
-
-        console.warn(
-          `[MetaAdsApi] Meta rejected "${name}" as corrupt - forcing a full re-encode and retrying once`,
-        );
-
-        const repaired = await prepareVideoForMeta(downloadedPath!, name, 1.0, { force: true });
-        if (!repaired.ok) {
-          console.error(
-            `[MetaAdsApi] Forced re-encode failed for "${name}": ${repaired.logs.error || repaired.reasons.join(', ')}`,
-          );
-          throw uploadError;
-        }
-
-        if (transcodedPath && transcodedPath !== repaired.usedPath) {
-          await cleanupTempFile(transcodedPath);
-        }
-        transcodeResult = repaired;
-        transcodedPath = repaired.transcoded ? repaired.usedPath : null;
-
-        video_id = await this.uploadPreparedVideoToMeta({
-          uploadUrl,
-          name,
-          originalUrl: videoUrlOrPath,
-          transcodeResult: repaired,
-          hasLocalPath: Boolean(options?.localPath),
-        });
-        console.log(`[MetaAdsApi] Recovered from Meta corrupt-video rejection for "${name}" via forced re-encode`);
-      }
-
-      if (!video_id) {
-        throw new Error('Video upload failed: no video_id returned');
-      }
+      const video_id = await this.uploadPreparedVideoToMeta({
+        uploadUrl,
+        name,
+        transcodeResult,
+      });
 
       const totalTime = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
-      console.log(`[MetaAdsApi] Video uploaded: ${video_id} in ${totalTime}s`);
-      
+      console.log(
+        `[MetaAdsApi] Video uploaded after local preparation: ${video_id} in ${totalTime}s` +
+        (rejection ? " (recovered from Meta corrupt-video rejection)" : ""),
+      );
       return { id: video_id, transcodeResult };
     } finally {
-      if (downloadedPath) {
-        await cleanupTempFile(downloadedPath);
-      }
-      if (transcodedPath && transcodedPath !== downloadedPath) {
-        await cleanupTempFile(transcodedPath);
-      }
+      if (downloadedPath) await cleanupTempFile(downloadedPath);
+      if (transcodedPath && transcodedPath !== downloadedPath) await cleanupTempFile(transcodedPath);
     }
   }
 
