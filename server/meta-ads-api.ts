@@ -63,6 +63,13 @@ const META_VIDEO_UPLOAD_RETRY_CONFIG = {
   retryableHttpStatuses: new Set([408, 429, 500, 502, 503, 504]),
 };
 
+export class VideoReadyDeadlineError extends Error {
+  constructor(public readonly videoId: string) {
+    super(`Stopped waiting for video ${videoId}: worker time limit`);
+    this.name = "VideoReadyDeadlineError";
+  }
+}
+
 // Utility: Sleep for specified milliseconds
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -876,6 +883,26 @@ export class MetaAdsApi {
         fields: "id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,special_ad_categories"
       }
     );
+  }
+
+  // The ad account's own clock. Meta shows schedules in it, so a start time
+  // the user picks is read in this zone.
+  async getAdAccountTimezone(): Promise<{ timezoneName: string; offsetHoursUtc: number | null }> {
+    if (!this.adAccountId) {
+      throw new Error("No ad account selected");
+    }
+
+    const data = await this.apiRequest<{ timezone_name?: string; timezone_offset_hours_utc?: number }>(
+      `act_${this.adAccountId.replace('act_', '')}`,
+      { fields: "timezone_name,timezone_offset_hours_utc" }
+    );
+    if (!data.timezone_name) {
+      throw new Error("Meta did not return a time zone for this ad account");
+    }
+    return {
+      timezoneName: data.timezone_name,
+      offsetHoursUtc: typeof data.timezone_offset_hours_utc === "number" ? data.timezone_offset_hours_utc : null,
+    };
   }
 
   async getCampaignsByPage(pageId: string): Promise<any[]> {
@@ -2350,7 +2377,14 @@ export class MetaAdsApi {
     throw lastError || new Error('Upload failed after max retries');
   }
 
-  async waitForVideoReady(videoId: string, maxAttempts: number = 30): Promise<string | undefined> {
+  // `deadlineAt` stops the wait (VideoReadyDeadlineError) instead of sleeping
+  // past it; the caller hands the job to a fresh run. `onProcessing` fires
+  // when Meta reports the video as still processing.
+  async waitForVideoReady(
+    videoId: string,
+    maxAttempts: number = 30,
+    options: { deadlineAt?: number; onProcessing?: () => void } = {},
+  ): Promise<string | undefined> {
     console.log('[MetaAdsApi] Waiting for video to be ready:', videoId);
     
     // Exponential backoff: start at 2s, max 10s
@@ -2382,6 +2416,10 @@ export class MetaAdsApi {
         
         // If video is still processing, wait with exponential backoff
         if (videoStatus === 'processing' || processingPhase === 'in_progress') {
+          options.onProcessing?.();
+          if (options.deadlineAt !== undefined && Date.now() + delay > options.deadlineAt) {
+            throw new VideoReadyDeadlineError(videoId);
+          }
           console.log(`[MetaAdsApi] Video still processing, waiting ${delay/1000}s...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           delay = Math.min(delay * 1.5, maxDelay);

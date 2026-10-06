@@ -7,7 +7,7 @@ import { storage } from "./storage.js";
 // Google Drive functions imported dynamically where needed
 import { parseDocx, validateAds } from "./docx-parser.js";
 import type { ExtractedAdData } from "../shared/schema.js";
-import { MetaAdsApi, createSyncLog, isMetaRateLimitError, updateSyncLog } from "./meta-ads-api.js";
+import { MetaAdsApi, VideoReadyDeadlineError, createSyncLog, isMetaRateLimitError, updateSyncLog } from "./meta-ads-api.js";
 import { validateMetaLaunchData, validateAdSetBeforeCreation } from "./meta-ads-validation.js";
 import { decrypt } from "./auth-routes.js";
 import { db } from "./db.js";
@@ -36,6 +36,7 @@ import {
   getLatestQueueForJob,
   clearQueueForJob,
   markQueueFailed,
+  yieldQueueItem,
   type LaunchQueuePayload,
 } from "./job-queue.js";
 import {
@@ -52,8 +53,28 @@ import {
 import { checkAdAccountPromotePagesAccess, normalizeMetaAdAccount } from "./meta-oauth-access.js";
 import { checkFfmpegAvailability, runFfmpegSelfTest } from "./video-transcoder.js";
 import { checkSupabaseStorage } from "./supabase-storage.js";
+import { formatZoneOffset, isValidTimeZone, wallTimeInZoneToUtc } from "./ad-account-time.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
+
+// Vercel kills a function at maxDuration (300s, vercel.json). The worker stops
+// itself before that and hands the rest of the job to a fresh run.
+const LAUNCH_WORKER_SOFT_DEADLINE_MS = (() => {
+  const configured = Number(process.env.LAUNCH_WORKER_SOFT_DEADLINE_MS || 240000);
+  return Number.isFinite(configured) ? Math.max(30000, Math.floor(configured)) : 240000;
+})();
+// Time a video needs to download, transcode and upload. One is not started
+// unless the run still has this much left, so it is never cut off midway.
+const LAUNCH_WORKER_VIDEO_UPLOAD_HEADROOM_MS = 90000;
+
+// Thrown when a worker run is out of time. Not a failure: the job goes back
+// on the queue and the next run resumes it.
+class WorkerYieldError extends Error {
+  constructor(public readonly madeProgress: boolean, public readonly stage: string) {
+    super("Worker time budget reached; continuing in a new run");
+    this.name = "WorkerYieldError";
+  }
+}
 
 // Cancellation is persisted on the job row, not held in memory: the request
 // that cancels and the worker that must notice run in separate serverless
@@ -873,6 +894,16 @@ function isExhaustedStaleLaunchQueue(queue: {
 }
 
 function triggerLaunchWorker(req: Request, queueId: string, jobId: string, reason: string): "requested" | "waiting_for_worker" {
+  return requestLaunchWorker(req, queueId, jobId, reason).status;
+}
+
+// Same as triggerLaunchWorker, plus `sent`, which settles once the request has
+// had time to leave. A worker that hands off to the next run awaits it before
+// responding, because the platform may freeze the instance right after.
+function requestLaunchWorker(req: Request, queueId: string, jobId: string, reason: string): {
+  status: "requested" | "waiting_for_worker";
+  sent: Promise<void>;
+} {
   const cronSecret = process.env.CRON_SECRET;
   const host = req.get("host");
   const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
@@ -881,11 +912,11 @@ function triggerLaunchWorker(req: Request, queueId: string, jobId: string, reaso
   if (!cronSecret || !host) {
     const missing = !cronSecret ? "CRON_SECRET missing" : "host missing";
     console.warn(`[Launch] Worker trigger skipped for job ${jobId} (${reason}, ${missing})`);
-    return "waiting_for_worker";
+    return { status: "waiting_for_worker", sent: Promise.resolve() };
   }
 
   const workerUrl = `${protocol}://${host}/api/workers/launch?queueId=${encodeURIComponent(queueId)}`;
-  void fetch(workerUrl, {
+  const request = fetch(workerUrl, {
     method: "POST",
     headers: {
       "x-cron-secret": cronSecret,
@@ -901,7 +932,10 @@ function triggerLaunchWorker(req: Request, queueId: string, jobId: string, reaso
       console.error(`[Launch] Failed to trigger worker for job ${jobId} (${reason}):`, triggerError);
     });
 
-  return "requested";
+  // The response only arrives when the triggered run finishes, so wait for
+  // the request to go out, not for the answer.
+  const sent = Promise.race([request, new Promise<void>((resolve) => setTimeout(resolve, 1500))]);
+  return { status: "requested", sent };
 }
 
 const ALLOWED_GLOBAL_SETTINGS_PATCH_KEYS = new Set([
@@ -1724,6 +1758,51 @@ export async function registerRoutes(
 
       const adAccountId = String(requestedAdAccountRecord.id || requestedAdAccountId);
 
+      // The picked start time is a time on the ad account's clock (Meta shows
+      // schedules in the account's time zone). Resolve it to an exact instant
+      // here, once; the server's own clock is UTC and must not be used.
+      let resolvedScheduledAt: string | undefined;
+      let scheduledTimezone: string | null = null;
+      if (launchMode === "scheduled" && scheduledAt) {
+        let timezoneName: string | null = null;
+        let timezoneError: string | null = null;
+        try {
+          const metaApi = new MetaAdsApi(userId);
+          if (await metaApi.initialize()) {
+            metaApi.setAdAccountId(adAccountId);
+            timezoneName = (await metaApi.getAdAccountTimezone()).timezoneName;
+          } else {
+            timezoneError = "Meta connection not found or expired";
+          }
+        } catch (err: any) {
+          timezoneError = err?.message || "Unknown error";
+        }
+
+        if (!timezoneName || !isValidTimeZone(timezoneName)) {
+          return res.status(isMetaRateLimitError(timezoneError) ? 429 : 502).json({
+            error: "Could not read the ad account's time zone from Meta, so the scheduled time cannot be set reliably.",
+            details: [
+              timezoneError || `Unknown time zone "${timezoneName}".`,
+              "Try again in a moment, or launch now instead of scheduling.",
+            ],
+          });
+        }
+
+        const instant = wallTimeInZoneToUtc(scheduledAt, timezoneName);
+        if (!instant) {
+          return res.status(400).json({ error: `Invalid scheduled date "${scheduledAt}".` });
+        }
+        if (instant.getTime() < Date.now() - 60000) {
+          return res.status(400).json({
+            error: `The scheduled time ${scheduledAt.replace("T", " ").slice(0, 16)} has already passed in the ad account's time zone (${timezoneName}, ${formatZoneOffset(new Date(), timezoneName)}).`,
+            details: ["Pick a later time."],
+          });
+        }
+        resolvedScheduledAt = instant.toISOString();
+        scheduledTimezone = timezoneName;
+        console.log(`[Launch] Scheduled start ${scheduledAt} ${timezoneName} -> ${resolvedScheduledAt}`);
+      }
+
       // Get ad account settings - STRICT validation required before launch
       const adAccountSettingsRecord = await storage.getAdAccountSettings(userId, adAccountId);
       const globalSettingsRecord = await storage.getGlobalSettings(userId);
@@ -1925,7 +2004,7 @@ export async function registerRoutes(
       }
 
       // Store scheduling info if scheduled
-      const isScheduled = launchMode === "scheduled" && scheduledAt;
+      const isScheduled = launchMode === "scheduled" && resolvedScheduledAt;
 
       // Get adsets, assets and ads (filter out disabled ad sets)
       const allJobAdsets = await storage.getAdsetsByJob(jobId);
@@ -2153,7 +2232,7 @@ export async function registerRoutes(
         extractedAds,
         copyOverrides,
         isScheduled: !!isScheduled,
-        scheduledAt,
+        scheduledAt: resolvedScheduledAt,
         hasCampaignBudget: campaignSettings.isCBO,
         beneficiaryName: globalSettingsRecord?.beneficiaryName,
         payerName: globalSettingsRecord?.payerName,
@@ -2192,7 +2271,9 @@ export async function registerRoutes(
         copyOverrides, creativeEnhancements, disabledAdSetIds,
         campaignSettings, adSetSettings, adSettings,
         effectiveUploadMode, useSinglePerCombination,
-        isScheduled: !!isScheduled, scheduledAt,
+        isScheduled: !!isScheduled,
+        scheduledAt: resolvedScheduledAt,
+        scheduledTimezone,
         jobAdsets, assets, extractedAds, pageId, pageName,
         globalSettingsRecord,
       };
@@ -2346,6 +2427,9 @@ export async function registerRoutes(
   });
 
   app.post("/api/workers/launch", async (req: Request, res: Response) => {
+    // The platform limit applies to the whole request, so every queue item
+    // claimed here shares one deadline.
+    const workerDeadlineAt = Date.now() + LAUNCH_WORKER_SOFT_DEADLINE_MS;
     try {
       const cronSecret = process.env.CRON_SECRET;
       const vercelCron = req.headers["x-vercel-cron"];
@@ -2396,8 +2480,10 @@ export async function registerRoutes(
       let completed = 0;
       let retried = 0;
       let failed = 0;
+      let continued = 0;
+      const continuations: Promise<void>[] = [];
 
-      for (const queueItem of claimed) {
+      for (const [claimIndex, queueItem] of claimed.entries()) {
         const payload = queueItem.payload as unknown as LaunchQueuePayload | null;
         if (!payload || !payload.jobId || !payload.userId) {
           await markQueueFailed(queueItem.id, "Invalid queue payload", {
@@ -2406,6 +2492,17 @@ export async function registerRoutes(
             reason: "invalid_payload",
           });
           failed++;
+          continue;
+        }
+
+        // Not enough of this run left to start another job: give it back
+        // untouched, with its attempt.
+        if (claimIndex > 0 && workerDeadlineAt - Date.now() < 60000) {
+          await yieldQueueItem(queueItem.id, {
+            refundAttempt: true,
+            details: { workerId, reason: "not_started_out_of_time" },
+          });
+          continued++;
           continue;
         }
 
@@ -2429,6 +2526,7 @@ export async function registerRoutes(
             queueId: queueItem.id,
             workerId,
             attempt: queueItem.attempts,
+            deadlineAt: workerDeadlineAt,
           });
           const durationMs = Date.now() - queueItemStartedAt;
           await completeQueueItem(queueItem.id, {
@@ -2449,6 +2547,54 @@ export async function registerRoutes(
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Worker processing failed";
           const durationMs = Date.now() - queueItemStartedAt;
+
+          // Out of time, not failed. The job stays "processing" for the user
+          // and the next run picks it up where this one stopped. A run that
+          // got nothing done still uses up an attempt, so a stuck job ends.
+          if (error instanceof WorkerYieldError) {
+            const handOffDetails = {
+              workerId,
+              durationMs,
+              stage: error.stage,
+              madeProgress: error.madeProgress,
+            };
+            let handedOff = true;
+            if (error.madeProgress) {
+              await yieldQueueItem(queueItem.id, { refundAttempt: true, details: handOffDetails });
+            } else {
+              const result = await failOrRetryQueueItem(queueItem.id, errorMessage, handOffDetails);
+              handedOff = result.status === "retrying";
+            }
+
+            if (handedOff) {
+              await storage.updateJob(payload.jobId, { status: "processing", errorMessage: null });
+              emitJobLog(payload.jobId, "Worker handed launch job to the next run", "info", {
+                event: "worker_continuation_requested",
+                queueId: queueItem.id,
+                ...handOffDetails,
+              });
+              // After progress the job is due at once, so start the next run
+              // now. Without progress it waits out a retry backoff, and the
+              // progress poll or the cron picks it up when it is due.
+              if (error.madeProgress) {
+                continuations.push(
+                  requestLaunchWorker(req, queueItem.id, payload.jobId, "worker_time_budget_continue").sent,
+                );
+              }
+              continued++;
+            } else {
+              const failMessage = "Upload stopped: no progress after several runs. Ads created so far remain on Meta.";
+              await storage.updateJob(payload.jobId, { status: "failed", errorMessage: failMessage });
+              emitJobLog(payload.jobId, failMessage, "error", {
+                event: "worker_no_progress_exhausted",
+                queueId: queueItem.id,
+                ...handOffDetails,
+              });
+              failed++;
+            }
+            continue;
+          }
+
           if (errorMessage.toLowerCase().includes("cancelled")) {
             await markQueueFailed(queueItem.id, errorMessage, {
               workerId,
@@ -2502,11 +2648,14 @@ export async function registerRoutes(
         }
       }
 
+      await Promise.all(continuations);
+
       res.json({
         ok: true,
         claimed: claimed.length,
         completed,
         retried,
+        continued,
         failed,
         queueId: requestedQueueId || undefined,
       });
@@ -2534,19 +2683,20 @@ export async function registerRoutes(
     useSinglePerCombination: boolean;
     isScheduled: boolean;
     scheduledAt?: string;
+    scheduledTimezone?: string | null;
     jobAdsets: any[];
     assets: any[];
     extractedAds: any[];
     pageId: string;
     pageName?: string;
     globalSettingsRecord: any;
-  }, runtime: { queueId?: string; workerId?: string; attempt?: number } = {}): Promise<{ totalAdsCreated: number; adSetCount: number }> {
+  }, runtime: { queueId?: string; workerId?: string; attempt?: number; deadlineAt?: number } = {}): Promise<{ totalAdsCreated: number; adSetCount: number }> {
     const {
       jobId, userId, adAccountId, campaignId, campaignName, adSetName,
       copyOverrides, creativeEnhancements, disabledAdSetIds,
       campaignSettings, adSetSettings, adSettings,
       effectiveUploadMode, useSinglePerCombination,
-      isScheduled, scheduledAt,
+      isScheduled, scheduledAt, scheduledTimezone,
       jobAdsets, assets, extractedAds, pageId, pageName,
       globalSettingsRecord,
     } = params;
@@ -2584,21 +2734,28 @@ export async function registerRoutes(
         emitJobLog(jobId, message, type, { ...baseDetails, ...details }, adsetId);
       };
       const launchStartedAt = Date.now();
-      const configuredSoftDeadlineMs = Number(process.env.LAUNCH_WORKER_SOFT_DEADLINE_MS || 240000);
-      const workerSoftDeadlineMs = Number.isFinite(configuredSoftDeadlineMs)
-        ? Math.max(30000, Math.floor(configuredSoftDeadlineMs))
-        : 240000;
-      const assertWorkerTimeBudget = (stage: string) => {
-        const elapsedMs = Date.now() - launchStartedAt;
-        if (elapsedMs <= workerSoftDeadlineMs) return;
-        const elapsedSeconds = Math.round(elapsedMs / 1000);
-        log(`Worker time budget reached after ${elapsedSeconds}s — retrying remaining work`, "warning", {
+      const deadlineAt = runtime.deadlineAt ?? launchStartedAt + LAUNCH_WORKER_SOFT_DEADLINE_MS;
+      // Whether this run created or uploaded anything. A hand-off after
+      // progress does not count as a failed attempt.
+      let madeProgress = false;
+      const markProgress = () => {
+        madeProgress = true;
+      };
+      // Stops the run when it cannot finish the next step (`neededMs`) before
+      // the deadline. Everything done so far is stored, so the next run skips it.
+      const yieldForTime = (stage: string, neededMs = 0): never => {
+        const elapsedSeconds = Math.round((Date.now() - launchStartedAt) / 1000);
+        log(`Server time limit reached after ${elapsedSeconds}s — continuing automatically where it stopped`, "info", {
           event: "worker_soft_deadline_reached",
           stage,
-          elapsedMs,
-          workerSoftDeadlineMs,
+          neededMs,
+          deadlineAt: new Date(deadlineAt).toISOString(),
+          madeProgress,
         });
-        throw new Error("Worker time budget reached; retrying remaining ad sets");
+        throw new WorkerYieldError(madeProgress, stage);
+      };
+      const assertWorkerTimeBudget = (stage: string, neededMs = 0) => {
+        if (Date.now() + neededMs > deadlineAt) yieldForTime(stage, neededMs);
       };
 
       log(`Ad upload mode: ${effectiveUploadMode}`, "info", {
@@ -2615,7 +2772,20 @@ export async function registerRoutes(
 
       // Use existing campaign or create new one
       let finalCampaignId = campaignId;
-      if (!campaignId) {
+      // A run that continues a job reuses the campaign an earlier run created;
+      // creating another would split the ad sets across two campaigns.
+      const campaignFromEarlierRun = campaignId
+        ? undefined
+        : (await storage.getMetaObjectsByJob(jobId)).find(
+            (obj) => obj.objectType === "campaign" && obj.metaId && obj.status === "created",
+          );
+      if (campaignFromEarlierRun?.metaId) {
+        finalCampaignId = campaignFromEarlierRun.metaId;
+        log(`Continuing in campaign created earlier: ${finalCampaignId}`, "info", {
+          event: "campaign_reused",
+          metaCampaignId: finalCampaignId,
+        });
+      } else if (!campaignId) {
         log(`Creating campaign: ${campaignName || "Campaign"}...`, "info");
         try {
           const campaign = await metaApi.createCampaign({
@@ -2625,8 +2795,9 @@ export async function registerRoutes(
             specialAdCategories: campaignSettings.specialAdCategories || [],
           });
           finalCampaignId = campaign.id;
+          markProgress();
           log(`Campaign created: ${campaign.id}`, "success");
-          
+
           await storage.createMetaObject({
             jobId,
             adIndex: 0,
@@ -2785,8 +2956,13 @@ export async function registerRoutes(
           
           // If scheduled launch, use scheduledAt as the start time
           if (isScheduled && scheduledAt) {
+            // scheduledAt is UTC. Launches queued before this change carry a
+            // zone-less time and no scheduledTimezone; those read as before.
             startTime = new Date(scheduledAt).toISOString();
-            log(`Using scheduled start time: ${startTime}`);
+            const localStart = scheduledTimezone
+              ? `${new Intl.DateTimeFormat("en-GB", { timeZone: scheduledTimezone, dateStyle: "medium", timeStyle: "short" }).format(new Date(startTime))} ${scheduledTimezone}`
+              : startTime;
+            log(`Scheduled start: ${localStart} (${startTime})`);
           } else if (campaignSettings.startDate) {
             const date = campaignSettings.startDate;
             const time = campaignSettings.startTime || "00:00";
@@ -2980,6 +3156,7 @@ export async function registerRoutes(
             });
             metaAdSetId = adSetResult.id;
             addAdSetId(metaAdSetId);
+            markProgress();
             log(`Ad set created: ${metaAdSetId}`);
 
             await storage.createMetaObject({
@@ -3117,6 +3294,9 @@ export async function registerRoutes(
           const imageResults: Array<{ type: 'image'; mediaId: string; name: string } | null> = [];
           for (let i = 0; i < imageAssets.length; i += IMAGE_PARALLEL_LIMIT) {
             const batch = imageAssets.slice(i, i + IMAGE_PARALLEL_LIMIT);
+            if (batch.some((asset) => !asset.metaCreativeId)) {
+              assertWorkerTimeBudget(`uploading images in ad set ${adset.name}`, 30000);
+            }
             const batchResults = await Promise.all(batch.map(async (asset) => {
               try {
                 if (asset.metaCreativeId) {
@@ -3144,6 +3324,7 @@ export async function registerRoutes(
                   metaImageHash: imageResult.hash,
                 }, adset.id);
                 await storage.updateAsset(asset.id, { metaCreativeId: imageResult.hash });
+                markProgress();
                 return { type: 'image' as const, mediaId: imageResult.hash, name: asset.originalFilename };
               } catch (err) {
                 log(`Error uploading ${asset.originalFilename}: ${err instanceof Error ? err.message : "Unknown"}`, "error", {
@@ -3239,6 +3420,7 @@ export async function registerRoutes(
               }
               
               await storage.updateAsset(asset.id, { metaCreativeId: videoResult.id });
+              markProgress();
               pendingVideoIds.push({ videoId: videoResult.id, name: asset.originalFilename, assetId: asset.id });
               if (videoLocalPath) {
                 try { const fs = await import("fs"); fs.unlinkSync(videoLocalPath); } catch {}
@@ -3261,6 +3443,9 @@ export async function registerRoutes(
           // Process videos in batches of VIDEO_PARALLEL_LIMIT
           for (let i = 0; i < videoAssets.length; i += VIDEO_PARALLEL_LIMIT) {
             const batch = videoAssets.slice(i, i + VIDEO_PARALLEL_LIMIT);
+            if (batch.some((asset) => !asset.metaCreativeId)) {
+              assertWorkerTimeBudget(`uploading videos in ad set ${adset.name}`, LAUNCH_WORKER_VIDEO_UPLOAD_HEADROOM_MS);
+            }
             await Promise.all(batch.map(uploadVideoOnly));
           }
           
@@ -3281,8 +3466,16 @@ export async function registerRoutes(
               const batch = pendingVideoIds.slice(i, i + READY_CHECK_LIMIT);
               const batchResults = await Promise.all(
                 batch.map(async ({ videoId, name }) => {
+                  let wasProcessing = false;
                   try {
-                    const thumbnailUrl = await metaApi.waitForVideoReady(videoId);
+                    const thumbnailUrl = await metaApi.waitForVideoReady(videoId, 30, {
+                      deadlineAt,
+                      onProcessing: () => {
+                        wasProcessing = true;
+                      },
+                    });
+                    // Meta finishing a video during this run is progress too.
+                    if (wasProcessing) markProgress();
                     log(`Video ready: ${name}`, "success", {
                       event: "video_ready",
                       videoId,
@@ -3290,6 +3483,8 @@ export async function registerRoutes(
                     }, adset.id);
                     return { type: 'video' as const, mediaId: videoId, name, thumbnailUrl };
                   } catch (err) {
+                    // Still processing at the deadline: the next run checks it again.
+                    if (err instanceof VideoReadyDeadlineError) return null;
                     log(`Video processing failed for ${name}: ${err instanceof Error ? err.message : "Unknown"}`, "error", {
                       event: "video_ready_failed",
                       videoId,
@@ -3300,8 +3495,11 @@ export async function registerRoutes(
                   }
                 })
               );
+              if (batchResults.some((result) => result === null)) {
+                yieldForTime(`waiting for videos in ad set ${adset.name}`);
+              }
               for (const result of batchResults) {
-                allAssetInfo.push(result);
+                if (result) allAssetInfo.push(result);
               }
             }
           }
@@ -3400,6 +3598,7 @@ export async function registerRoutes(
                     totalAdsCreated++;
                     adsCreatedForThisAdSet++;
                     existingAdNames.add(adName);
+                    markProgress();
                   } catch (err) {
                     log(`Error creating ad for ${assetInfo.name} + PT${textIdx + 1}: ${err instanceof Error ? err.message : "Unknown"}`);
                   }
@@ -3488,6 +3687,7 @@ export async function registerRoutes(
                   totalAdsCreated++;
                   adsCreatedForThisAdSet++;
                   existingAdNames.add(adName);
+                  markProgress();
                 } catch (err) {
                   log(`Error creating ad for ${assetInfo.name}: ${err instanceof Error ? err.message : "Unknown"}`);
                 }
@@ -3530,17 +3730,18 @@ export async function registerRoutes(
       console.log(`[Background] Job ${jobId} completed: ${totalAdsCreated} ads created`);
       return { totalAdsCreated, adSetCount: adSetIds.length };
     } catch (error) {
-      emitJobLog(jobId, "Background launch processing failed", "error", {
-        queueId: runtime.queueId ?? null,
-        workerId: runtime.workerId ?? null,
-        attempt: runtime.attempt ?? null,
-        errorMessage: error instanceof Error ? error.message : "Launch failed",
-      });
-      console.error(`[Background] Error processing job ${jobId}:`, error);
-      await storage.updateJob(jobId, {
-        status: "error",
-        errorMessage: error instanceof Error ? error.message : "Launch failed",
-      });
+      // The job status is left to the worker, which knows whether this run
+      // hands off, retries or really fails. Writing "error" here showed the
+      // user a failed upload that then carried on in the background.
+      if (!(error instanceof WorkerYieldError)) {
+        emitJobLog(jobId, "Background launch processing failed", "error", {
+          queueId: runtime.queueId ?? null,
+          workerId: runtime.workerId ?? null,
+          attempt: runtime.attempt ?? null,
+          errorMessage: error instanceof Error ? error.message : "Launch failed",
+        });
+        console.error(`[Background] Error processing job ${jobId}:`, error);
+      }
       throw error;
     }
   }
@@ -6569,6 +6770,51 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error fetching ad accounts:", error);
       res.status(500).json({ error: error.message || "Failed to fetch ad accounts" });
+    }
+  });
+
+  // The ad account's time zone, so the schedule picker can say which clock a
+  // start time is on. Launch reads it again itself; this is for display.
+  app.get("/api/meta/ad-account-timezone", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const requestedAdAccountId = typeof req.query.adAccountId === "string" ? req.query.adAccountId : "";
+      if (!requestedAdAccountId) {
+        return res.status(400).json({ error: "adAccountId is required" });
+      }
+
+      const [metaAssetRow] = await db.select()
+        .from(metaAssets)
+        .where(eq(metaAssets.userId, userId))
+        .limit(1);
+      const allowedAdAccounts = Array.isArray(metaAssetRow?.adAccountsJson)
+        ? (metaAssetRow!.adAccountsJson as Array<{ id?: unknown }>)
+        : [];
+      const adAccount = allowedAdAccounts.find((account) =>
+        normalizeAdAccountId(String(account?.id || "")) === normalizeAdAccountId(requestedAdAccountId),
+      );
+      if (!adAccount) {
+        return res.status(404).json({ error: "Ad account not found" });
+      }
+
+      const metaApi = new MetaAdsApi(userId);
+      if (!(await metaApi.initialize())) {
+        return res.status(400).json({ error: "Meta connection not found or expired" });
+      }
+      metaApi.setAdAccountId(String(adAccount.id));
+      const { timezoneName } = await metaApi.getAdAccountTimezone();
+      if (!isValidTimeZone(timezoneName)) {
+        return res.status(502).json({ error: `Unknown time zone "${timezoneName}" from Meta` });
+      }
+      res.json({ timezoneName, utcOffset: formatZoneOffset(new Date(), timezoneName) });
+    } catch (error: any) {
+      console.error("Error fetching ad account time zone:", error);
+      res.status(isMetaRateLimitError(error?.message) ? 429 : 500).json({
+        error: error?.message || "Failed to fetch ad account time zone",
+      });
     }
   });
 

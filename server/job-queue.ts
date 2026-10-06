@@ -27,6 +27,8 @@ export interface LaunchQueuePayload {
   useSinglePerCombination: boolean;
   isScheduled: boolean;
   scheduledAt?: string | null;
+  // Ad account time zone the scheduled time was picked in; scheduledAt is UTC.
+  scheduledTimezone?: string | null;
   jobAdsets: any[];
   assets: any[];
   extractedAds: any[];
@@ -36,7 +38,10 @@ export interface LaunchQueuePayload {
 }
 
 const DEFAULT_MAX_ATTEMPTS = 3;
-const LOCK_WINDOW_MINUTES = 15;
+// A worker lives at most 300s on Vercel (vercel.json maxDuration). The lock
+// only has to outlast that; anything longer just delays recovery after the
+// platform kills a run.
+const LOCK_WINDOW_MINUTES = 6;
 const MONTHLY_COUNTED_STATUSES: QueueStatus[] = ["queued", "processing", "retrying", "completed"];
 let ensureQueueTablesPromise: Promise<void> | null = null;
 
@@ -342,6 +347,46 @@ export async function failOrRetryQueueItem(queueId: string, errorMessage: string
   return { status, attempts, nextRunAt };
 }
 
+// A worker that runs out of its time budget hands the job back so the next
+// run continues where it stopped. A run that made progress gets its attempt
+// back: attempts are for real failures, not for the hosting time limit. A run
+// that made none keeps it, so a job that never moves still ends.
+export async function yieldQueueItem(queueId: string, params: {
+  refundAttempt: boolean;
+  details?: QueueAttemptDetails;
+}): Promise<{ attempts: number }> {
+  await ensureQueueTables();
+
+  const current = await getQueueItemById(queueId);
+  if (!current) {
+    throw new Error(`Queue item not found: ${queueId}`);
+  }
+
+  const attempts = params.refundAttempt ? Math.max(0, current.attempts - 1) : current.attempts;
+
+  await db
+    .update(jobQueue)
+    .set({
+      status: "retrying",
+      attempts,
+      nextRunAt: new Date(),
+      lockedBy: null,
+      lockedUntil: null,
+      updatedAt: new Date(),
+      lastError: null,
+    })
+    .where(eq(jobQueue.id, queueId));
+
+  await recordAttempt(queueId, current.attempts, "yielded", undefined, {
+    jobId: current.jobId,
+    userId: current.userId,
+    attemptRefunded: params.refundAttempt,
+    ...params.details,
+  });
+
+  return { attempts };
+}
+
 export async function markQueueFailed(queueId: string, errorMessage: string, details: QueueAttemptDetails = {}): Promise<void> {
   await ensureQueueTables();
 
@@ -393,7 +438,7 @@ export async function getQueueItemById(queueId: string) {
 async function recordAttempt(
   queueId: string,
   attemptNumber: number,
-  status: "processing" | "completed" | "retrying" | "failed",
+  status: "processing" | "completed" | "retrying" | "failed" | "yielded",
   errorMessage?: string,
   details?: QueueAttemptDetails,
 ) {

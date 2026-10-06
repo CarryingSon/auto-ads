@@ -396,6 +396,26 @@ function getAdSetDailyMinSpendTarget(adset: AdSetInfo): number | undefined {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
 }
 
+// "Now" on the ad account's clock, as the schedule picker's strings:
+// { date: "2026-10-07", time: "14:05" }.
+function getNowInTimeZone(timeZone: string): { date: string; time: string } | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).formatToParts(new Date());
+    const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+    return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}` };
+  } catch {
+    return null;
+  }
+}
+
 interface ImportResult {
   jobId: string;
   folderName: string;
@@ -1145,6 +1165,29 @@ export default function BulkAds() {
   );
   const connectionUpdatedAt = adAccountsData?.connectionUpdatedAt || null;
 
+  // Meta runs each ad account on its own clock; a scheduled start is a time on
+  // that clock, whatever the browser's time zone is.
+  const { data: adAccountTimezone, isError: adAccountTimezoneFailed } = useQuery<{ timezoneName: string; utcOffset: string }>({
+    queryKey: ["/api/meta/ad-account-timezone", selectedAdAccountId],
+    queryFn: async () => {
+      const res = await fetch(`/api/meta/ad-account-timezone?adAccountId=${encodeURIComponent(selectedAdAccountId)}`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        throw new Error((await res.text()) || `Failed to fetch ad account time zone (${res.status})`);
+      }
+      return res.json();
+    },
+    enabled: hasSelectedUsableAdAccount,
+    staleTime: 60 * 60 * 1000,
+    retry: 1,
+  });
+  const accountTimezoneName = adAccountTimezone?.timezoneName ?? null;
+  const accountNow = accountTimezoneName ? getNowInTimeZone(accountTimezoneName) : null;
+  const isScheduledTimeInPast = Boolean(
+    scheduledDate && accountNow && `${scheduledDate}T${scheduledTime || "00:00"}` <= `${accountNow.date}T${accountNow.time}`,
+  );
+
   // Load per-ad-account settings to check if configured
   const { data: adAccountSettingsData, isLoading: adAccountSettingsLoading, isFetched: adAccountSettingsFetched, dataUpdatedAt } = useQuery<{
     settings: {
@@ -1168,6 +1211,7 @@ export default function BulkAds() {
       instagramPageId?: string;
       instagramPageName?: string;
       creativeEnhancements?: Record<string, boolean>;
+      dailyMinSpendTarget?: number | null;
     } | null;
     adAccountId: string | null;
     adAccountName: string | null;
@@ -2498,6 +2542,7 @@ export default function BulkAds() {
   });
 
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
 
   const cancelUploadMutation = useMutation({
     mutationFn: async () => {
@@ -4093,6 +4138,182 @@ export default function BulkAds() {
     }
   };
 
+  // Everything the launch will use, shown once more before anything is sent
+  // to Meta: the settings most often wrong first, the ad copy last.
+  const renderLaunchConfirmDialog = () => {
+    const websiteUrl = defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl || "";
+    const accountMinSpend = adAccountSettingsData?.settings?.dailyMinSpendTarget ?? undefined;
+    const minSpendFor = (adset: AdSetInfo) => getAdSetDailyMinSpendTarget(adset) ?? accountMinSpend;
+    const minSpendValues = Array.from(new Set(enabledAdSets.map((adset) => minSpendFor(adset) ?? null)));
+    const minSpendSummary = minSpendValues.length > 1
+      ? "Varies per ad set"
+      : minSpendValues[0] == null ? "No minimum" : `${minSpendValues[0]} / day`;
+    const geoFor = (adset: AdSetInfo): string[] =>
+      adset.geoTargeting?.length
+        ? adset.geoTargeting
+        : (adset.overrideSettings?.geoTargeting as string[] | undefined)?.length
+          ? (adset.overrideSettings!.geoTargeting as string[])
+          : effectiveSettings.geoTargeting;
+    const hasGeoSplit = enabledAdSets.some((adset) => adset.geoSplitMarket);
+    const placementsSummary = hasLinkedInstagram
+      ? "Automatic — Facebook & Instagram"
+      : "Automatic — Facebook only (no Instagram linked)";
+    const copyFor = (adset: AdSetInfo) => {
+      const override = adSetCopyOverrides[adset.id];
+      const split = (value: string) => value.split("\n\n---\n\n").map((text) => text.trim()).filter(Boolean);
+      return {
+        primaryTexts: override?.primaryText ? split(override.primaryText) : adset.parsedCopy?.primaryTexts || [],
+        headlines: override?.headline ? split(override.headline) : adset.parsedCopy?.headlines || [],
+      };
+    };
+    const budgetSummary = campaignHasCBO && campaignBudget !== null
+      ? `${campaignBudget} ${campaignBudgetType === "LIFETIME" ? "lifetime" : "/ day"} (campaign budget)`
+      : `${effectiveSettings.budgetAmount} ${effectiveSettings.budgetType === "LIFETIME" ? "lifetime" : "/ day"}`;
+
+    const keySettings: Array<{ label: string; value: string; missing?: boolean }> = [
+      { label: "Min daily spend", value: minSpendSummary },
+      { label: "Website URL", value: websiteUrl || "Not set", missing: !websiteUrl },
+      { label: "Placements", value: placementsSummary },
+      {
+        label: "Geography",
+        value: hasGeoSplit
+          ? "Geo split — per ad set below"
+          : effectiveSettings.geoTargeting.length > 0 ? effectiveSettings.geoTargeting.join(", ") : "Not set",
+        missing: !hasGeoSplit && effectiveSettings.geoTargeting.length === 0,
+      },
+    ];
+    const otherSettings: Array<{ label: string; value: string }> = [
+      { label: "Campaign", value: selectedCampaign?.name || campaignName || "New campaign" },
+      { label: "Budget", value: budgetSummary },
+      { label: "Age", value: `${effectiveSettings.ageMin} – ${effectiveSettings.ageMax}` },
+      { label: "Gender", value: effectiveSettings.gender === "ALL" ? "All" : effectiveSettings.gender === "MALE" ? "Men" : "Women" },
+      { label: "Facebook Page", value: selectedPage?.name || "Not set" },
+      { label: "Instagram", value: selectedInstagram?.username || selectedInstagram?.name || "Not connected" },
+      { label: "Pixel", value: adAccountSettingsData?.settings?.pixelName || effectiveSettings.pixelId || "Not set" },
+      { label: "CTA", value: defaultSettings.defaultCta || importedCta || adAccountSettingsData?.settings?.defaultCta || "LEARN_MORE" },
+      { label: "Display link", value: defaultSettings.displayLink || importedDisplayLink || adAccountSettingsData?.settings?.displayLink || "Not set" },
+      {
+        label: "Start",
+        value: scheduledDate
+          ? `${scheduledDate} ${scheduledTime || "00:00"}${accountTimezoneName ? ` (${accountTimezoneName})` : ""}`
+          : "Now",
+      },
+    ];
+
+    return (
+      <Dialog open={showLaunchConfirm} onOpenChange={setShowLaunchConfirm}>
+        <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-y-auto" data-testid="dialog-launch-confirm">
+          <DialogHeader>
+            <DialogTitle>Review before publishing</DialogTitle>
+            <DialogDescription>
+              {enabledAdSets.length} ad set{enabledAdSets.length !== 1 ? "s" : ""} will be created on Meta with these settings.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {keySettings.map((item) => (
+                <div key={item.label} className="p-3 rounded-lg border bg-muted/50 min-w-0">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{item.label}</p>
+                  <p className={`text-sm font-semibold break-words ${item.missing ? "text-red-600 dark:text-red-400" : "text-foreground"}`}>
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2.5 px-1">
+              {otherSettings.map((item) => (
+                <div key={item.label} className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{item.label}</p>
+                  <p className="text-[13px] text-foreground truncate" title={item.value}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2.5">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">Ad copy</h4>
+              {enabledAdSets.map((adset) => {
+                const copy = copyFor(adset);
+                const minSpend = minSpendFor(adset);
+                return (
+                  <div key={adset.id} className="rounded-lg border p-3 space-y-2.5" data-testid={`launch-confirm-adset-${adset.id}`}>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="text-sm font-semibold text-foreground mr-1 break-words">{adSetNameDrafts[adset.id] ?? adset.name}</p>
+                      <Badge variant="secondary" className="text-[11px]">
+                        {(adset.videoCount || 0) + (adset.imageCount || 0)} creatives
+                      </Badge>
+                      {minSpend != null && (
+                        <Badge variant="outline" className="text-[11px]">Min {minSpend} / day</Badge>
+                      )}
+                      {hasGeoSplit && (
+                        <Badge variant="outline" className="text-[11px]">{geoFor(adset).join(", ") || "No countries"}</Badge>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                        Primary text ({copy.primaryTexts.length})
+                      </p>
+                      {copy.primaryTexts.length > 0 ? (
+                        <ol className="space-y-1.5">
+                          {copy.primaryTexts.map((text, idx) => (
+                            <li key={idx} className="text-[13px] text-foreground whitespace-pre-wrap break-words rounded-md bg-muted/50 px-2.5 py-1.5">
+                              {text}
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="text-[13px] text-red-600 dark:text-red-400">No primary text</p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                        Headline ({copy.headlines.length})
+                      </p>
+                      {copy.headlines.length > 0 ? (
+                        <ul className="flex flex-wrap gap-1.5">
+                          {copy.headlines.map((headline, idx) => (
+                            <li key={idx} className="text-[13px] font-medium text-foreground rounded-md bg-muted/50 px-2.5 py-1 break-words">
+                              {headline}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-[13px] text-muted-foreground">No headline</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:gap-0 pt-2">
+            <Button
+              variant="outline"
+              data-testid="button-launch-confirm-back"
+              onClick={() => setShowLaunchConfirm(false)}
+            >
+              Go back
+            </Button>
+            <Button
+              data-testid="button-launch-confirm"
+              disabled={launchMutation.isPending || isScheduledTimeInPast}
+              onClick={() => {
+                setShowLaunchConfirm(false);
+                setCurrentStep(5);
+                launchMutation.mutate();
+              }}
+            >
+              <Rocket className="h-4 w-4 mr-2" />
+              {scheduledDate ? `Schedule ${scheduledDate}` : "Publish Ads"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   const renderStep4 = () => (
     <div className="glass-panel rounded-2xl p-6 relative overflow-hidden">
       <div className="absolute -top-32 -right-32 w-96 h-96 bg-primary opacity-[0.08] rounded-full blur-[100px] pointer-events-none" />
@@ -4303,9 +4524,50 @@ export default function BulkAds() {
                   Schedule
                 </h3>
                 <div className={`glass-tag px-3 py-1.5 rounded-full text-xs font-semibold ${scheduledDate ? "text-meta" : "text-muted-foreground"}`}>
-                  {scheduledDate ? `${scheduledDate} ${scheduledTime || "00:00"}` : "Launch Now"}
+                  {scheduledDate
+                    ? `${scheduledDate} ${scheduledTime || "00:00"}${accountTimezoneName ? ` ${accountTimezoneName}` : ""}`
+                    : "Launch Now"}
                 </div>
               </div>
+
+              {/* Always say which clock the schedule runs on: the zone read
+                  from the ad account on Meta, not the browser's. */}
+              <div
+                className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 ${
+                  adAccountTimezoneFailed
+                    ? "border-amber-400/40 bg-amber-50/70 dark:border-amber-500/50 dark:bg-amber-500/10"
+                    : "border-border bg-muted/50"
+                }`}
+                data-testid="text-schedule-timezone"
+              >
+                <span className="material-symbols-outlined text-[18px] text-muted-foreground mt-px">public</span>
+                <div className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Ad account time zone</p>
+                  {accountTimezoneName ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground break-words">
+                        {accountTimezoneName} · {adAccountTimezone?.utcOffset}
+                        {accountNow && <span className="font-normal text-muted-foreground"> · now {accountNow.time}</span>}
+                      </p>
+                      <p className="text-[12px] text-muted-foreground">
+                        Read from your Meta ad account. The date and time below are on this clock.
+                      </p>
+                    </>
+                  ) : adAccountTimezoneFailed ? (
+                    <p className="text-sm text-amber-900 dark:text-amber-200">
+                      Could not read the time zone from Meta. It is read again when you publish, and scheduling stops if it still can't be read.
+                    </p>
+                  ) : hasSelectedUsableAdAccount ? (
+                    <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Reading from Meta...
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Select an ad account to see its time zone.</p>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="text-sm">Date (optional)</Label>
@@ -4333,7 +4595,11 @@ export default function BulkAds() {
                             setLaunchMode("now");
                           }
                         }}
-                        disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                        disabled={(date) =>
+                          accountNow
+                            ? format(date, "yyyy-MM-dd") < accountNow.date
+                            : date < new Date(new Date().setHours(0, 0, 0, 0))
+                        }
                         initialFocus
                       />
                       {scheduledDate && (
@@ -4355,7 +4621,9 @@ export default function BulkAds() {
                   </Popover>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="schedule-time" className="text-sm">Time</Label>
+                  <Label htmlFor="schedule-time" className="text-sm">
+                    Time{accountTimezoneName && <span className="text-muted-foreground font-normal"> ({accountTimezoneName})</span>}
+                  </Label>
                   <Input
                     id="schedule-time"
                     type="time"
@@ -4367,6 +4635,11 @@ export default function BulkAds() {
                   />
                 </div>
               </div>
+              {isScheduledTimeInPast && (
+                <p className="text-xs font-medium text-red-600 dark:text-red-400" data-testid="text-schedule-in-past">
+                  This time has already passed in {accountTimezoneName}. Pick a later time.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Leave empty for immediate launch. Set date for scheduled launch.
               </p>
@@ -4417,12 +4690,10 @@ export default function BulkAds() {
                   !hasSelectedUsableAdAccount ||
                   launchMutation.isPending ||
                   !jobId ||
-                  !selectedPageId
+                  !selectedPageId ||
+                  isScheduledTimeInPast
                 }
-                onClick={() => {
-                  setCurrentStep(5);
-                  launchMutation.mutate();
-                }}
+                onClick={() => setShowLaunchConfirm(true)}
               >
                 {launchMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -4434,6 +4705,7 @@ export default function BulkAds() {
               </div>
               <p className="text-[13px] text-muted-foreground">Dry Run simulates the publish without creating ads — use it to check for errors first.</p>
             </div>
+            {renderLaunchConfirmDialog()}
             
             {dryRunPreview && dryRunPreview.length > 0 && (
               <div className="rounded-md border p-4 space-y-3">
@@ -4540,6 +4812,19 @@ export default function BulkAds() {
               ? `${totalCreated} ad${totalCreated !== 1 ? "s" : ""} created across ${launchResults.adSets.length} ad set${launchResults.adSets.length !== 1 ? "s" : ""}`
               : "Upload stopped due to validation errors — see details below"}
           </p>
+          {/* The server runs an upload in 5-minute runs; between runs the
+              queue reads "retrying". Say so, so nobody uploads it again. */}
+          {launchStatus === "launching" && (jobDetails?.queueStatus === "retrying" || jobDetails?.progressStatus === "retrying") && (
+            <div
+              className="mt-2 ml-8 flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-[12px] text-foreground"
+              data-testid="notice-launch-continuing"
+            >
+              <Loader2 className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 animate-spin text-primary" />
+              <span>
+                Continuing automatically where it stopped. Ads already created are kept — no need to upload again.
+              </span>
+            </div>
+          )}
 
           {/* Progress Section */}
           <div className="space-y-2 bg-white/40 p-3 rounded-lg border border-white/40 dark:border-white/5 shadow-inner mt-3">
