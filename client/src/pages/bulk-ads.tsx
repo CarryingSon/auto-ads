@@ -4202,16 +4202,21 @@ export default function BulkAds() {
 
     return (
       <Dialog open={showLaunchConfirm} onOpenChange={setShowLaunchConfirm}>
-        <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-y-auto" data-testid="dialog-launch-confirm">
+        <DialogContent
+          className="flex flex-col w-[calc(100vw-32px)] max-w-[1280px] sm:max-w-[1280px] h-[92vh] p-0 gap-0"
+          data-testid="dialog-launch-confirm"
+        >
+          <div className="px-6 pt-6 pb-4 border-b">
           <DialogHeader>
             <DialogTitle>Review before publishing</DialogTitle>
             <DialogDescription>
               {enabledAdSets.length} ad set{enabledAdSets.length !== 1 ? "s" : ""} will be created on Meta with these settings.
             </DialogDescription>
           </DialogHeader>
+          </div>
 
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
               {keySettings.map((item) => (
                 <div key={item.label} className="p-3 rounded-lg border bg-muted/50 min-w-0">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{item.label}</p>
@@ -4222,7 +4227,7 @@ export default function BulkAds() {
               ))}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2.5 px-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-2.5 px-1">
               {otherSettings.map((item) => (
                 <div key={item.label} className="min-w-0">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{item.label}</p>
@@ -4233,6 +4238,7 @@ export default function BulkAds() {
 
             <div className="space-y-2.5">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">Ad copy</h4>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 items-start">
               {enabledAdSets.map((adset) => {
                 const copy = copyFor(adset);
                 const minSpend = minSpendFor(adset);
@@ -4285,10 +4291,11 @@ export default function BulkAds() {
                   </div>
                 );
               })}
+              </div>
             </div>
           </div>
 
-          <DialogFooter className="flex gap-2 sm:gap-0 pt-2">
+          <DialogFooter className="flex gap-2 sm:gap-2 px-6 py-4 border-t bg-background rounded-b-lg">
             <Button
               variant="outline"
               data-testid="button-launch-confirm-back"
