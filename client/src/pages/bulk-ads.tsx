@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, getCsrfHeaders } from "@/lib/queryClient";
 import { filterDisplayableInstagramAccounts } from "@/lib/instagram-accounts";
+import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
 import {
   FolderOpen,
   FileVideo,
@@ -1431,24 +1432,11 @@ export default function BulkAds() {
   const selectedInstagram = instagramAccounts.find(a => a.id === savedIgId) || (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
   const hasLinkedInstagram = Boolean(selectedInstagram?.id);
 
-  const { data: campaignsData, isLoading: campaignsLoading, isError: campaignsError } = useQuery<{
-    data: Array<{ 
-      id: string; 
-      name: string; 
-      status: string; 
-      effective_status?: string;
-      objective?: string;
-      daily_budget?: string;
-      lifetime_budget?: string;
-    }>;
-    source: string;
-  }>({
-    queryKey: ["/api/meta/campaigns", selectedAdAccountId || "none"],
-    queryFn: async () => {
-      const res = await fetch("/api/meta/campaigns", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch campaigns");
-      return res.json();
-    },
+  // Usually already in the cache: usePrefetchMetaData loads it as soon as the
+  // ad account is known.
+  const { data: campaignsData, isLoading: campaignsLoading, isError: campaignsError } = useQuery<MetaCampaignList>({
+    queryKey: metaCampaignsQueryKey(selectedAdAccountId),
+    queryFn: fetchMetaCampaigns,
     enabled: !!selectedAdAccountId,
   });
 

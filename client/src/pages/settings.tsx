@@ -13,6 +13,7 @@ import { Loader2 } from "lucide-react";
 import { SiFacebook } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
 import type { CampaignSettings, AdSetSettings, AdSettings, CreativeSettings } from "@shared/schema";
+import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
 
 interface GlobalSettings {
   id?: string;
@@ -219,23 +220,9 @@ export default function Settings() {
   const [isApplyingImport, setIsApplyingImport] = useState(false);
   
   // Fetch campaigns for import dropdown
-  const { data: campaignsData, isLoading: isLoadingCampaigns } = useQuery<{
-    data: Array<{
-      id: string;
-      name: string;
-      status: string;
-      effective_status?: string;
-      objective?: string;
-      daily_budget?: string;
-      lifetime_budget?: string;
-    }>;
-  }>({
-    queryKey: ["/api/meta/campaigns", selectedAdAccountId || "none"],
-    queryFn: async () => {
-      const res = await fetch("/api/meta/campaigns", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch campaigns");
-      return res.json();
-    },
+  const { data: campaignsData, isLoading: isLoadingCampaigns } = useQuery<MetaCampaignList>({
+    queryKey: metaCampaignsQueryKey(selectedAdAccountId),
+    queryFn: fetchMetaCampaigns,
     enabled: !!metaConnection && !!selectedAdAccountId,
   });
   
