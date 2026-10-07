@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { TypewriterProgressBar } from "@/components/typewriter-progress-bar";
 import { useQuery } from "@tanstack/react-query";
+import { pluralize } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -855,7 +856,7 @@ export default function Statistics() {
                           );
                         })}
                         <TotalsRow
-                          label={`Total (${adSets.length} ad sets)`}
+                          label={`Total (${pluralize(adSets.length, "ad set")})`}
                           spend={totals.spend}
                           impressions={totals.impressions}
                           clicks={totals.clicks}

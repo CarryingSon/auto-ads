@@ -207,7 +207,10 @@ export default function Dashboard() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {kpis.map((kpi) => {
-          const isPositive = kpi.invertColors ? !kpi.change?.isPositive : kpi.change?.isPositive;
+          // The arrow shows which way the number moved; the colour shows
+          // whether that is good (for CPA, going down is good).
+          const wentUp = kpi.change?.isPositive ?? false;
+          const isGood = kpi.invertColors ? !wentUp : wentUp;
           return (
             <div
               key={kpi.title}
@@ -226,10 +229,13 @@ export default function Dashboard() {
                 )}
                 {kpi.change && kpi.change.value > 0 ? (
                   <div className="flex items-center mt-1">
-                    <span className={`material-symbols-outlined text-xs mr-1 ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
-                      {isPositive ? 'arrow_downward' : 'arrow_upward'}
+                    <span
+                      className={`material-symbols-outlined text-xs mr-1 ${isGood ? 'text-green-500' : 'text-red-500'}`}
+                      aria-label={wentUp ? "up" : "down"}
+                    >
+                      {wentUp ? 'arrow_upward' : 'arrow_downward'}
                     </span>
-                    <span className={`text-xs font-medium ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
+                    <span className={`text-xs font-medium ${isGood ? 'text-green-500' : 'text-red-500'}`}>
                       {kpi.change.value.toFixed(1)}%
                     </span>
                     <span className="text-xs text-muted-foreground ml-1">vs last period</span>

@@ -726,7 +726,7 @@ export function AppSidebar() {
           <div className="mt-3 pt-3 border-t border-border/50 dark:border-white/10">
             <div
               className={isProPlan
-                ? "rounded-xl px-2.5 py-2 border border-primary/25 bg-gradient-to-br from-primary/10 via-white/50 to-primary/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_8px_18px_hsl(var(--primary)/0.12)]"
+                ? "rounded-xl px-2.5 py-2 border border-primary/25 bg-gradient-to-br from-primary/10 via-white/50 to-primary/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_8px_18px_hsl(var(--primary)/0.12)] dark:from-primary/20 dark:via-white/[0.04] dark:to-primary/10 dark:shadow-none"
                 : ""
               }
             >
@@ -746,7 +746,7 @@ export function AppSidebar() {
                   href="/settings"
                   className={`text-xs font-bold ${
                     isProPlan
-                      ? "text-meta hover:text-[hsl(var(--primary))] rounded-md px-1.5 py-0.5 bg-white/55 border border-primary/20"
+                      ? "text-meta hover:text-[hsl(var(--primary))] rounded-md px-1.5 py-0.5 bg-white/55 dark:bg-white/10 border border-primary/20"
                       : "text-meta hover:text-[hsl(var(--primary))]"
                   }`}
                   data-testid="link-upgrade"

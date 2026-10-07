@@ -8,7 +8,7 @@ import avatarHero3 from "../assets/images/avatar-hero-3.png";
 import avatarHero4 from "../assets/images/avatar-hero-4.png";
 
 const capabilities = [
-  { icon: "rocket_launch", label: "Auto-Ads Engine", value: "100's of ads launched instantly" },
+  { icon: "rocket_launch", label: "Auto-Ads Engine", value: "Hundreds of ads launched instantly" },
   { icon: "speed", label: "Efficiency", value: "88.2% faster launch time" },
   { icon: "account_balance_wallet", label: "Scalability", value: "Unlimited ad accounts" },
   { icon: "cloud_upload", label: "Volume", value: "Unlimited ad uploads" },
@@ -49,8 +49,8 @@ export default function LoginPage() {
             className="text-muted-foreground font-medium text-sm inline-flex items-center gap-2 hover:text-primary transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             data-testid="link-back-home"
           >
+            <span className="material-symbols-outlined text-lg">arrow_back</span>
             Back to home
-            <span className="material-symbols-outlined text-lg">arrow_forward</span>
           </Link>
         </div>
 
@@ -134,7 +134,7 @@ export default function LoginPage() {
           </div>
 
           <h2 className="text-5xl font-extrabold text-white leading-[1.1] mb-8 tracking-tight text-balance">
-            Save yourself 100&apos;s of hours a month launching ad creatives.
+            Save yourself hundreds of hours a month launching ad creatives.
           </h2>
 
           <div className="grid grid-cols-2 gap-4 mt-12">

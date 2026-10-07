@@ -902,7 +902,7 @@ export default function Settings() {
     <div className="p-4 lg:p-8 max-w-5xl mx-auto space-y-5">
       <div className="mb-1">
         <h1 className="text-xl font-extrabold tracking-tight" data-testid="text-settings-title">
-          Ad Account Settings
+          Settings
         </h1>
         <p className="text-sm text-muted-foreground mt-1 font-medium">
           Configure your platform experience and integrations.
@@ -945,7 +945,6 @@ export default function Settings() {
               <div>
                 <h3 className="text-sm font-bold" data-testid="text-user-name">{user?.name || "User"}</h3>
                 <p className="text-xs font-medium text-muted-foreground opacity-80" data-testid="text-user-email">{user?.email || "Facebook Account"}</p>
-                <p className="text-[9px] font-mono text-muted-foreground mt-0.5 uppercase tracking-wider">ID: {user?.id || "—"}</p>
               </div>
             </div>
             <button 

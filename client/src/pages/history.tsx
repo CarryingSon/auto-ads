@@ -1,6 +1,17 @@
-import { useState, useMemo } from "react";
+import { useCallback, useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { pluralize } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Trash2, ChevronDown, ChevronRight, Clock, Image, Film, Layers } from "lucide-react";
@@ -92,6 +103,11 @@ export default function History() {
   const [mediaFilter, setMediaFilter] = useState<string>("all");
   const [showAll, setShowAll] = useState(false);
   const [expandedQueueJob, setExpandedQueueJob] = useState<string | null>(null);
+  // Clearing or removing queue entries stops uploads that are still running,
+  // so both ask first.
+  const [confirmQueueAction, setConfirmQueueAction] = useState<
+    { kind: "clear" } | { kind: "delete"; jobId: string; name: string } | null
+  >(null);
   const [expandedBatch, setExpandedBatch] = useState<number | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -130,6 +146,26 @@ export default function History() {
     refetchInterval: 5000,
   });
 
+  // Jobs store only the ad account id; show its name where we know it.
+  const { data: adAccountsData } = useQuery<{ data: Array<{ id: string; name: string }> }>({
+    queryKey: ["/api/meta/ad-accounts"],
+  });
+  const adAccountNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const account of adAccountsData?.data || []) {
+      names.set(String(account.id).replace(/^act_/, ""), account.name);
+    }
+    return names;
+  }, [adAccountsData]);
+  const accountNameFor = useCallback(
+    (job: JobWithAssets) =>
+      (job as any).adAccountName ||
+      adAccountNames.get(String(job.adAccountId || "").replace(/^act_/, "")) ||
+      job.adAccountId ||
+      "Unknown",
+    [adAccountNames],
+  );
+
   const completedJobs = jobs.filter(j => j.status === "done" || j.status === "completed");
   const queueJobs = jobs.filter((j) => {
     if (j.queueStatus) {
@@ -164,7 +200,7 @@ export default function History() {
         batchMap.set(hourKey, {
           date,
           adAccountId: job.adAccountId || 'unknown',
-          adAccountName: (job as any).adAccountName || job.adAccountId || 'Unknown',
+          adAccountName: accountNameFor(job),
           adsLaunched: 0,
           mediaCount: 0,
           mediaType: "image",
@@ -209,17 +245,17 @@ export default function History() {
     });
     
     return Array.from(batchMap.values()).sort((a, b) => b.date.getTime() - a.date.getTime());
-  }, [completedJobs]);
+  }, [completedJobs, accountNameFor]);
   
   const uniqueAccounts = useMemo(() => {
     const accounts = new Map<string, string>();
     completedJobs.forEach(job => {
       if (job.adAccountId) {
-        accounts.set(job.adAccountId, (job as any).adAccountName || job.adAccountId);
+        accounts.set(job.adAccountId, accountNameFor(job));
       }
     });
     return Array.from(accounts.entries());
-  }, [completedJobs]);
+  }, [completedJobs, accountNameFor]);
   
   const filteredBatches = useMemo(() => {
     return batches.filter(batch => {
@@ -296,13 +332,41 @@ export default function History() {
                     className="text-red-500 dark:text-red-400"
                     data-testid="button-clear-queue"
                     disabled={clearQueueMutation.isPending}
-                    onClick={() => clearQueueMutation.mutate()}
+                    onClick={() => setConfirmQueueAction({ kind: "clear" })}
                   >
                     {clearQueueMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Trash2 className="h-3.5 w-3.5 mr-1.5" />}
                     Clear All
                   </Button>
+                  <AlertDialog open={confirmQueueAction !== null} onOpenChange={(open) => { if (!open) setConfirmQueueAction(null); }}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          {confirmQueueAction?.kind === "delete"
+                            ? `Remove "${confirmQueueAction.name}" from the queue?`
+                            : "Clear the whole queue?"}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Uploads that are still running will stop. Ads already created stay on Meta.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel data-testid="button-queue-action-cancel">Keep</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-red-500 text-white hover:bg-red-600"
+                          data-testid="button-queue-action-confirm"
+                          onClick={() => {
+                            if (confirmQueueAction?.kind === "delete") deleteJobMutation.mutate(confirmQueueAction.jobId);
+                            else clearQueueMutation.mutate();
+                            setConfirmQueueAction(null);
+                          }}
+                        >
+                          {confirmQueueAction?.kind === "delete" ? "Remove" : "Clear queue"}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">Jobs currently in progress or waiting</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Uploads in progress, waiting, or stopped with an error</p>
               </div>
               <div className="divide-y divide-border/60">
                 {queueJobs.map((job) => {
@@ -312,7 +376,7 @@ export default function History() {
                   return (
                     <div key={job.id} data-testid={`queue-job-${job.id}`}>
                       <div
-                        className="px-4 py-3 flex items-center gap-3 cursor-pointer hover-elevate transition-colors"
+                        className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 cursor-pointer hover-elevate transition-colors"
                         onClick={() => setExpandedQueueJob(isExpanded ? null : job.id)}
                         data-testid={`queue-job-row-${job.id}`}
                       >
@@ -327,7 +391,7 @@ export default function History() {
                           {getStatusLabel(job.status)}
                         </span>
 
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-[8rem]">
                           <p className="text-xs font-medium text-foreground truncate" data-testid={`queue-campaign-${job.id}`}>
                             {job.campaignName || job.driveRootFolderName || "Untitled Campaign"}
                           </p>
@@ -340,17 +404,22 @@ export default function History() {
                           </span>
                           <span className="flex items-center gap-1" data-testid={`queue-adsets-${job.id}`}>
                             <span className="material-symbols-outlined text-[14px]">folder</span>
-                            {job.totalAdSets || 0} ad sets
+                            {pluralize(job.totalAdSets || 0, "ad set")}
                           </span>
                           <Button
                             size="icon"
                             variant="ghost"
                             className="text-muted-foreground"
+                            aria-label="Remove from queue"
                             data-testid={`button-delete-job-${job.id}`}
                             disabled={deletingJobId === job.id}
                             onClick={(e) => {
                               e.stopPropagation();
-                              deleteJobMutation.mutate(job.id);
+                              setConfirmQueueAction({
+                                kind: "delete",
+                                jobId: job.id,
+                                name: job.campaignName || job.driveRootFolderName || "this upload",
+                              });
                             }}
                           >
                             {deletingJobId === job.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
@@ -638,16 +707,16 @@ export default function History() {
                             </span>
                             <span className="flex items-center gap-1">
                               {batch.totalVideoAssets > 0 && batch.totalImageAssets > 0 ? (
-                                <><Film className="h-3 w-3" /> {batch.totalAssets} creatives</>
+                                <><Film className="h-3 w-3" /> {pluralize(batch.totalAssets, "creative")}</>
                               ) : batch.totalVideoAssets > 0 ? (
-                                <><Film className="h-3 w-3" /> {batch.totalVideoAssets} videos</>
+                                <><Film className="h-3 w-3" /> {pluralize(batch.totalVideoAssets, "video")}</>
                               ) : (
-                                <><Image className="h-3 w-3" /> {batch.totalImageAssets || batch.totalAssets} images</>
+                                <><Image className="h-3 w-3" /> {pluralize(batch.totalImageAssets || batch.totalAssets, "image")}</>
                               )}
                             </span>
                             <span className="flex items-center gap-1">
                               <span className="material-symbols-outlined text-[14px]">folder</span>
-                              {batch.mediaCount} ad sets
+                              {pluralize(batch.mediaCount, "ad set")}
                             </span>
                           </div>
                         </div>

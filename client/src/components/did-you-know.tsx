@@ -73,6 +73,7 @@ export function DidYouKnow({ className = "", variant = "inline", tip }: DidYouKn
             size="icon"
             className="h-6 w-6 flex-shrink-0"
             onClick={() => setDismissed(true)}
+            aria-label="Dismiss tip"
             data-testid="button-dismiss-tip"
           >
             <X className="h-4 w-4" />
@@ -139,6 +140,7 @@ export function DidYouKnowIcon({ tip }: { tip?: string }) {
           variant="ghost" 
           size="icon" 
           className="h-6 w-6"
+          aria-label="Show a tip"
           data-testid="button-did-you-know-icon"
         >
           <Lightbulb className="h-4 w-4 text-amber-500" />

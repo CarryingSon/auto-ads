@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { SiFacebook, SiInstagram } from "react-icons/si";
 import { TypewriterProgressBar } from "@/components/typewriter-progress-bar";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { pluralize } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -221,7 +222,7 @@ function WizardStep({ step, currentStep, title, onClick, disabled }: WizardStepP
       data-testid={`wizard-step-${step}`}
     >
       <div
-        className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold mb-2 transition-all ${
+        className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-semibold mb-2 transition-all ${
           isCompleted
             ? "bg-green-500 text-white shadow-lg shadow-green-200/50 hover:scale-110"
             : isCurrent
@@ -232,7 +233,7 @@ function WizardStep({ step, currentStep, title, onClick, disabled }: WizardStepP
         {isCompleted ? <span className="material-symbols-outlined text-base">check</span> : step}
       </div>
       <span
-        className={`text-[10px] font-semibold uppercase tracking-widest ${
+        className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide sm:tracking-widest ${
           isCompleted ? "text-green-600" : isCurrent ? "text-meta" : "text-muted-foreground"
         }`}
       >
@@ -3607,7 +3608,7 @@ export default function BulkAds() {
         </div>
         <p className="text-sm text-muted-foreground mb-4">Connect your assets to start the launch</p>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
           <button
             type="button"
             disabled={isSyncInProgress}
@@ -3695,7 +3696,7 @@ export default function BulkAds() {
             <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-[16px]">link</span>
             <Input
               data-testid="input-folder-url"
-              className="pl-9 py-2 h-auto text-sm bg-white/40 border-border rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 transition-all"
+              className="pl-9 py-2 h-auto text-sm bg-white/40 dark:bg-black/20 border-border rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 transition-all"
               placeholder="Paste Google Drive folder URL..."
               value={folderUrl}
               onChange={(e) => setFolderUrl(e.target.value)}
@@ -3727,7 +3728,7 @@ export default function BulkAds() {
             <span className="material-symbols-outlined text-sm text-muted-foreground">public</span>
             <div>
               <p className="text-xs font-medium text-foreground">Geo Split</p>
-              <p className="text-[10px] text-muted-foreground">Split ad sets by market (US, UK, AU...) in filenames</p>
+              <p className="text-[10px] text-muted-foreground">One ad set per market named in file names (e.g. SI, HR, US)</p>
             </div>
           </div>
           <button
@@ -3946,7 +3947,7 @@ export default function BulkAds() {
                   {adset.hasDocx ? (
                     <Badge variant="outline" className="gap-1">
                       <FileText className="h-3 w-3" />
-                      {adset.docxSource === 'global' ? 'Globalni' : 'Per-DCT'}
+                      {adset.docxSource === 'global' ? 'Global copy' : 'Per-DCT copy'}
                     </Badge>
                   ) : (
                     <>
@@ -4441,7 +4442,7 @@ export default function BulkAds() {
                     </Badge>
                   )}
                   <Badge variant="secondary" className="text-xs flex-shrink-0">
-                    {(adset.videoCount || 0) + (adset.imageCount || 0)} creatives
+                    {pluralize((adset.videoCount || 0) + (adset.imageCount || 0), "creative")}
                   </Badge>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -4611,7 +4612,7 @@ export default function BulkAds() {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <p className="text-sm font-semibold text-foreground mr-1 break-words">{adSetNameDrafts[adset.id] ?? adset.name}</p>
                       <Badge variant="secondary" className="text-[11px]">
-                        {(adset.videoCount || 0) + (adset.imageCount || 0)} creatives
+                        {pluralize((adset.videoCount || 0) + (adset.imageCount || 0), "creative")}
                       </Badge>
                       {minSpend != null && (
                         <Badge variant="outline" className="text-[11px]">Min {minSpend} / day</Badge>
@@ -5686,7 +5687,7 @@ export default function BulkAds() {
 
   return (
     <div className="max-w-5xl mx-auto py-1 px-2">
-      <div className="glass-panel rounded-2xl p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] mb-8">
+      <div className="glass-panel rounded-2xl px-3 py-4 sm:p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] mb-8">
         <div className="flex items-center justify-between max-w-4xl mx-auto">
           <WizardStep 
             step={1} 
@@ -5695,7 +5696,7 @@ export default function BulkAds() {
             onClick={() => navigateToStep(1)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 1 ? "" : "bg-muted"}`}>
+          <div className={`flex-1 h-0.5 mx-1.5 sm:mx-4 relative ${currentStep > 1 ? "" : "bg-muted"}`}>
             {currentStep > 1 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
@@ -5705,7 +5706,7 @@ export default function BulkAds() {
             onClick={() => navigateToStep(2)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 2 ? "" : "bg-muted"}`}>
+          <div className={`flex-1 h-0.5 mx-1.5 sm:mx-4 relative ${currentStep > 2 ? "" : "bg-muted"}`}>
             {currentStep > 2 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
@@ -5715,7 +5716,7 @@ export default function BulkAds() {
             onClick={() => navigateToStep(3)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 3 ? "" : "bg-muted"}`}>
+          <div className={`flex-1 h-0.5 mx-1.5 sm:mx-4 relative ${currentStep > 3 ? "" : "bg-muted"}`}>
             {currentStep > 3 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
@@ -5724,7 +5725,7 @@ export default function BulkAds() {
             title="Launch"
             disabled={true}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 4 ? "" : "bg-muted"}`}>
+          <div className={`flex-1 h-0.5 mx-1.5 sm:mx-4 relative ${currentStep > 4 ? "" : "bg-muted"}`}>
             {currentStep > 4 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
