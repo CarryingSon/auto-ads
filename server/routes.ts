@@ -67,6 +67,9 @@ const LAUNCH_WORKER_SOFT_DEADLINE_MS = (() => {
 // Time a video needs to download, transcode and upload. One is not started
 // unless the run still has this much left, so it is never cut off midway.
 const LAUNCH_WORKER_VIDEO_UPLOAD_HEADROOM_MS = 90000;
+// A launch waiting longer than this is stale: its settings, schedule and the
+// user's intent may all have changed. It is expired, never run.
+const LAUNCH_QUEUE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // Thrown when a worker run is out of time. Not a failure: the job goes back
 // on the queue and the next run resumes it.
@@ -2535,6 +2538,24 @@ export async function registerRoutes(
             details: { workerId, reason: "not_started_out_of_time" },
           });
           continued++;
+          continue;
+        }
+
+        const queuedForMs = Date.now() - new Date(queueItem.createdAt).getTime();
+        if (queuedForMs > LAUNCH_QUEUE_MAX_AGE_MS) {
+          const expiredMessage = "Launch expired: it waited in the queue for more than 24 hours and was not run. Start a new upload.";
+          await markQueueFailed(queueItem.id, expiredMessage, {
+            workerId,
+            reason: "expired",
+            queuedHours: Math.round(queuedForMs / 3600000),
+          });
+          await storage.updateJob(payload.jobId, { status: "failed", errorMessage: expiredMessage });
+          emitJobLog(payload.jobId, expiredMessage, "error", {
+            event: "launch_expired",
+            queueId: queueItem.id,
+            queuedHours: Math.round(queuedForMs / 3600000),
+          });
+          failed++;
           continue;
         }
 
