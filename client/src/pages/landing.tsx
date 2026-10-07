@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
 import avatarHero1 from "../assets/images/avatar-hero-1.png";
@@ -52,7 +52,22 @@ function DemoVideoPlaceholder() {
   );
 }
 
+// Only the landing page uses Font Awesome icons, so only it loads the
+// stylesheet; the app itself does not pay for it on every page.
+const FONT_AWESOME_HREF = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css";
+
+function useFontAwesome() {
+  useEffect(() => {
+    if (document.querySelector(`link[href="${FONT_AWESOME_HREF}"]`)) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = FONT_AWESOME_HREF;
+    document.head.appendChild(link);
+  }, []);
+}
+
 export default function Landing() {
+  useFontAwesome();
   const [isYearly, setIsYearly] = useState(false);
   const [weeklyImageAds, setWeeklyImageAds] = useState(40);
   const [weeklyVideoAds, setWeeklyVideoAds] = useState(20);
