@@ -43,6 +43,20 @@ const MARKET_TO_COUNTRIES: Record<string, string[]> = {
   SA: ["SA"],
   IL: ["IL"],
   EG: ["EG"],
+  SI: ["SI"],
+  RS: ["RS"],
+  BA: ["BA"],
+  ME: ["ME"],
+  MK: ["MK"],
+  AL: ["AL"],
+  SK: ["SK"],
+  LT: ["LT"],
+  LV: ["LV"],
+  EE: ["EE"],
+  LU: ["LU"],
+  CY: ["CY"],
+  MT: ["MT"],
+  UA: ["UA"],
   EU: [
     "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
     "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
@@ -52,11 +66,18 @@ const MARKET_TO_COUNTRIES: Record<string, string[]> = {
   NORDICS: ["SE", "NO", "DK", "FI"],
   ANZ: ["AU", "NZ"],
   BENELUX: ["BE", "NL", "LU"],
+  ADRIA: ["SI", "HR", "BA", "RS", "ME", "MK"],
 };
 
-const AMBIGUOUS_CODES = new Set(["IN", "IT", "AT", "BE", "NO"]);
+// Codes that are also everyday words ("in", "it", "my", ...). They count only
+// written in capitals and at the start or end of the name, so "my_AD_1" or
+// "final_NO_text" are not read as Malaysia or Norway.
+const AMBIGUOUS_CODES = new Set(["IN", "IT", "AT", "BE", "NO", "MY", "ID", "ME", "AL"]);
 
-const ALL_MARKET_CODES = Object.keys(MARKET_TO_COUNTRIES);
+// Trailing name parts that are not part of what the file is called:
+// "promo_AT_v2" ends in "AT" for this purpose.
+const TRAILING_NOISE_RE = /^(?:v?\d+|final|copy|edit|new)$/i;
+
 
 interface FileInfo {
   id: string;
@@ -79,30 +100,30 @@ export interface SplitAdSet {
   files: FileInfo[];
 }
 
+// The market a creative is for, from its file name: "video_US.mp4" -> "US",
+// "SI-reel.mp4" -> "SI". The first market named wins ("BE_FR" -> "BE").
 function detectMarketCode(filename: string): string | null {
-  const nameWithoutExt = filename.replace(/\.[^.]+$/, "");
+  const tokens = filename
+    .replace(/\.[^.]+$/, "")
+    .split(/[\s_\-.()[\]]+/)
+    .filter(Boolean);
 
-  for (const code of ALL_MARKET_CODES) {
-    if (code.length <= 2 && AMBIGUOUS_CODES.has(code)) {
-      const pattern = new RegExp(`(?:^|_)${code}(?:_\\d+$|_\\d+_|$)`, "i");
-      if (pattern.test(nameWithoutExt)) {
-        return code.toUpperCase();
-      }
-      continue;
-    }
+  let lastMeaningful = tokens.length - 1;
+  while (lastMeaningful > 0 && TRAILING_NOISE_RE.test(tokens[lastMeaningful])) {
+    lastMeaningful--;
+  }
 
-    if (code.length > 2) {
-      const pattern = new RegExp(`(?:^|_|-)${code}(?:_|-|$)`, "i");
-      if (pattern.test(nameWithoutExt)) {
-        return code.toUpperCase();
-      }
-      continue;
-    }
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const code = token.toUpperCase();
+    if (!(code in MARKET_TO_COUNTRIES)) continue;
 
-    const pattern = new RegExp(`(?:^|[_\\-])${code}(?:[_\\-.]|$)`, "i");
-    if (pattern.test(nameWithoutExt)) {
-      return code.toUpperCase();
+    if (AMBIGUOUS_CODES.has(code)) {
+      const isCapitalised = token === code;
+      const isAtEdge = i === 0 || i === lastMeaningful;
+      if (!isCapitalised || !isAtEdge) continue;
     }
+    return code;
   }
 
   return null;
