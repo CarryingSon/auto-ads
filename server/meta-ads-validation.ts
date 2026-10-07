@@ -96,7 +96,6 @@ interface LaunchDataParams {
   };
   adSettings: {
     defaultCta?: string;
-    defaultUrl?: string;
     websiteUrl?: string;
     displayLink?: string;
   };
@@ -458,22 +457,16 @@ export function validateMetaLaunchData(params: LaunchDataParams): ValidationResu
     });
   }
 
-  if (!ads.defaultUrl) {
+  if (!ads.websiteUrl) {
     errors.push({
-      field: "defaultUrl",
-      message: "Default URL is not set. A destination URL is required for ads.",
+      field: "websiteUrl",
+      message: "Website URL is not set. A destination URL is required for ads.",
       severity: "error",
     });
-  } else if (!isValidUrl(ads.defaultUrl)) {
+  } else if (isPlaceholderUrl(ads.websiteUrl)) {
     errors.push({
-      field: "defaultUrl",
-      message: `Invalid default URL "${ads.defaultUrl}". Must be a valid http:// or https:// URL.`,
-      severity: "error",
-    });
-  } else if (isPlaceholderUrl(ads.defaultUrl)) {
-    errors.push({
-      field: "defaultUrl",
-      message: `Default URL "${ads.defaultUrl}" is a placeholder. Set a real landing URL before launch.`,
+      field: "websiteUrl",
+      message: `Website URL "${ads.websiteUrl}" is a placeholder. Set a real landing URL before launch.`,
       severity: "error",
     });
   }

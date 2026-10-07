@@ -50,43 +50,69 @@ if (!TOKEN_ENC_KEY) {
   console.warn("WARNING: TOKEN_ENC_KEY or SESSION_SECRET not set. Token encryption will fail.");
 }
 
-function encrypt(text: string): string {
+// scrypt is deliberately expensive (~50-100ms of blocking CPU). Derive the
+// key once at module load instead of on every encrypt and decrypt, which
+// otherwise stalls the event loop on each request that touches a token.
+let cachedKey: Buffer | null = null;
+function getKey(): Buffer {
   if (!TOKEN_ENC_KEY) throw new Error("Encryption key not configured");
+  if (!cachedKey) {
+    cachedKey = crypto.scryptSync(TOKEN_ENC_KEY, 'salt', 32);
+  }
+  return cachedKey;
+}
+
+function encrypt(text: string): string {
   const iv = crypto.randomBytes(12);
-  const key = crypto.scryptSync(TOKEN_ENC_KEY, 'salt', 32);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getKey(), iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   const authTag = cipher.getAuthTag().toString('hex');
   return iv.toString('hex') + ':' + encrypted + ':' + authTag;
 }
 
-function decrypt(encryptedText: string): string {
+/**
+ * Returns null when the value cannot be decrypted. It must never return the
+ * ciphertext: that used to travel onwards as an access token and came back
+ * from Meta as a bare code 190, indistinguishable from an expired token —
+ * which is exactly what a rotated TOKEN_ENC_KEY looks like.
+ */
+function decrypt(encryptedText: string): string | null {
   if (!TOKEN_ENC_KEY) throw new Error("Encryption key not configured");
+  const parts = encryptedText.split(':');
+
+  // Legacy rows were stored in the clear and carry no iv separator.
+  if (parts.length !== 3 && parts.length !== 2) {
+    return encryptedText;
+  }
+
   try {
-    const parts = encryptedText.split(':');
     if (parts.length === 3) {
       const [ivHex, encrypted, authTagHex] = parts;
-      const iv = Buffer.from(ivHex, 'hex');
-      const authTag = Buffer.from(authTagHex, 'hex');
-      const key = crypto.scryptSync(TOKEN_ENC_KEY, 'salt', 32);
-      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
-      decipher.setAuthTag(authTag);
-      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-      decrypted += decipher.final('utf8');
-      return decrypted;
-    } else if (parts.length === 2) {
-      const [ivHex, encrypted] = parts;
-      const iv = Buffer.from(ivHex, 'hex');
-      const key = crypto.scryptSync(TOKEN_ENC_KEY, 'salt', 32);
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+      const decipher = crypto.createDecipheriv(
+        'aes-256-gcm',
+        getKey(),
+        Buffer.from(ivHex, 'hex'),
+        { authTagLength: 16 },
+      );
+      decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
       let decrypted = decipher.update(encrypted, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       return decrypted;
     }
-    return encryptedText;
-  } catch {
-    return encryptedText;
+
+    const [ivHex, encrypted] = parts;
+    const decipher = crypto.createDecipheriv('aes-256-cbc', getKey(), Buffer.from(ivHex, 'hex'));
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (error) {
+    console.error(
+      "[Auth] Stored token could not be decrypted — the encryption key may have changed. " +
+        "The affected connection needs to be re-authorized.",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
   }
 }
 

@@ -5,9 +5,9 @@ import multer from "multer";
 import { z } from "zod";
 import { storage } from "./storage.js";
 // Google Drive functions imported dynamically where needed
-import { parseDocx, validateAds } from "./docx-parser.js";
+import { DOCX_VARIATION_SEPARATOR, extractDocxText, parseDocx, validateAds } from "./docx-parser.js";
 import type { ExtractedAdData } from "../shared/schema.js";
-import { MetaAdsApi, createSyncLog, isMetaRateLimitError, updateSyncLog } from "./meta-ads-api.js";
+import { MetaAdsApi, VideoReadyDeadlineError, createSyncLog, isMetaRateLimitError, updateSyncLog } from "./meta-ads-api.js";
 import { validateMetaLaunchData, validateAdSetBeforeCreation } from "./meta-ads-validation.js";
 import { decrypt } from "./auth-routes.js";
 import { db } from "./db.js";
@@ -35,7 +35,9 @@ import {
   failOrRetryQueueItem,
   getLatestQueueForJob,
   clearQueueForJob,
+  markQueueCancelled,
   markQueueFailed,
+  yieldQueueItem,
   type LaunchQueuePayload,
 } from "./job-queue.js";
 import {
@@ -52,10 +54,41 @@ import {
 import { checkAdAccountPromotePagesAccess, normalizeMetaAdAccount } from "./meta-oauth-access.js";
 import { checkFfmpegAvailability, runFfmpegSelfTest } from "./video-transcoder.js";
 import { checkSupabaseStorage } from "./supabase-storage.js";
+import { formatZoneOffset, isValidTimeZone, wallTimeInZoneToUtc } from "./ad-account-time.js";
 
 const ENABLE_DEV_AUTH_BYPASS = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
-const cancelledJobs = new Set<string>();
+// Vercel kills a function at maxDuration (300s, vercel.json). The worker stops
+// itself before that and hands the rest of the job to a fresh run.
+const LAUNCH_WORKER_SOFT_DEADLINE_MS = (() => {
+  const configured = Number(process.env.LAUNCH_WORKER_SOFT_DEADLINE_MS || 240000);
+  return Number.isFinite(configured) ? Math.max(30000, Math.floor(configured)) : 240000;
+})();
+// Time a video needs to download, transcode and upload. One is not started
+// unless the run still has this much left, so it is never cut off midway.
+const LAUNCH_WORKER_VIDEO_UPLOAD_HEADROOM_MS = 90000;
+
+// Thrown when a worker run is out of time. Not a failure: the job goes back
+// on the queue and the next run resumes it.
+class WorkerYieldError extends Error {
+  constructor(public readonly madeProgress: boolean, public readonly stage: string) {
+    super("Worker time budget reached; continuing in a new run");
+    this.name = "WorkerYieldError";
+  }
+}
+
+// Cancellation is persisted on the job row, not held in memory: the request
+// that cancels and the worker that must notice run in separate serverless
+// instances, so an in-process Set never reached the worker.
+async function isCancellationRequested(jobId: string): Promise<boolean> {
+  try {
+    const job = await storage.getJob(jobId);
+    return Boolean(job?.cancelRequestedAt);
+  } catch (error) {
+    console.warn(`[Launch] Could not read cancellation flag for job ${jobId}:`, error);
+    return false;
+  }
+}
 
 const metaApiCache = new Map<string, { data: any; expiry: number }>();
 const META_CACHE_TTL = 30 * 60 * 1000;
@@ -271,6 +304,22 @@ async function getAccountCache(userId: string, adAccountId: string): Promise<any
   }
 }
 
+async function getUserMetaAccessToken(userId: string): Promise<string | null> {
+  try {
+    const [connection] = await db.select()
+      .from(oauthConnections)
+      .where(and(
+        eq(oauthConnections.userId, userId),
+        eq(oauthConnections.provider, "meta"),
+      ))
+      .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
+      .limit(1);
+    return connection?.accessToken ? decrypt(connection.accessToken) : null;
+  } catch {
+    return null;
+  }
+}
+
 type PageLike = Record<string, unknown> & { id?: string; name?: string };
 
 function sanitizePageForClient(page: PageLike): PageLike {
@@ -430,28 +479,98 @@ function extractInstagramAccountsFromPageRecord(page: any): InstagramAccountReco
   return dedupeInstagramAccounts(accounts);
 }
 
+// Meta answers "you lack permission" and "this Page has no Instagram" with
+// shapes that are easy to confuse, so name the token and the edge that failed.
+function logInstagramLookupError(
+  pageId: string,
+  pageName: string | undefined,
+  tokenSource: string,
+  edge: string,
+  error: any,
+) {
+  console.warn(
+    `[IG] Page ${pageName || pageId} (${pageId}): ${edge} lookup failed with ${tokenSource}. ` +
+      `code=${error?.code ?? "unknown"} subcode=${error?.error_subcode ?? "none"} ` +
+      `type=${error?.type ?? "unknown"} message=${error?.message ?? "unknown"}`,
+  );
+}
+
+// Page edges only return an Instagram username with instagram_basic. The ad
+// account's own Instagram edges run on ads_management, so they can name the
+// accounts a Page lookup could only give us an id for.
+async function fetchInstagramUsernamesFromAdAccount(params: {
+  adAccountId: string;
+  userAccessToken: string;
+  apiVersion: string;
+}): Promise<Map<string, InstagramAccountRecord>> {
+  const { adAccountId, userAccessToken, apiVersion } = params;
+  const byId = new Map<string, InstagramAccountRecord>();
+  // advertisable_instagram_profiles is not an ad account edge — Meta answers
+  // code 2500 "Unknown path components" — so instagram_accounts is the only one.
+  const edges = ["instagram_accounts"];
+
+  for (const edge of edges) {
+    const data = await cachedMetaFetch(
+      `https://graph.facebook.com/${apiVersion}/${adAccountId}/${edge}?fields=id,username,profile_picture_url,name&access_token=${userAccessToken}`,
+      `ig_names_${adAccountId}_${edge}`,
+    );
+    if (data?.error) {
+      console.warn(
+        `[IG] Ad account ${adAccountId}: ${edge} lookup failed. ` +
+          `code=${data.error?.code ?? "unknown"} message=${data.error?.message ?? "unknown"}`,
+      );
+      continue;
+    }
+    if (!Array.isArray(data?.data)) continue;
+    for (const account of data.data) {
+      const normalized = normalizeInstagramAccount(account);
+      if (normalized?.username && !byId.has(normalized.id)) {
+        byId.set(normalized.id, normalized);
+      }
+    }
+  }
+
+  console.log(
+    `[IG] Ad account ${adAccountId}: resolved ${byId.size} named Instagram account(s): ` +
+      `${Array.from(byId.values()).map((a) => `${a.id} (@${a.username})`).join(", ") || "none"}`,
+  );
+  return byId;
+}
+
+// Resolves the Instagram accounts linked to a Page. A Page Access Token is
+// preferred but optional: a user token still resolves the Page's Instagram
+// link, which is the only way to reach pages the user can advertise for but
+// holds no Page role on.
 async function fetchInstagramAccountsForPage(params: {
   pageId: string;
-  pageAccessToken: string;
+  pageAccessToken?: string | null;
   userAccessToken?: string | null;
+  adAccountId?: string | null;
   pageName?: string;
   apiVersion?: string;
   cacheKeyPrefix?: string;
 }): Promise<InstagramAccountRecord[]> {
   const {
     pageId,
-    pageAccessToken,
+    pageAccessToken = null,
     userAccessToken = null,
+    adAccountId = null,
     pageName,
     apiVersion = "v21.0",
     cacheKeyPrefix,
   } = params;
   const tokenEntries = [
-    { token: pageAccessToken, source: "page" },
+    { token: pageAccessToken || "", source: "page" },
     { token: userAccessToken || "", source: "user" },
   ]
     .filter((entry) => entry.token)
     .filter((entry, index, arr) => arr.findIndex((candidate) => candidate.token === entry.token) === index);
+  if (tokenEntries.length === 0) {
+    console.warn(
+      `[IG] Page ${pageName || pageId} (${pageId}): no page or user access token available, cannot resolve Instagram`,
+    );
+    return [];
+  }
   const accounts: InstagramAccountRecord[] = [];
   const fieldsQuery =
     "instagram_business_account{id,username,profile_picture_url,name}," +
@@ -464,7 +583,10 @@ async function fetchInstagramAccountsForPage(params: {
       `https://graph.facebook.com/${apiVersion}/${pageId}?fields=${fieldsQuery}&access_token=${entry.token}`,
       `${cachePrefix}_fields_${entry.source}`,
     );
-    if (data?.error) continue;
+    if (data?.error) {
+      logInstagramLookupError(pageId, pageName, `${entry.source} token`, "page fields", data.error);
+      continue;
+    }
     const fieldAccounts = [
       normalizeInstagramAccount(data.instagram_business_account, pageName),
       normalizeInstagramAccount(data.connected_instagram_account, pageName),
@@ -479,7 +601,11 @@ async function fetchInstagramAccountsForPage(params: {
         `https://graph.facebook.com/${apiVersion}/${pageId}/instagram_accounts?fields=id,username,profile_picture_url,name&access_token=${entry.token}`,
         `${cachePrefix}_accounts_${entry.source}`,
       );
-      if (data?.error || !Array.isArray(data?.data)) continue;
+      if (data?.error) {
+        logInstagramLookupError(pageId, pageName, `${entry.source} token`, "instagram_accounts edge", data.error);
+        continue;
+      }
+      if (!Array.isArray(data?.data)) continue;
       for (const account of data.data) {
         const normalized = normalizeInstagramAccount(account, pageName);
         if (normalized) accounts.push(normalized);
@@ -488,7 +614,42 @@ async function fetchInstagramAccountsForPage(params: {
     }
   }
 
-  return dedupeInstagramAccounts(accounts);
+  if (accounts.length === 0) {
+    console.warn(
+      `[IG] Page ${pageName || pageId} (${pageId}): Meta returned no Instagram link using ${tokenEntries
+        .map((entry) => entry.source)
+        .join("+")} token(s)`,
+    );
+  }
+
+  const resolved = dedupeInstagramAccounts(accounts);
+
+  // Without instagram_basic the Page edges answer with an id but no username,
+  // which surfaces as a nameless "@?" account. Name it from the ad account.
+  const unnamed = resolved.filter((account) => !account.username);
+  if (unnamed.length > 0 && adAccountId && userAccessToken) {
+    const named = await fetchInstagramUsernamesFromAdAccount({
+      adAccountId,
+      userAccessToken,
+      apiVersion,
+    });
+    for (const account of resolved) {
+      const match = named.get(account.id);
+      if (!match) continue;
+      account.username = account.username || match.username;
+      account.profile_picture_url = account.profile_picture_url || match.profile_picture_url;
+      if (match.name) account.name = match.name;
+    }
+    const stillUnnamed = resolved.filter((account) => !account.username);
+    if (stillUnnamed.length > 0) {
+      console.warn(
+        `[IG] Page ${pageName || pageId} (${pageId}): ${stillUnnamed.length} account(s) remain unnamed ` +
+          `(${stillUnnamed.map((a) => a.id).join(", ")}); ad account ${adAccountId} does not list them`,
+      );
+    }
+  }
+
+  return resolved;
 }
 
 type JobLogType = "info" | "success" | "error" | "warning";
@@ -734,6 +895,16 @@ function isExhaustedStaleLaunchQueue(queue: {
 }
 
 function triggerLaunchWorker(req: Request, queueId: string, jobId: string, reason: string): "requested" | "waiting_for_worker" {
+  return requestLaunchWorker(req, queueId, jobId, reason).status;
+}
+
+// Same as triggerLaunchWorker, plus `sent`, which settles once the request has
+// had time to leave. A worker that hands off to the next run awaits it before
+// responding, because the platform may freeze the instance right after.
+function requestLaunchWorker(req: Request, queueId: string, jobId: string, reason: string): {
+  status: "requested" | "waiting_for_worker";
+  sent: Promise<void>;
+} {
   const cronSecret = process.env.CRON_SECRET;
   const host = req.get("host");
   const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
@@ -742,11 +913,11 @@ function triggerLaunchWorker(req: Request, queueId: string, jobId: string, reaso
   if (!cronSecret || !host) {
     const missing = !cronSecret ? "CRON_SECRET missing" : "host missing";
     console.warn(`[Launch] Worker trigger skipped for job ${jobId} (${reason}, ${missing})`);
-    return "waiting_for_worker";
+    return { status: "waiting_for_worker", sent: Promise.resolve() };
   }
 
   const workerUrl = `${protocol}://${host}/api/workers/launch?queueId=${encodeURIComponent(queueId)}`;
-  void fetch(workerUrl, {
+  const request = fetch(workerUrl, {
     method: "POST",
     headers: {
       "x-cron-secret": cronSecret,
@@ -762,7 +933,10 @@ function triggerLaunchWorker(req: Request, queueId: string, jobId: string, reaso
       console.error(`[Launch] Failed to trigger worker for job ${jobId} (${reason}):`, triggerError);
     });
 
-  return "requested";
+  // The response only arrives when the triggered run finishes, so wait for
+  // the request to go out, not for the answer.
+  const sent = Promise.race([request, new Promise<void>((resolve) => setTimeout(resolve, 1500))]);
+  return { status: "requested", sent };
 }
 
 const ALLOWED_GLOBAL_SETTINGS_PATCH_KEYS = new Set([
@@ -823,8 +997,13 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  app.get("/api/drive/connected-email", async (_req: Request, res: Response) => {
+  app.get("/api/drive/connected-email", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { getServiceAccountEmail, isServiceAccountConfigured } = await import("./google-drive-service-account.js");
       if (isServiceAccountConfigured()) {
         const email = getServiceAccountEmail();
@@ -1036,6 +1215,37 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching connections:", error);
       res.status(500).json({ error: "Failed to fetch connections" });
+    }
+  });
+
+  // How long the Meta connection has left. Meta user tokens last about 60
+  // days and cannot be refreshed, so the app warns before a launch fails.
+  app.get("/api/meta/connection-health", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const [metaOAuth] = await db.select()
+        .from(oauthConnections)
+        .where(and(eq(oauthConnections.userId, userId), eq(oauthConnections.provider, "meta")))
+        .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
+        .limit(1);
+
+      if (!metaOAuth || metaOAuth.status !== "connected") {
+        return res.json({ connected: false, tokenExpiresAt: null, daysLeft: null, expired: false });
+      }
+      const expiresAt = metaOAuth.tokenExpiresAt ? new Date(metaOAuth.tokenExpiresAt) : null;
+      const msLeft = expiresAt ? expiresAt.getTime() - Date.now() : null;
+      res.json({
+        connected: true,
+        tokenExpiresAt: expiresAt?.toISOString() ?? null,
+        daysLeft: msLeft === null ? null : Math.max(0, Math.floor(msLeft / (24 * 60 * 60 * 1000))),
+        expired: msLeft !== null && msLeft <= 0,
+      });
+    } catch (error) {
+      console.error("Error reading Meta connection health:", error);
+      res.status(500).json({ error: "Failed to read Meta connection" });
     }
   });
 
@@ -1402,6 +1612,11 @@ export async function registerRoutes(
     { name: "videos", maxCount: 10 },
   ]), async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const files = req.files as { docx?: Express.Multer.File[]; videos?: Express.Multer.File[] };
       
       if (!files.docx || files.docx.length === 0) {
@@ -1416,11 +1631,10 @@ export async function registerRoutes(
         : videoIndexesRaw ? [Number(videoIndexesRaw)] : [];
 
       // Create a new job
-      const userId = (req.session as any)?.userId;
       const job = await storage.createJob({
         status: "draft",
         currentStep: 2,
-        userId: userId || undefined,
+        userId,
       });
 
       // Save DOCX upload record
@@ -1576,6 +1790,51 @@ export async function registerRoutes(
 
       const adAccountId = String(requestedAdAccountRecord.id || requestedAdAccountId);
 
+      // The picked start time is a time on the ad account's clock (Meta shows
+      // schedules in the account's time zone). Resolve it to an exact instant
+      // here, once; the server's own clock is UTC and must not be used.
+      let resolvedScheduledAt: string | undefined;
+      let scheduledTimezone: string | null = null;
+      if (launchMode === "scheduled" && scheduledAt) {
+        let timezoneName: string | null = null;
+        let timezoneError: string | null = null;
+        try {
+          const metaApi = new MetaAdsApi(userId);
+          if (await metaApi.initialize()) {
+            metaApi.setAdAccountId(adAccountId);
+            timezoneName = (await metaApi.getAdAccountTimezone()).timezoneName;
+          } else {
+            timezoneError = "Meta connection not found or expired";
+          }
+        } catch (err: any) {
+          timezoneError = err?.message || "Unknown error";
+        }
+
+        if (!timezoneName || !isValidTimeZone(timezoneName)) {
+          return res.status(isMetaRateLimitError(timezoneError) ? 429 : 502).json({
+            error: "Could not read the ad account's time zone from Meta, so the scheduled time cannot be set reliably.",
+            details: [
+              timezoneError || `Unknown time zone "${timezoneName}".`,
+              "Try again in a moment, or launch now instead of scheduling.",
+            ],
+          });
+        }
+
+        const instant = wallTimeInZoneToUtc(scheduledAt, timezoneName);
+        if (!instant) {
+          return res.status(400).json({ error: `Invalid scheduled date "${scheduledAt}".` });
+        }
+        if (instant.getTime() < Date.now() - 60000) {
+          return res.status(400).json({
+            error: `The scheduled time ${scheduledAt.replace("T", " ").slice(0, 16)} has already passed in the ad account's time zone (${timezoneName}, ${formatZoneOffset(new Date(), timezoneName)}).`,
+            details: ["Pick a later time."],
+          });
+        }
+        resolvedScheduledAt = instant.toISOString();
+        scheduledTimezone = timezoneName;
+        console.log(`[Launch] Scheduled start ${scheduledAt} ${timezoneName} -> ${resolvedScheduledAt}`);
+      }
+
       // Get ad account settings - STRICT validation required before launch
       const adAccountSettingsRecord = await storage.getAdAccountSettings(userId, adAccountId);
       const globalSettingsRecord = await storage.getGlobalSettings(userId);
@@ -1662,7 +1921,7 @@ export async function registerRoutes(
         
         // Check Ad Settings (required)
         if (!adAccountSettingsRecord.defaultCta) validationErrors.push("Default CTA not set");
-        if (!adAccountSettingsRecord.defaultUrl) validationErrors.push("Default URL not set");
+        if (!adAccountSettingsRecord.websiteUrl) validationErrors.push("Website URL not set");
       }
       
       // If any validation errors, return them all
@@ -1740,9 +1999,8 @@ export async function registerRoutes(
       };
       const adSettings = {
         defaultCta: adAccountSettingsRecord!.defaultCta!,
-        defaultUrl: adAccountSettingsRecord!.defaultUrl!,
         adFormat: "FLEXIBLE" as const,
-        websiteUrl: adAccountSettingsRecord!.websiteUrl || undefined,
+        websiteUrl: adAccountSettingsRecord!.websiteUrl!,
         displayLink: adAccountSettingsRecord!.displayLink || undefined,
       };
       
@@ -1778,7 +2036,7 @@ export async function registerRoutes(
       }
 
       // Store scheduling info if scheduled
-      const isScheduled = launchMode === "scheduled" && scheduledAt;
+      const isScheduled = launchMode === "scheduled" && resolvedScheduledAt;
 
       // Get adsets, assets and ads (filter out disabled ad sets)
       const allJobAdsets = await storage.getAdsetsByJob(jobId);
@@ -1926,13 +2184,15 @@ export async function registerRoutes(
         }
       }
 
-      if (resolvedInstagramAccounts.length === 0 && pageAccessToken) {
+      // Runs even without a Page token — the user token still resolves the link.
+      if (resolvedInstagramAccounts.length === 0) {
         resolvedInstagramAccounts = await fetchInstagramAccountsForPage({
           pageId,
           pageAccessToken,
           userAccessToken,
           pageName,
           apiVersion: "v21.0",
+          adAccountId,
           cacheKeyPrefix: `ig_preflight_${jobId}_${pageId}`,
         });
       }
@@ -2004,7 +2264,7 @@ export async function registerRoutes(
         extractedAds,
         copyOverrides,
         isScheduled: !!isScheduled,
-        scheduledAt,
+        scheduledAt: resolvedScheduledAt,
         hasCampaignBudget: campaignSettings.isCBO,
         beneficiaryName: globalSettingsRecord?.beneficiaryName,
         payerName: globalSettingsRecord?.payerName,
@@ -2043,10 +2303,16 @@ export async function registerRoutes(
         copyOverrides, creativeEnhancements, disabledAdSetIds,
         campaignSettings, adSetSettings, adSettings,
         effectiveUploadMode, useSinglePerCombination,
-        isScheduled: !!isScheduled, scheduledAt,
+        isScheduled: !!isScheduled,
+        scheduledAt: resolvedScheduledAt,
+        scheduledTimezone,
         jobAdsets, assets, extractedAds, pageId, pageName,
         globalSettingsRecord,
       };
+
+      // A new launch clears any cancellation left over from a previous run,
+      // otherwise the worker would stop on the first ad set.
+      await storage.updateJob(jobId, { cancelRequestedAt: null });
 
       const billingStatus = await getBillingStatusForUser(userId);
       let queueItem;
@@ -2193,6 +2459,9 @@ export async function registerRoutes(
   });
 
   app.post("/api/workers/launch", async (req: Request, res: Response) => {
+    // The platform limit applies to the whole request, so every queue item
+    // claimed here shares one deadline.
+    const workerDeadlineAt = Date.now() + LAUNCH_WORKER_SOFT_DEADLINE_MS;
     try {
       const cronSecret = process.env.CRON_SECRET;
       const vercelCron = req.headers["x-vercel-cron"];
@@ -2243,8 +2512,10 @@ export async function registerRoutes(
       let completed = 0;
       let retried = 0;
       let failed = 0;
+      let continued = 0;
+      const continuations: Promise<void>[] = [];
 
-      for (const queueItem of claimed) {
+      for (const [claimIndex, queueItem] of claimed.entries()) {
         const payload = queueItem.payload as unknown as LaunchQueuePayload | null;
         if (!payload || !payload.jobId || !payload.userId) {
           await markQueueFailed(queueItem.id, "Invalid queue payload", {
@@ -2253,6 +2524,17 @@ export async function registerRoutes(
             reason: "invalid_payload",
           });
           failed++;
+          continue;
+        }
+
+        // Not enough of this run left to start another job: give it back
+        // untouched, with its attempt.
+        if (claimIndex > 0 && workerDeadlineAt - Date.now() < 60000) {
+          await yieldQueueItem(queueItem.id, {
+            refundAttempt: true,
+            details: { workerId, reason: "not_started_out_of_time" },
+          });
+          continued++;
           continue;
         }
 
@@ -2276,6 +2558,7 @@ export async function registerRoutes(
             queueId: queueItem.id,
             workerId,
             attempt: queueItem.attempts,
+            deadlineAt: workerDeadlineAt,
           });
           const durationMs = Date.now() - queueItemStartedAt;
           await completeQueueItem(queueItem.id, {
@@ -2296,11 +2579,58 @@ export async function registerRoutes(
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Worker processing failed";
           const durationMs = Date.now() - queueItemStartedAt;
-          if (errorMessage.toLowerCase().includes("cancelled")) {
-            await markQueueFailed(queueItem.id, errorMessage, {
+
+          // Out of time, not failed. The job stays "processing" for the user
+          // and the next run picks it up where this one stopped. A run that
+          // got nothing done still uses up an attempt, so a stuck job ends.
+          if (error instanceof WorkerYieldError) {
+            const handOffDetails = {
               workerId,
               durationMs,
-              reason: "cancelled",
+              stage: error.stage,
+              madeProgress: error.madeProgress,
+            };
+            let handedOff = true;
+            if (error.madeProgress) {
+              await yieldQueueItem(queueItem.id, { refundAttempt: true, details: handOffDetails });
+            } else {
+              const result = await failOrRetryQueueItem(queueItem.id, errorMessage, handOffDetails);
+              handedOff = result.status === "retrying";
+            }
+
+            if (handedOff) {
+              await storage.updateJob(payload.jobId, { status: "processing", errorMessage: null });
+              emitJobLog(payload.jobId, "Worker handed launch job to the next run", "info", {
+                event: "worker_continuation_requested",
+                queueId: queueItem.id,
+                ...handOffDetails,
+              });
+              // After progress the job is due at once, so start the next run
+              // now. Without progress it waits out a retry backoff, and the
+              // progress poll or the cron picks it up when it is due.
+              if (error.madeProgress) {
+                continuations.push(
+                  requestLaunchWorker(req, queueItem.id, payload.jobId, "worker_time_budget_continue").sent,
+                );
+              }
+              continued++;
+            } else {
+              const failMessage = "Upload stopped: no progress after several runs. Ads created so far remain on Meta.";
+              await storage.updateJob(payload.jobId, { status: "failed", errorMessage: failMessage });
+              emitJobLog(payload.jobId, failMessage, "error", {
+                event: "worker_no_progress_exhausted",
+                queueId: queueItem.id,
+                ...handOffDetails,
+              });
+              failed++;
+            }
+            continue;
+          }
+
+          if (errorMessage.toLowerCase().includes("cancelled")) {
+            await markQueueCancelled(queueItem.id, {
+              workerId,
+              durationMs,
             });
             await storage.updateJob(payload.jobId, {
               status: "failed",
@@ -2349,11 +2679,14 @@ export async function registerRoutes(
         }
       }
 
+      await Promise.all(continuations);
+
       res.json({
         ok: true,
         claimed: claimed.length,
         completed,
         retried,
+        continued,
         failed,
         queueId: requestedQueueId || undefined,
       });
@@ -2381,22 +2714,26 @@ export async function registerRoutes(
     useSinglePerCombination: boolean;
     isScheduled: boolean;
     scheduledAt?: string;
+    scheduledTimezone?: string | null;
     jobAdsets: any[];
     assets: any[];
     extractedAds: any[];
     pageId: string;
     pageName?: string;
     globalSettingsRecord: any;
-  }, runtime: { queueId?: string; workerId?: string; attempt?: number } = {}): Promise<{ totalAdsCreated: number; adSetCount: number }> {
+  }, runtime: { queueId?: string; workerId?: string; attempt?: number; deadlineAt?: number } = {}): Promise<{ totalAdsCreated: number; adSetCount: number }> {
     const {
       jobId, userId, adAccountId, campaignId, campaignName, adSetName,
       copyOverrides, creativeEnhancements, disabledAdSetIds,
       campaignSettings, adSetSettings, adSettings,
       effectiveUploadMode, useSinglePerCombination,
-      isScheduled, scheduledAt,
+      isScheduled, scheduledAt, scheduledTimezone,
       jobAdsets, assets, extractedAds, pageId, pageName,
       globalSettingsRecord,
     } = params;
+
+    // Set once logging is ready; writes any log lines not yet saved.
+    let drainLogs: (() => Promise<void>) | null = null;
 
     try {
       // Initialize Meta API in background context
@@ -2418,6 +2755,37 @@ export async function registerRoutes(
         adAccountId,
         campaignId: campaignId ?? null,
       };
+      // The activity feed reads job.logs. Writes go out one at a time, each
+      // with the latest lines: firing one write per line let an older list
+      // land after a newer one and drop the last lines from the feed.
+      let logWriteInFlight: Promise<void> | null = null;
+      let logWritePending = false;
+      const saveLogs = () => {
+        if (logWriteInFlight) {
+          logWritePending = true;
+          return;
+        }
+        logWriteInFlight = storage.updateJob(jobId, { logs: [...logs] })
+          .then(() => undefined)
+          .catch((err) => {
+            console.error("[Launch] Failed to save log to DB:", err);
+          })
+          .finally(() => {
+            logWriteInFlight = null;
+            if (logWritePending) {
+              logWritePending = false;
+              saveLogs();
+            }
+          });
+      };
+      drainLogs = async () => {
+        while (logWriteInFlight) await logWriteInFlight;
+        if (logWritePending) {
+          logWritePending = false;
+          saveLogs();
+          while (logWriteInFlight) await logWriteInFlight;
+        }
+      };
       const log = (
         message: string,
         type: JobLogType = "info",
@@ -2425,27 +2793,32 @@ export async function registerRoutes(
         adsetId?: string | null,
       ) => {
         logs.push(message);
-        storage.updateJob(jobId, { logs }).catch(err => {
-          console.error("[Launch] Failed to save log to DB:", err);
-        });
+        saveLogs();
         emitJobLog(jobId, message, type, { ...baseDetails, ...details }, adsetId);
       };
       const launchStartedAt = Date.now();
-      const configuredSoftDeadlineMs = Number(process.env.LAUNCH_WORKER_SOFT_DEADLINE_MS || 240000);
-      const workerSoftDeadlineMs = Number.isFinite(configuredSoftDeadlineMs)
-        ? Math.max(30000, Math.floor(configuredSoftDeadlineMs))
-        : 240000;
-      const assertWorkerTimeBudget = (stage: string) => {
-        const elapsedMs = Date.now() - launchStartedAt;
-        if (elapsedMs <= workerSoftDeadlineMs) return;
-        const elapsedSeconds = Math.round(elapsedMs / 1000);
-        log(`Worker time budget reached after ${elapsedSeconds}s — retrying remaining work`, "warning", {
+      const deadlineAt = runtime.deadlineAt ?? launchStartedAt + LAUNCH_WORKER_SOFT_DEADLINE_MS;
+      // Whether this run created or uploaded anything. A hand-off after
+      // progress does not count as a failed attempt.
+      let madeProgress = false;
+      const markProgress = () => {
+        madeProgress = true;
+      };
+      // Stops the run when it cannot finish the next step (`neededMs`) before
+      // the deadline. Everything done so far is stored, so the next run skips it.
+      const yieldForTime = (stage: string, neededMs = 0): never => {
+        const elapsedSeconds = Math.round((Date.now() - launchStartedAt) / 1000);
+        log(`Server time limit reached after ${elapsedSeconds}s — continuing automatically where it stopped`, "info", {
           event: "worker_soft_deadline_reached",
           stage,
-          elapsedMs,
-          workerSoftDeadlineMs,
+          neededMs,
+          deadlineAt: new Date(deadlineAt).toISOString(),
+          madeProgress,
         });
-        throw new Error("Worker time budget reached; retrying remaining ad sets");
+        throw new WorkerYieldError(madeProgress, stage);
+      };
+      const assertWorkerTimeBudget = (stage: string, neededMs = 0) => {
+        if (Date.now() + neededMs > deadlineAt) yieldForTime(stage, neededMs);
       };
 
       log(`Ad upload mode: ${effectiveUploadMode}`, "info", {
@@ -2462,7 +2835,20 @@ export async function registerRoutes(
 
       // Use existing campaign or create new one
       let finalCampaignId = campaignId;
-      if (!campaignId) {
+      // A run that continues a job reuses the campaign an earlier run created;
+      // creating another would split the ad sets across two campaigns.
+      const campaignFromEarlierRun = campaignId
+        ? undefined
+        : (await storage.getMetaObjectsByJob(jobId)).find(
+            (obj) => obj.objectType === "campaign" && obj.metaId && obj.status === "created",
+          );
+      if (campaignFromEarlierRun?.metaId) {
+        finalCampaignId = campaignFromEarlierRun.metaId;
+        log(`Continuing in campaign created earlier: ${finalCampaignId}`, "info", {
+          event: "campaign_reused",
+          metaCampaignId: finalCampaignId,
+        });
+      } else if (!campaignId) {
         log(`Creating campaign: ${campaignName || "Campaign"}...`, "info");
         try {
           const campaign = await metaApi.createCampaign({
@@ -2472,8 +2858,9 @@ export async function registerRoutes(
             specialAdCategories: campaignSettings.specialAdCategories || [],
           });
           finalCampaignId = campaign.id;
+          markProgress();
           log(`Campaign created: ${campaign.id}`, "success");
-          
+
           await storage.createMetaObject({
             jobId,
             adIndex: 0,
@@ -2492,7 +2879,14 @@ export async function registerRoutes(
 
       // Find a default description from any ad that has one (for fallback)
       const defaultDescription = extractedAds.find((a: any) => a.description && a.description.trim())?.description || "";
-      const defaultUrl = adSettings.defaultUrl || adSettings.websiteUrl || "https://example.com";
+      // The destination link. Never fall back to a placeholder: shipping ads
+      // that point at example.com is worse than not shipping them.
+      const destinationUrl = adSettings.websiteUrl?.trim();
+      if (!destinationUrl) {
+        throw new Error(
+          "Website URL is not set for this ad account. Set it under Settings before launching.",
+        );
+      }
 
       // Create ad sets and ads for each adset
       const adSetIds: string[] = [];
@@ -2521,10 +2915,9 @@ export async function registerRoutes(
       for (const adset of jobAdsets) {
         assertWorkerTimeBudget(`starting ad set ${adset.name}`);
 
-        if (cancelledJobs.has(jobId)) {
+        if (await isCancellationRequested(jobId)) {
           log("Upload cancelled by user — stopping", "error");
           await storage.updateJob(jobId, { status: "error", errorMessage: "Upload cancelled by user" });
-          cancelledJobs.delete(jobId);
           throw new Error("Upload cancelled by user");
         }
 
@@ -2626,8 +3019,13 @@ export async function registerRoutes(
           
           // If scheduled launch, use scheduledAt as the start time
           if (isScheduled && scheduledAt) {
+            // scheduledAt is UTC. Launches queued before this change carry a
+            // zone-less time and no scheduledTimezone; those read as before.
             startTime = new Date(scheduledAt).toISOString();
-            log(`Using scheduled start time: ${startTime}`);
+            const localStart = scheduledTimezone
+              ? `${new Intl.DateTimeFormat("en-GB", { timeZone: scheduledTimezone, dateStyle: "medium", timeStyle: "short" }).format(new Date(startTime))} ${scheduledTimezone}`
+              : startTime;
+            log(`Scheduled start: ${localStart} (${startTime})`);
           } else if (campaignSettings.startDate) {
             const date = campaignSettings.startDate;
             const time = campaignSettings.startTime || "00:00";
@@ -2697,13 +3095,15 @@ export async function registerRoutes(
             );
           }
 
-          if (resolvedAccounts.length === 0 && pageAccessToken) {
+          // Runs even without a Page token — the user token still resolves the link.
+          if (resolvedAccounts.length === 0 && (pageAccessToken || userAccessToken)) {
             resolvedAccounts = await fetchInstagramAccountsForPage({
               pageId,
               pageAccessToken,
               userAccessToken,
               pageName: storedPage?.name || pageName,
               apiVersion: "v21.0",
+              adAccountId,
               cacheKeyPrefix: `ig_launch_${jobId}_${pageId}`,
             });
             if (resolvedAccounts.length > 0) {
@@ -2819,6 +3219,7 @@ export async function registerRoutes(
             });
             metaAdSetId = adSetResult.id;
             addAdSetId(metaAdSetId);
+            markProgress();
             log(`Ad set created: ${metaAdSetId}`);
 
             await storage.createMetaObject({
@@ -2871,7 +3272,7 @@ export async function registerRoutes(
         const descriptions = normText(rawDescription).split(/\n\n---\n\n|\n---\n|---/).map(t => t.trim()).filter(t => t.length > 0).slice(0, 5);
         
         const finalCta = override?.cta || adSettings.defaultCta || "LEARN_MORE";
-        const finalUrl = override?.url || defaultUrl;
+        const finalUrl = override?.url || destinationUrl;
 
         // Always use the original selected pageId (never switch to different page)
         const effectivePageId = pageId;
@@ -2956,6 +3357,9 @@ export async function registerRoutes(
           const imageResults: Array<{ type: 'image'; mediaId: string; name: string } | null> = [];
           for (let i = 0; i < imageAssets.length; i += IMAGE_PARALLEL_LIMIT) {
             const batch = imageAssets.slice(i, i + IMAGE_PARALLEL_LIMIT);
+            if (batch.some((asset) => !asset.metaCreativeId)) {
+              assertWorkerTimeBudget(`uploading images in ad set ${adset.name}`, 30000);
+            }
             const batchResults = await Promise.all(batch.map(async (asset) => {
               try {
                 if (asset.metaCreativeId) {
@@ -2983,6 +3387,7 @@ export async function registerRoutes(
                   metaImageHash: imageResult.hash,
                 }, adset.id);
                 await storage.updateAsset(asset.id, { metaCreativeId: imageResult.hash });
+                markProgress();
                 return { type: 'image' as const, mediaId: imageResult.hash, name: asset.originalFilename };
               } catch (err) {
                 log(`Error uploading ${asset.originalFilename}: ${err instanceof Error ? err.message : "Unknown"}`, "error", {
@@ -3078,6 +3483,7 @@ export async function registerRoutes(
               }
               
               await storage.updateAsset(asset.id, { metaCreativeId: videoResult.id });
+              markProgress();
               pendingVideoIds.push({ videoId: videoResult.id, name: asset.originalFilename, assetId: asset.id });
               if (videoLocalPath) {
                 try { const fs = await import("fs"); fs.unlinkSync(videoLocalPath); } catch {}
@@ -3100,6 +3506,9 @@ export async function registerRoutes(
           // Process videos in batches of VIDEO_PARALLEL_LIMIT
           for (let i = 0; i < videoAssets.length; i += VIDEO_PARALLEL_LIMIT) {
             const batch = videoAssets.slice(i, i + VIDEO_PARALLEL_LIMIT);
+            if (batch.some((asset) => !asset.metaCreativeId)) {
+              assertWorkerTimeBudget(`uploading videos in ad set ${adset.name}`, LAUNCH_WORKER_VIDEO_UPLOAD_HEADROOM_MS);
+            }
             await Promise.all(batch.map(uploadVideoOnly));
           }
           
@@ -3120,8 +3529,16 @@ export async function registerRoutes(
               const batch = pendingVideoIds.slice(i, i + READY_CHECK_LIMIT);
               const batchResults = await Promise.all(
                 batch.map(async ({ videoId, name }) => {
+                  let wasProcessing = false;
                   try {
-                    const thumbnailUrl = await metaApi.waitForVideoReady(videoId);
+                    const thumbnailUrl = await metaApi.waitForVideoReady(videoId, 30, {
+                      deadlineAt,
+                      onProcessing: () => {
+                        wasProcessing = true;
+                      },
+                    });
+                    // Meta finishing a video during this run is progress too.
+                    if (wasProcessing) markProgress();
                     log(`Video ready: ${name}`, "success", {
                       event: "video_ready",
                       videoId,
@@ -3129,6 +3546,8 @@ export async function registerRoutes(
                     }, adset.id);
                     return { type: 'video' as const, mediaId: videoId, name, thumbnailUrl };
                   } catch (err) {
+                    // Still processing at the deadline: the next run checks it again.
+                    if (err instanceof VideoReadyDeadlineError) return null;
                     log(`Video processing failed for ${name}: ${err instanceof Error ? err.message : "Unknown"}`, "error", {
                       event: "video_ready_failed",
                       videoId,
@@ -3139,8 +3558,11 @@ export async function registerRoutes(
                   }
                 })
               );
+              if (batchResults.some((result) => result === null)) {
+                yieldForTime(`waiting for videos in ad set ${adset.name}`);
+              }
               for (const result of batchResults) {
-                allAssetInfo.push(result);
+                if (result) allAssetInfo.push(result);
               }
             }
           }
@@ -3239,6 +3661,7 @@ export async function registerRoutes(
                     totalAdsCreated++;
                     adsCreatedForThisAdSet++;
                     existingAdNames.add(adName);
+                    markProgress();
                   } catch (err) {
                     log(`Error creating ad for ${assetInfo.name} + PT${textIdx + 1}: ${err instanceof Error ? err.message : "Unknown"}`);
                   }
@@ -3248,7 +3671,7 @@ export async function registerRoutes(
                 log(`Ad set "${adSetName || adset.name}" completed — ${adsCreatedForThisAdSet} ads created`, "success");
                 const adSetObj = (await storage.getMetaObjectsByJob(jobId)).find(obj => obj.objectType === "adset" && obj.adsetId === adset.id);
                 if (adSetObj) await storage.updateMetaObject(adSetObj.id, { status: "created" });
-                await storage.updateJob(jobId, { logs });
+                saveLogs();
               }
             } else {
               // DYNAMIC MODE: 1 ad per asset with all text variations for A/B testing
@@ -3327,6 +3750,7 @@ export async function registerRoutes(
                   totalAdsCreated++;
                   adsCreatedForThisAdSet++;
                   existingAdNames.add(adName);
+                  markProgress();
                 } catch (err) {
                   log(`Error creating ad for ${assetInfo.name}: ${err instanceof Error ? err.message : "Unknown"}`);
                 }
@@ -3335,7 +3759,7 @@ export async function registerRoutes(
                 log(`Ad set "${adSetName || adset.name}" completed — ${adsCreatedForThisAdSet} ads created`, "success");
                 const adSetObj = (await storage.getMetaObjectsByJob(jobId)).find(obj => obj.objectType === "adset" && obj.adsetId === adset.id);
                 if (adSetObj) await storage.updateMetaObject(adSetObj.id, { status: "created" });
-                await storage.updateJob(jobId, { logs });
+                saveLogs();
               }
             }
           } else {
@@ -3357,6 +3781,7 @@ export async function registerRoutes(
           totalAdsCreated,
           adSetCount: adSetIds.length,
         });
+        await drainLogs();
         await storage.updateJob(jobId, {
           status: "done",
           completedAt: new Date(),
@@ -3369,17 +3794,21 @@ export async function registerRoutes(
       console.log(`[Background] Job ${jobId} completed: ${totalAdsCreated} ads created`);
       return { totalAdsCreated, adSetCount: adSetIds.length };
     } catch (error) {
-      emitJobLog(jobId, "Background launch processing failed", "error", {
-        queueId: runtime.queueId ?? null,
-        workerId: runtime.workerId ?? null,
-        attempt: runtime.attempt ?? null,
-        errorMessage: error instanceof Error ? error.message : "Launch failed",
-      });
-      console.error(`[Background] Error processing job ${jobId}:`, error);
-      await storage.updateJob(jobId, {
-        status: "error",
-        errorMessage: error instanceof Error ? error.message : "Launch failed",
-      });
+      // Lines logged just before stopping (the hand-off note, the error)
+      // must reach the feed before the worker updates the job.
+      await drainLogs?.();
+      // The job status is left to the worker, which knows whether this run
+      // hands off, retries or really fails. Writing "error" here showed the
+      // user a failed upload that then carried on in the background.
+      if (!(error instanceof WorkerYieldError)) {
+        emitJobLog(jobId, "Background launch processing failed", "error", {
+          queueId: runtime.queueId ?? null,
+          workerId: runtime.workerId ?? null,
+          attempt: runtime.attempt ?? null,
+          errorMessage: error instanceof Error ? error.message : "Launch failed",
+        });
+        console.error(`[Background] Error processing job ${jobId}:`, error);
+      }
       throw error;
     }
   }
@@ -3408,38 +3837,46 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Ad set not found" });
       }
 
-      // Update ad set status to processing/creating
+      // Re-run the job through the launch queue. The worker already resumes
+      // rather than duplicates: it reuses ad sets that carry a metaId and
+      // skips ads whose names already exist, so only the failed work is redone.
+      const previousQueue = await getLatestQueueForJob(jobId);
+      if (!previousQueue?.payload) {
+        return res.status(409).json({
+          error:
+            "This upload has no stored launch data to retry from. Start a new upload for these ad sets.",
+        });
+      }
+
       await storage.updateMetaObject(adSetObject.id, {
         status: "creating",
       });
 
-      // Update job status back to creating_creatives if it was in error
-      if (job.status === "error" || job.status === "done") {
-        await storage.updateJob(jobId, {
-          status: "creating_creatives",
-        });
-      }
+      await storage.updateJob(jobId, {
+        status: "creating_creatives",
+        cancelRequestedAt: null,
+        errorMessage: null,
+      });
 
-      // Simulate successful retry (in real implementation, this would trigger actual retry logic)
-      setTimeout(async () => {
-        await storage.updateMetaObject(adSetObject.id, {
-          status: "created",
-        });
-        
-        // Check if all ad sets are now complete
-        const updatedMetaObjects = await storage.getMetaObjectsByJob(jobId);
-        const allAdSets = updatedMetaObjects.filter(obj => obj.objectType === "adset");
-        const allComplete = allAdSets.every(obj => obj.status === "created");
-        
-        if (allComplete) {
-          await storage.updateJob(jobId, {
-            status: "done",
-            completedAt: new Date(),
-          });
-        }
-      }, 2000);
+      const retryQueueItem = await enqueueLaunchJob({
+        jobId,
+        userId,
+        payload: previousQueue.payload as unknown as LaunchQueuePayload,
+      });
 
-      res.json({ success: true, message: "Retry initiated" });
+      const dispatch = triggerLaunchWorker(req, retryQueueItem.id, jobId, "retry_adset");
+
+      emitJobLog(jobId, `Retrying ad set ${adSetObject.name || adsetId}`, "info");
+
+      res.json({
+        success: true,
+        queueId: retryQueueItem.id,
+        dispatch,
+        message:
+          dispatch === "requested"
+            ? "Retry queued and worker started"
+            : "Retry queued — the worker will pick it up shortly",
+      });
     } catch (error) {
       console.error("Error retrying ad set:", error);
       res.status(500).json({ 
@@ -3459,7 +3896,7 @@ export async function registerRoutes(
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
-      cancelledJobs.add(jobId);
+      await storage.updateJob(jobId, { cancelRequestedAt: new Date() });
       console.error(`\n========== [Launch] UPLOAD CANCELLED BY USER ==========`);
       console.error(`Job ID: ${jobId}`);
       console.error(`============================================================\n`);
@@ -3476,17 +3913,24 @@ export async function registerRoutes(
   // Dry run preview
   app.post("/api/bulk-ads/dry-run", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       // Validate request body
       const parseResult = dryRunRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
-        return res.status(400).json({ 
-          error: parseResult.error.errors[0]?.message || "Invalid request" 
+        return res.status(400).json({
+          error: parseResult.error.errors[0]?.message || "Invalid request"
         });
       }
-      
+
       const { jobId, disabledAdSetIds } = parseResult.data;
 
-      const job = await storage.getJob(jobId);
+      // This returns ad copy, creative names and campaign settings, so the
+      // caller has to own the job — not merely know its id.
+      const job = await assertJobOwnership(userId, jobId);
       if (!job) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -3580,6 +4024,11 @@ export async function registerRoutes(
   // Import from Google Drive folder URL
   app.post("/api/drive/import", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { folderUrl } = req.body;
       if (!folderUrl || typeof folderUrl !== 'string') {
         return res.status(400).json({ error: "Folder URL is required" });
@@ -3611,7 +4060,6 @@ export async function registerRoutes(
       }
 
       // Create job with new structure
-      const userId = (req.session as any)?.userId;
       const job = await storage.createJob({
         status: "pending",
         currentStep: 1,
@@ -3619,7 +4067,7 @@ export async function registerRoutes(
         campaignName: folderName,
         totalAdSets: subfolders.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
         defaultSettings: {
           dailyBudget: 20,
           ageMin: 18,
@@ -3798,6 +4246,11 @@ export async function registerRoutes(
   // Parse Drive folder URL and return folder info
   app.post("/api/drive/parse-url", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { folderUrl } = req.body;
       if (!folderUrl || typeof folderUrl !== 'string') {
         return res.status(400).json({ error: "Folder URL is required" });
@@ -3849,7 +4302,6 @@ export async function registerRoutes(
         normalizeDCTName,
       } = await import("./google-drive.js");
       const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser.js");
-      const { parseDocx } = await import("./docx-parser.js");
       
       const folderId = extractFolderIdFromUrl(driveUrl);
       if (!folderId) {
@@ -3906,8 +4358,7 @@ export async function registerRoutes(
           } else {
             // Fall back to mammoth for .docx files
             const docxBuffer = await downloadFileAsBuffer(bestGlobalDocx.id!);
-            const parseResult = await parseDocx(docxBuffer);
-            rawText = parseResult.rawText;
+            rawText = (await extractDocxText(docxBuffer)).rawText;
           }
           const parsedBlocks = parseDCTCopyFromText(rawText);
           globalCopyBlocksArray = parsedBlocks; // Store for order-based matching
@@ -3940,7 +4391,7 @@ export async function registerRoutes(
         campaignId,
         totalAdSets: dctFolders.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
       });
 
       // Process each DCT folder - use sorted order for matching
@@ -3973,8 +4424,7 @@ export async function registerRoutes(
               rawText = plainText;
             } else {
               const docxBuffer = await downloadFileAsBuffer(bestDocx.id);
-              const parseResult = await parseDocx(docxBuffer);
-              rawText = parseResult.rawText;
+              rawText = (await extractDocxText(docxBuffer)).rawText;
             }
             const parsedBlocks = parseDCTCopyFromText(rawText);
             parsedCopy = parsedBlocks.length === 1 ? parsedBlocks[0] : parsedBlocks.find(b => 
@@ -4392,6 +4842,11 @@ export async function registerRoutes(
 
   app.post("/api/drive/parse-docx", upload.single("docx"), async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       if (!req.file) {
         return res.status(400).json({ error: "DOCX file is required" });
       }
@@ -4410,10 +4865,12 @@ export async function registerRoutes(
       const headlines: string[] = [];
       const descriptions: string[] = [];
 
+      const variations = (value: string) =>
+        value.split(DOCX_VARIATION_SEPARATOR).map((text) => text.trim()).filter(Boolean);
       for (const ad of result.ads) {
-        if (ad.primary_text) primaryTexts.push(ad.primary_text);
-        if (ad.headline) headlines.push(ad.headline);
-        if (ad.description) descriptions.push(ad.description);
+        primaryTexts.push(...variations(ad.primary_text || ""));
+        headlines.push(...variations(ad.headline || ""));
+        descriptions.push(...variations(ad.description || ""));
       }
 
       res.json({
@@ -4435,6 +4892,11 @@ export async function registerRoutes(
   // Import from public Drive folder using manifest.json
   app.post("/api/drive/import-public", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { campaignId, driveUrl, manifestFileId } = req.body;
       if (!campaignId || !driveUrl || !manifestFileId) {
         return res.status(400).json({ 
@@ -4476,7 +4938,6 @@ export async function registerRoutes(
       }
 
       // Create job
-      const userId = (req.session as any)?.userId;
       const job = await storage.createJob({
         status: "pending",
         currentStep: 1,
@@ -4486,7 +4947,7 @@ export async function registerRoutes(
         campaignId,
         totalAdSets: manifest.dcts.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
       });
 
       // Parse global DOCX if present
@@ -4617,6 +5078,11 @@ export async function registerRoutes(
 
   app.get("/api/drive/debug", async (req: Request, res: Response) => {
     try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
       const { isServiceAccountConfigured, getServiceAccountEmail } = await import("./google-drive-service-account.js");
       if (!isServiceAccountConfigured()) {
         return res.json({ error: "Service account not configured", connected: false });
@@ -4746,7 +5212,6 @@ export async function registerRoutes(
         getFileType,
         getServiceAccountEmail,
       } = await import("./google-drive-service-account.js");
-      const { parseDocx } = await import("./docx-parser.js");
       const { parseDCTCopyFromText, normalizeDCTName, parseDCTFolderName } = await import("./google-drive.js");
       const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser.js");
       
@@ -4800,8 +5265,7 @@ export async function registerRoutes(
       if (globalDocx) {
         try {
           const docxBuffer = await downloadFile(globalDocx.id);
-          const parseResult = await parseDocx(docxBuffer);
-          const parsedBlocks = parseDCTCopyFromText(parseResult.rawText);
+          const parsedBlocks = parseDCTCopyFromText((await extractDocxText(docxBuffer)).rawText);
           globalCopyBlocksArray = parsedBlocks;
           for (const block of parsedBlocks) {
             const key = normalizeDCTName(block.dctName);
@@ -4823,7 +5287,7 @@ export async function registerRoutes(
         campaignId,
         totalAdSets: sortedDctFolders.length,
         completedAdSets: 0,
-        userId: userId || undefined,
+        userId,
       });
 
       // Process each DCT folder
@@ -4848,8 +5312,7 @@ export async function registerRoutes(
           docxSource = 'per-dct';
           try {
             const docxBuffer = await downloadFile(dct.docxFile.id);
-            const parseResult = await parseDocx(docxBuffer);
-            const parsedBlocks = parseDCTCopyFromText(parseResult.rawText);
+            const parsedBlocks = parseDCTCopyFromText((await extractDocxText(docxBuffer)).rawText);
             parsedCopy = parsedBlocks.length === 1 ? parsedBlocks[0] : parsedBlocks.find(b => 
               normalizeDCTName(b.dctName) === normalizeDCTName(dct.name || "")
             ) || parsedBlocks[0];
@@ -5330,7 +5793,6 @@ export async function registerRoutes(
     // Ad settings
     websiteUrl: z.string().nullable().optional(),
     defaultCta: z.string().nullable().optional(),
-    defaultUrl: z.string().nullable().optional(),
     displayLink: z.string().nullable().optional(),
     beneficiaryName: z.string().nullable().optional(),
     payerName: z.string().nullable().optional(),
@@ -5387,7 +5849,7 @@ export async function registerRoutes(
         hasPositiveNumber(merged.budgetAmount) &&
         hasGeoTargeting &&
         hasString(merged.defaultCta) &&
-        hasString(merged.defaultUrl);
+        hasString(merged.websiteUrl);
       
       const settings = await storage.upsertAdAccountSettings(userId, adAccountId, {
         adAccountName: adAccount?.name,
@@ -5566,10 +6028,13 @@ export async function registerRoutes(
             // Re-fetch Instagram accounts for each page with valid access token
             // This ensures IG data is always fresh when switching ad accounts.
             for (const page of filteredPages) {
+              // No Page token is not a dead end — the user token still resolves
+              // the Page's Instagram link for pages we can advertise for.
               const pageToken = page.access_token;
               if (!pageToken) {
-                console.log(`[Pages] Page ${page.name} (${page.id}): no access token, skipping IG fetch`);
-                continue;
+                console.log(
+                  `[Pages] Page ${page.name} (${page.id}): no page access token, falling back to user token for IG fetch`,
+                );
               }
               try {
                 const igAccounts = await fetchInstagramAccountsForPage({
@@ -5578,6 +6043,7 @@ export async function registerRoutes(
                   userAccessToken: accessToken,
                   pageName: page.name,
                   apiVersion: "v21.0",
+                  adAccountId: selectedAdAccountId,
                   cacheKeyPrefix: `ig_prefetch_${userId}_${selectedAdAccountId}_${page.id}`,
                 });
                 if (igAccounts.length > 0) {
@@ -5855,23 +6321,39 @@ export async function registerRoutes(
       // First check if Instagram accounts were fetched during OAuth or page refresh (stored in pagesJson)
       const pageWithIg = selectedPage as any;
       const cachedAccounts = extractInstagramAccountsFromPageRecord(pageWithIg);
-      if (cachedAccounts.length > 0) {
+      // A cached account with no username was resolved before we could name it.
+      // Re-resolve so the ad account gets a chance to supply the handle.
+      const cachedIsNamed = cachedAccounts.every((account) => account.username);
+      if (cachedAccounts.length > 0 && cachedIsNamed) {
         console.log(`[IG] Serving ${cachedAccounts.length} IG account(s) from DB cache for page ${pageId}`);
         return res.json({ data: cachedAccounts, source: "cache" });
       }
+      if (cachedAccounts.length > 0) {
+        console.log(
+          `[IG] Cached IG account(s) for page ${pageId} have no username, re-resolving to name them`,
+        );
+      }
 
-      // No cached IG data — need access token for live API call
-      if (!selectedPage.access_token) {
-        console.log(`No access token for page ${pageId}, cannot fetch IG accounts`);
+      // No cached IG data — go live. A missing Page token is fine; the user
+      // token resolves the link for pages we can advertise for but hold no
+      // Page role on.
+      const userAccessToken = await getUserMetaAccessToken(userId);
+      if (!selectedPage.access_token && !userAccessToken) {
+        console.log(`No page or user access token for page ${pageId}, cannot fetch IG accounts`);
         return res.json({ data: [] });
+      }
+      if (!selectedPage.access_token) {
+        console.log(`[IG] No page access token for page ${pageId}, falling back to user token`);
       }
 
       console.log(`[IG] No cached IG data for page ${pageId}, fetching from API...`);
       const accounts = await fetchInstagramAccountsForPage({
         pageId,
         pageAccessToken: selectedPage.access_token,
+        userAccessToken,
         pageName: selectedPage.name,
         apiVersion: "v21.0",
+        adAccountId: selectedAdAccountId,
         cacheKeyPrefix: `ig_endpoint_${userId}_${pageId}`,
       });
 
@@ -5946,10 +6428,14 @@ export async function registerRoutes(
         pagesJson = (assets[0].pagesJson || []) as Array<{ id: string; name: string; access_token?: string }>;
       }
       
-      // Find the page's access token
+      // Find the page's access token. Missing is fine — the user token from
+      // MetaAdsApi still resolves the Page's Instagram link.
       const selectedPage = pagesJson.find((p) => p.id === selectedPageId);
-      if (!selectedPage || !selectedPage.access_token) {
+      if (!selectedPage) {
         return res.json({ data: [] });
+      }
+      if (!selectedPage.access_token) {
+        console.log(`[IG] No page access token for page ${selectedPageId}, falling back to user token`);
       }
 
       const igAccounts = await fetchInstagramAccountsForPage({
@@ -5958,6 +6444,7 @@ export async function registerRoutes(
         userAccessToken: api.getAccessToken(),
         pageName: selectedPage.name,
         apiVersion: "v21.0",
+        adAccountId: selectedAdAccountId,
         cacheKeyPrefix: `ig_legacy_${userId}_${selectedPageId}`,
       });
       if (selectedAdAccountId && igAccounts.length > 0) {
@@ -6011,8 +6498,8 @@ export async function registerRoutes(
             .limit(1);
 
           const encryptedToken = connection?.accessToken;
-          if (encryptedToken) {
-            const accessToken = decrypt(encryptedToken);
+          const accessToken = encryptedToken ? decrypt(encryptedToken) : null;
+          if (accessToken) {
             const apiVersion = process.env.META_API_VERSION || "v21.0";
 
             const refreshedPendingAccounts = await Promise.all(
@@ -6346,6 +6833,51 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error fetching ad accounts:", error);
       res.status(500).json({ error: error.message || "Failed to fetch ad accounts" });
+    }
+  });
+
+  // The ad account's time zone, so the schedule picker can say which clock a
+  // start time is on. Launch reads it again itself; this is for display.
+  app.get("/api/meta/ad-account-timezone", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const requestedAdAccountId = typeof req.query.adAccountId === "string" ? req.query.adAccountId : "";
+      if (!requestedAdAccountId) {
+        return res.status(400).json({ error: "adAccountId is required" });
+      }
+
+      const [metaAssetRow] = await db.select()
+        .from(metaAssets)
+        .where(eq(metaAssets.userId, userId))
+        .limit(1);
+      const allowedAdAccounts = Array.isArray(metaAssetRow?.adAccountsJson)
+        ? (metaAssetRow!.adAccountsJson as Array<{ id?: unknown }>)
+        : [];
+      const adAccount = allowedAdAccounts.find((account) =>
+        normalizeAdAccountId(String(account?.id || "")) === normalizeAdAccountId(requestedAdAccountId),
+      );
+      if (!adAccount) {
+        return res.status(404).json({ error: "Ad account not found" });
+      }
+
+      const metaApi = new MetaAdsApi(userId);
+      if (!(await metaApi.initialize())) {
+        return res.status(400).json({ error: "Meta connection not found or expired" });
+      }
+      metaApi.setAdAccountId(String(adAccount.id));
+      const { timezoneName } = await metaApi.getAdAccountTimezone();
+      if (!isValidTimeZone(timezoneName)) {
+        return res.status(502).json({ error: `Unknown time zone "${timezoneName}" from Meta` });
+      }
+      res.json({ timezoneName, utcOffset: formatZoneOffset(new Date(), timezoneName) });
+    } catch (error: any) {
+      console.error("Error fetching ad account time zone:", error);
+      res.status(isMetaRateLimitError(error?.message) ? 429 : 500).json({
+        error: error?.message || "Failed to fetch ad account time zone",
+      });
     }
   });
 

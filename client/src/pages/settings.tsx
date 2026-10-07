@@ -13,6 +13,7 @@ import { Loader2 } from "lucide-react";
 import { SiFacebook } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
 import type { CampaignSettings, AdSetSettings, AdSettings, CreativeSettings } from "@shared/schema";
+import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
 
 interface GlobalSettings {
   id?: string;
@@ -195,7 +196,6 @@ export default function Settings() {
       lifetimeSpendCap?: number;
       websiteUrl?: string;
       defaultCta?: string;
-      defaultUrl?: string;
       displayLink?: string;
       isConfigured?: boolean;
     } | null;
@@ -220,23 +220,9 @@ export default function Settings() {
   const [isApplyingImport, setIsApplyingImport] = useState(false);
   
   // Fetch campaigns for import dropdown
-  const { data: campaignsData, isLoading: isLoadingCampaigns } = useQuery<{
-    data: Array<{
-      id: string;
-      name: string;
-      status: string;
-      effective_status?: string;
-      objective?: string;
-      daily_budget?: string;
-      lifetime_budget?: string;
-    }>;
-  }>({
-    queryKey: ["/api/meta/campaigns", selectedAdAccountId || "none"],
-    queryFn: async () => {
-      const res = await fetch("/api/meta/campaigns", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch campaigns");
-      return res.json();
-    },
+  const { data: campaignsData, isLoading: isLoadingCampaigns } = useQuery<MetaCampaignList>({
+    queryKey: metaCampaignsQueryKey(selectedAdAccountId),
+    queryFn: fetchMetaCampaigns,
     enabled: !!metaConnection && !!selectedAdAccountId,
   });
   
@@ -361,7 +347,6 @@ export default function Settings() {
   const [lifetimeSpendCap, setLifetimeSpendCap] = useState<string>("");
   
   // Ad settings state
-  const [defaultUrl, setDefaultUrl] = useState<string>("");
   const [defaultUtm, setDefaultUtm] = useState<string>("");
   const [websiteUrl, setWebsiteUrl] = useState<string>("");
   const [displayLink, setDisplayLink] = useState<string>("");
@@ -504,7 +489,6 @@ export default function Settings() {
       setLifetimeSpendCap(s.lifetimeSpendCap?.toString() || "");
       setWebsiteUrl(s.websiteUrl || "");
       setDefaultCta(s.defaultCta || "LEARN_MORE");
-      setDefaultUrl(s.defaultUrl || "");
       setDisplayLink(s.displayLink || "");
     } else {
       // Reset to defaults when no settings exist
@@ -523,7 +507,6 @@ export default function Settings() {
       setLifetimeSpendCap("");
       setWebsiteUrl("");
       setDefaultCta("LEARN_MORE");
-      setDefaultUrl("");
       setDisplayLink("");
     }
   }, [adAccountSettingsData]);
@@ -583,7 +566,6 @@ export default function Settings() {
     updateAdAccountSettingsMutation.mutate({
       websiteUrl: websiteUrl || null,
       defaultCta: defaultCta || null,
-      defaultUrl: defaultUrl || null,
       displayLink: displayLink || null,
     });
   };
@@ -605,7 +587,6 @@ export default function Settings() {
     lifetimeSpendCap: string;
     websiteUrl: string;
     defaultCta: string;
-    defaultUrl: string;
     displayLink: string;
   }, callbacks?: { onSuccess?: () => void; onError?: (error: Error) => void }) => {
     const geoArray = values.geoTargeting.split(",").map(s => s.trim()).filter(s => s);
@@ -634,7 +615,6 @@ export default function Settings() {
       lifetimeSpendCap: values.lifetimeSpendCap ? parseFloat(values.lifetimeSpendCap) : null,
       websiteUrl: values.websiteUrl || null,
       defaultCta: values.defaultCta || null,
-      defaultUrl: values.defaultUrl || null,
       displayLink: values.displayLink || null,
     }, callbacks);
   };
@@ -657,7 +637,6 @@ export default function Settings() {
       lifetimeSpendCap,
       websiteUrl,
       defaultCta,
-      defaultUrl,
       displayLink,
     });
   };
@@ -805,17 +784,14 @@ export default function Settings() {
     const assetFeedSpec = ad?.creative?.asset_feed_spec;
     const ctaFromAssetFeed = assetFeedSpec?.call_to_action_types?.[0];
     
-    // URL extraction: separate website URL (destination) and default URL (display/fallback)
-    // Website URL = main destination URL where clicks go
+    // Website URL = the destination where clicks go. Display Link is the
+    // visible text on the ad and never affects where people land.
     const websiteUrlFromLinkData = ad?.creative?.object_story_spec?.link_data?.link;
     const websiteUrlFromVideoData = ad?.creative?.object_story_spec?.video_data?.call_to_action?.value?.link;
     const websiteUrlFromAssetFeed = assetFeedSpec?.link_urls?.[0]?.website_url;
     const extractedWebsiteUrl = websiteUrlFromLinkData || websiteUrlFromVideoData || websiteUrlFromAssetFeed || websiteUrl || "";
     
-    // Default URL = display URL for link_data ads only (display_link is validated URL field)
-    // For video ads and DCT ads, defaultUrl equals websiteUrl since no separate display URL exists
     const displayUrlFromLinkData = ad?.creative?.object_story_spec?.link_data?.display_link;
-    const extractedDefaultUrl = displayUrlFromLinkData || defaultUrl || extractedWebsiteUrl;
     
     // Display Link - the visual URL shown on the ad (e.g., "www.example.com")
     const extractedDisplayLink = displayUrlFromLinkData || displayLink || "";
@@ -837,7 +813,6 @@ export default function Settings() {
     setLifetimeSpendCap(extractedLifetimeSpendCap);
     setDefaultCta(extractedCta);
     setWebsiteUrl(extractedWebsiteUrl);
-    setDefaultUrl(extractedDefaultUrl);
     setDisplayLink(extractedDisplayLink);
     
     // ===== STEP 3: Validate required fields before auto-saving =====
@@ -865,7 +840,6 @@ export default function Settings() {
       lifetimeSpendCap: extractedLifetimeSpendCap,
       websiteUrl: extractedWebsiteUrl,
       defaultCta: extractedCta,
-      defaultUrl: extractedDefaultUrl,
       displayLink: extractedDisplayLink,
     }, {
       onSuccess: () => {
@@ -940,7 +914,7 @@ export default function Settings() {
         <div className="p-5">
           <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-[#1877F2]/10 flex items-center justify-center text-[#1877F2]">
+              <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center text-meta">
                 <span className="material-symbols-outlined text-lg">account_circle</span>
               </div>
               <div>
@@ -962,16 +936,16 @@ export default function Settings() {
                     src={user.picture}
                   />
                 ) : (
-                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-[#1877F2] to-blue-600 text-white flex items-center justify-center text-lg font-bold shadow-lg ring-2 ring-white/30 dark:ring-white/10">
+                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-primary to-[hsl(224_84%_66%)] text-white flex items-center justify-center text-lg font-bold shadow-lg ring-2 ring-white/30 dark:ring-white/10">
                     {userInitials}
                   </div>
                 )}
-                <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 border-2 border-white dark:border-slate-800 rounded-full" />
+                <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 border-2 border-white rounded-full" />
               </div>
               <div>
                 <h3 className="text-sm font-bold" data-testid="text-user-name">{user?.name || "User"}</h3>
                 <p className="text-xs font-medium text-muted-foreground opacity-80" data-testid="text-user-email">{user?.email || "Facebook Account"}</p>
-                <p className="text-[9px] font-mono text-gray-400 mt-0.5 uppercase tracking-wider">ID: {user?.id || "—"}</p>
+                <p className="text-[9px] font-mono text-muted-foreground mt-0.5 uppercase tracking-wider">ID: {user?.id || "—"}</p>
               </div>
             </div>
             <button 
@@ -986,12 +960,12 @@ export default function Settings() {
 
           {/* Integrations */}
           <div className="pt-5">
-            <h4 className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">Integrations</h4>
+            <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">Integrations</h4>
             <div className="grid md:grid-cols-2 gap-3">
               {/* Meta Account */}
-              <div className="flex items-center justify-between p-3.5 rounded-xl border border-white/40 dark:border-white/10 bg-white/40 dark:bg-slate-800/20 hover:border-[#1877F2]/30 transition-all">
+              <div className="flex items-center justify-between p-3.5 rounded-xl border border-white/40 dark:border-white/10 bg-card/40 hover:border-primary/30 transition-all">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                  <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary dark:text-primary">
                     <SiFacebook className="w-5 h-5" />
                   </div>
                   <div>
@@ -1004,7 +978,7 @@ export default function Settings() {
                   </div>
                 </div>
                 <button
-                  className="text-[10px] font-bold text-[#1877F2] hover:text-white hover:bg-[#1877F2] px-4 py-2 border border-[#1877F2]/30 rounded-lg transition-all uppercase"
+                  className="text-[10px] font-bold text-meta hover:text-white hover:bg-primary px-4 py-2 border border-primary/30 rounded-lg transition-all uppercase"
                   onClick={() => window.location.href = "/auth/meta/start"}
                   data-testid="button-reconnect-meta"
                 >
@@ -1024,21 +998,21 @@ export default function Settings() {
         <div
           className={`md:col-span-1 glass-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden group transition-all ${
             isProPlan
-              ? "ring-1 ring-[#1877F2]/25"
+              ? "ring-1 ring-primary/25"
               : ""
           }`}
           style={isProPlan ? {
-            border: "1.5px solid rgba(24, 119, 242, 0.78)",
-            boxShadow: "0 0 0 1px rgba(24, 119, 242, 0.35), 0 16px 38px rgba(24, 119, 242, 0.2)",
+            border: "1.5px solid hsl(var(--primary) / 0.78)",
+            boxShadow: "0 0 0 1px hsl(var(--primary) / 0.35), 0 16px 38px hsl(var(--primary) / 0.2)",
           } : undefined}
         >
-          <div className="absolute -top-12 -right-12 w-40 h-40 bg-[#1877F2]/20 rounded-full blur-3xl group-hover:bg-[#1877F2]/30 transition-colors pointer-events-none" />
+          <div className="absolute -top-12 -right-12 w-40 h-40 bg-primary/20 rounded-full blur-3xl group-hover:bg-primary/30 transition-colors pointer-events-none" />
           <div>
             <h3
               className={`text-[10px] font-bold uppercase tracking-[0.18em] mb-2 ${
                 isProPlan
-                  ? "text-[#1877F2]/85 drop-shadow-[0_1px_0_rgba(255,255,255,0.35)]"
-                  : "text-gray-400 dark:text-gray-500"
+                  ? "text-meta/85 drop-shadow-[0_1px_0_rgba(255,255,255,0.35)]"
+                  : "text-muted-foreground"
               }`}
             >
               Current Plan
@@ -1047,7 +1021,7 @@ export default function Settings() {
               <span
                 className={`${
                   isProPlan
-                    ? "text-[48px] leading-none font-black tracking-[-0.03em] bg-gradient-to-b from-[#0f1f3d] via-[#1d3f7a] to-[#1877F2] bg-clip-text text-transparent drop-shadow-[0_3px_10px_rgba(24,119,242,0.18)]"
+                    ? "text-[48px] leading-none font-black tracking-[-0.03em] bg-gradient-to-b from-[hsl(var(--foreground))] via-[hsl(var(--primary))] to-primary bg-clip-text text-transparent drop-shadow-[0_3px_10px_hsl(var(--primary)/0.18)]"
                     : "text-2xl font-extrabold"
                 }`}
               >
@@ -1056,7 +1030,7 @@ export default function Settings() {
               {isProPlan && billingStatus?.billingInterval && (
                 <Badge
                   variant="secondary"
-                  className="text-[10px] uppercase tracking-[0.14em] font-extrabold bg-white/70 text-[#15386e] border border-[#1877F2]/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]"
+                  className="text-[10px] uppercase tracking-[0.14em] font-extrabold bg-white/70 text-[hsl(var(--primary))] border border-primary/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]"
                 >
                   {billingStatus.billingInterval}
                 </Badge>
@@ -1065,7 +1039,7 @@ export default function Settings() {
             <p
               className={`text-[11px] ${
                 isProPlan
-                  ? "font-semibold text-slate-700 dark:text-slate-200 tracking-[0.01em]"
+                  ? "font-semibold text-foreground tracking-[0.01em]"
                   : "font-medium text-muted-foreground"
               }`}
             >
@@ -1077,7 +1051,7 @@ export default function Settings() {
               </p>
             )}
             {isProPlan && !billingStatus?.cancelAtPeriodEnd && currentPeriodEndLabel && (
-              <p className="text-[10px] font-bold text-[#2457a1] dark:text-blue-300 mt-2 tracking-[0.01em]">
+              <p className="text-[10px] font-bold text-[hsl(var(--primary))] dark:text-primary/70 mt-2 tracking-[0.01em]">
                 Renews on {currentPeriodEndLabel}
               </p>
             )}
@@ -1086,14 +1060,14 @@ export default function Settings() {
             {!isProPlan && (
               <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-white/40 dark:bg-white/5 border border-white/20 dark:border-white/10">
                 <button
-                  className={`text-[10px] font-bold py-1.5 rounded-md transition-all ${billingPeriod === "monthly" ? "bg-[#1877F2] text-white" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`text-[10px] font-bold py-1.5 rounded-md transition-all ${billingPeriod === "monthly" ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}
                   onClick={() => setBillingPeriod("monthly")}
                   type="button"
                 >
                   Monthly
                 </button>
                 <button
-                  className={`text-[10px] font-bold py-1.5 rounded-md transition-all ${billingPeriod === "yearly" ? "bg-[#1877F2] text-white" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`text-[10px] font-bold py-1.5 rounded-md transition-all ${billingPeriod === "yearly" ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}
                   onClick={() => setBillingPeriod("yearly")}
                   type="button"
                 >
@@ -1117,7 +1091,7 @@ export default function Settings() {
               </button>
             ) : (
               <button
-                className="w-full py-2.5 px-3 bg-[#1877F2] hover:bg-[#1565c0] text-white text-xs font-bold rounded-xl shadow-lg shadow-[#1877F2]/25 transition-all flex items-center justify-center gap-2 group/btn disabled:opacity-60"
+                className="w-full py-2.5 px-3 bg-primary hover:bg-[hsl(var(--primary))] text-white text-xs font-bold rounded-xl shadow-lg shadow-primary/25 transition-all flex items-center justify-center gap-2 group/btn disabled:opacity-60"
                 data-testid="button-upgrade"
                 onClick={() => checkoutMutation.mutate(billingPeriod)}
                 disabled={checkoutMutation.isPending}
@@ -1127,7 +1101,7 @@ export default function Settings() {
               </button>
             )}
             {(!isProPlan || isLegacyPro) && (
-              <p className="text-center text-[10px] font-bold text-gray-400 dark:text-gray-500">
+              <p className="text-center text-[10px] font-bold text-muted-foreground">
                 {billingPeriod === "monthly" ? "€29 / month" : "€290 / year (2 months free)"}
               </p>
             )}
@@ -1138,7 +1112,7 @@ export default function Settings() {
         <div className="md:col-span-2 glass-card rounded-2xl p-5">
           <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-[#1877F2] text-lg">analytics</span>
+              <span className="material-symbols-outlined text-meta text-lg">analytics</span>
               <h3 className="text-base font-bold">Usage & Limits</h3>
             </div>
             <span className="text-[10px] font-bold bg-white/40 dark:bg-white/5 px-2.5 py-1 rounded-full text-muted-foreground border border-white/20 dark:border-white/5">
@@ -1172,8 +1146,8 @@ export default function Settings() {
                 </div>
               ) : (
                 <>
-                  <div className="w-full bg-gray-200/50 dark:bg-gray-800/50 rounded-full h-2.5 overflow-hidden p-0.5 border border-white/10">
-                    <div className="bg-gradient-to-r from-[#1877F2] to-blue-400 h-1.5 rounded-full shadow-[0_0_8px_rgba(24,119,242,0.4)] transition-all duration-500" style={{ width: `${uploadsPercent}%` }} />
+                  <div className="w-full bg-muted/50 rounded-full h-2.5 overflow-hidden p-0.5 border border-white/10">
+                    <div className="bg-gradient-to-r from-primary to-[hsl(224_84%_66%)] h-1.5 rounded-full shadow-[0_0_8px_hsl(var(--primary)/0.4)] transition-all duration-500" style={{ width: `${uploadsPercent}%` }} />
                   </div>
                   <p className="text-[10px] font-semibold text-muted-foreground mt-2">
                     {uploadsRemaining ?? 0} uploads remaining this month
@@ -1191,7 +1165,7 @@ export default function Settings() {
       <section className="glass-card rounded-2xl overflow-hidden" data-testid="section-billing">
         <div className="p-5">
           <div className="flex items-center gap-2.5 mb-4">
-            <div className="w-8 h-8 rounded-xl bg-[#1877F2]/10 flex items-center justify-center text-[#1877F2]">
+            <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center text-meta">
               <span className="material-symbols-outlined text-lg">receipt_long</span>
             </div>
             <div>
@@ -1206,8 +1180,8 @@ export default function Settings() {
             </div>
           ) : billingPayments.length === 0 ? (
             <div className="text-center py-8" data-testid="billing-empty">
-              <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800/60 flex items-center justify-center mx-auto mb-3">
-                <span className="material-symbols-outlined text-lg text-slate-400">payments</span>
+              <div className="w-10 h-10 rounded-xl bg-muted/60 flex items-center justify-center mx-auto mb-3">
+                <span className="material-symbols-outlined text-lg text-muted-foreground">payments</span>
               </div>
               <p className="text-xs font-bold text-muted-foreground" data-testid="text-no-payments">No payments yet</p>
               <p className="text-[10px] font-medium text-muted-foreground opacity-60 mt-1">Your payment history will appear here</p>
@@ -1237,7 +1211,7 @@ export default function Settings() {
                       <tr key={payment.id} className="border-b border-white/20 dark:border-white/5 last:border-0" data-testid={`row-payment-${payment.id}`}>
                         <td className="px-3 py-2.5 text-xs font-bold" data-testid={`text-period-${payment.id}`}>{monthLabel}</td>
                         <td className="px-3 py-2.5">
-                          <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-[#1877F2]/10 text-[#1877F2]" data-testid={`text-plan-${payment.id}`}>
+                          <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-primary/10 text-meta" data-testid={`text-plan-${payment.id}`}>
                             {payment.planType}
                           </span>
                         </td>
@@ -1256,7 +1230,7 @@ export default function Settings() {
                               href={payment.invoiceUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[10px] font-bold text-[#1877F2] hover:underline uppercase tracking-wide inline-flex items-center gap-1"
+                              className="text-[10px] font-bold text-meta hover:underline uppercase tracking-wide inline-flex items-center gap-1"
                               data-testid={`link-invoice-${payment.id}`}
                             >
                               <span className="material-symbols-outlined text-[14px]">download</span>
@@ -1328,7 +1302,7 @@ export default function Settings() {
       </section>
 
       <footer className="mt-8 mb-6 text-center">
-        <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">&copy; 2025 Auto-ads Platform</p>
+        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">&copy; 2025 Auto-ads Platform</p>
       </footer>
     </div>
   );

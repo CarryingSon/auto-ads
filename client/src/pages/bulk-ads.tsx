@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, getCsrfHeaders } from "@/lib/queryClient";
 import { filterDisplayableInstagramAccounts } from "@/lib/instagram-accounts";
+import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
 import {
   FolderOpen,
   FileVideo,
@@ -63,7 +64,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Pencil } from "lucide-react";
 import type { Connection, CampaignSettings, AdSetSettings, AdSettings } from "@shared/schema";
 
 const META_COUNTRIES = [
@@ -224,15 +225,15 @@ function WizardStep({ step, currentStep, title, onClick, disabled }: WizardStepP
           isCompleted
             ? "bg-green-500 text-white shadow-lg shadow-green-200/50 hover:scale-110"
             : isCurrent
-            ? "bg-[#1877F2] text-white shadow-[0_0_15px_rgba(24,119,242,0.5)] hover:scale-110"
-            : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
+            ? "bg-primary text-white shadow-[0_0_15px_hsl(var(--primary)/0.5)] hover:scale-110"
+            : "bg-muted text-muted-foreground border border-border"
         }`}
       >
         {isCompleted ? <span className="material-symbols-outlined text-base">check</span> : step}
       </div>
       <span
         className={`text-[10px] font-semibold uppercase tracking-widest ${
-          isCompleted ? "text-green-600" : isCurrent ? "text-[#1877F2]" : "text-slate-400"
+          isCompleted ? "text-green-600" : isCurrent ? "text-meta" : "text-muted-foreground"
         }`}
       >
         {title}
@@ -396,6 +397,26 @@ function getAdSetDailyMinSpendTarget(adset: AdSetInfo): number | undefined {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
 }
 
+// "Now" on the ad account's clock, as the schedule picker's strings:
+// { date: "2026-10-07", time: "14:05" }.
+function getNowInTimeZone(timeZone: string): { date: string; time: string } | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).formatToParts(new Date());
+    const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+    return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}` };
+  } catch {
+    return null;
+  }
+}
+
 interface ImportResult {
   jobId: string;
   folderName: string;
@@ -522,7 +543,6 @@ interface DefaultSettings {
   pixelId?: string;
   defaultCta?: string;
   websiteUrl?: string;
-  defaultUrl?: string;
   displayLink?: string;
   beneficiaryName?: string;
   payerName?: string;
@@ -532,11 +552,393 @@ interface CreativeDraft {
   pixelId: string;
   defaultCta: string;
   websiteUrl: string;
-  defaultUrl: string;
   displayLink: string;
   beneficiaryName: string;
   payerName: string;
 }
+
+function resizeTextareaToContent(textarea: HTMLTextAreaElement | null) {
+  if (!textarea) return;
+  textarea.style.height = "0px";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
+function cleanCopyList(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
+function cleanCopy(copy: ParsedCopy): ParsedCopy {
+  return {
+    primaryTexts: cleanCopyList(copy.primaryTexts),
+    headlines: cleanCopyList(copy.headlines),
+    descriptions: cleanCopyList(copy.descriptions),
+  };
+}
+
+function copyDraftFrom(copy: ParsedCopy | null | undefined): ParsedCopy {
+  const orBlank = (values: string[] | undefined) => (values && values.length > 0 ? [...values] : [""]);
+  return {
+    primaryTexts: orBlank(copy?.primaryTexts),
+    headlines: orBlank(copy?.headlines),
+    descriptions: orBlank(copy?.descriptions),
+  };
+}
+
+type CopyListField = keyof ParsedCopy;
+
+const COPY_FIELD_LABELS: Record<CopyListField, { title: string; item: string; placeholder: string }> = {
+  primaryTexts: { title: "Primary texts", item: "Primary text", placeholder: "Enter primary text..." },
+  headlines: { title: "Headlines", item: "Headline", placeholder: "Enter headline..." },
+  descriptions: { title: "Descriptions", item: "Description", placeholder: "Enter description..." },
+};
+
+// Edits the copy of every ad set in one scrollable dialog, opened at the ad
+// set whose Edit was clicked. Keeps its own state so typing does not
+// re-render the whole Launch page.
+const AdCopyEditDialog = memo(function AdCopyEditDialog({
+  open,
+  onOpenChange,
+  adSets,
+  focusAdSetId,
+  isSaving,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  adSets: AdSetInfo[];
+  focusAdSetId: string | null;
+  isSaving: boolean;
+  onSave: (changes: Array<{ adsetId: string; copy: ParsedCopy }>) => void;
+}) {
+  const { toast } = useToast();
+  const [drafts, setDrafts] = useState<Record<string, ParsedCopy>>({});
+  const [pasteTexts, setPasteTexts] = useState<Record<string, string>>({});
+  const [pasteOpen, setPasteOpen] = useState<Record<string, boolean>>({});
+  const [activeAdSetId, setActiveAdSetId] = useState<string | null>(null);
+  const [draftsReady, setDraftsReady] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  // Fresh drafts from the saved copy every time the dialog opens.
+  useEffect(() => {
+    if (!open) {
+      setDraftsReady(false);
+      return;
+    }
+    const next: Record<string, ParsedCopy> = {};
+    for (const adset of adSets) next[adset.id] = copyDraftFrom(adset.parsedCopy);
+    setDrafts(next);
+    setPasteTexts({});
+    setPasteOpen({});
+    setActiveAdSetId(focusAdSetId ?? adSets[0]?.id ?? null);
+    setDraftsReady(true);
+    // Only on open: later ad set updates must not wipe what is being typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const scrollToAdSet = useCallback((adsetId: string, behavior: ScrollBehavior = "smooth") => {
+    const container = scrollRef.current;
+    const section = sectionRefs.current[adsetId];
+    if (!container || !section) return;
+    // The scroll area is `relative`, so offsetTop is measured from it.
+    container.scrollTo({ top: section.offsetTop, behavior });
+    setActiveAdSetId(adsetId);
+  }, []);
+
+  // Land on the ad set that was clicked once its section is on screen.
+  useEffect(() => {
+    if (!draftsReady || !focusAdSetId) return;
+    const frame = requestAnimationFrame(() => scrollToAdSet(focusAdSetId, "auto"));
+    return () => cancelAnimationFrame(frame);
+  }, [draftsReady, focusAdSetId, scrollToAdSet]);
+
+  const handleScroll = () => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const top = container.scrollTop + 24;
+    let current: string | null = adSets[0]?.id ?? null;
+    for (const adset of adSets) {
+      const section = sectionRefs.current[adset.id];
+      if (section && section.offsetTop <= top) current = adset.id;
+    }
+    if (current !== activeAdSetId) setActiveAdSetId(current);
+  };
+
+  const changes = useMemo(() => {
+    const list: Array<{ adsetId: string; copy: ParsedCopy }> = [];
+    for (const adset of adSets) {
+      const draft = drafts[adset.id];
+      if (!draft) continue;
+      const cleaned = cleanCopy(draft);
+      const original = cleanCopy(copyDraftFrom(adset.parsedCopy));
+      if (JSON.stringify(cleaned) !== JSON.stringify(original)) {
+        list.push({ adsetId: adset.id, copy: cleaned });
+      }
+    }
+    return list;
+  }, [adSets, drafts]);
+  const changedIds = useMemo(() => new Set(changes.map((change) => change.adsetId)), [changes]);
+
+  const updateField = (adsetId: string, field: CopyListField, update: (values: string[]) => string[]) => {
+    setDrafts((prev) => {
+      const current = prev[adsetId];
+      if (!current) return prev;
+      return { ...prev, [adsetId]: { ...current, [field]: update(current[field]) } };
+    });
+  };
+
+  const applyPaste = (adsetId: string) => {
+    const parsed = parsePastedCopyText(pasteTexts[adsetId] || "");
+    if (parsed.primaryTexts.length === 0 && parsed.headlines.length === 0 && parsed.descriptions.length === 0) {
+      toast({
+        title: "Could not parse text",
+        description: "Use labels like Primary text_1:, Headline_1:, Description_1: (or separate entries with ---).",
+        variant: "destructive",
+      });
+      return;
+    }
+    setDrafts((prev) => ({ ...prev, [adsetId]: copyDraftFrom(parsed) }));
+    setPasteTexts((prev) => ({ ...prev, [adsetId]: "" }));
+    setPasteOpen((prev) => ({ ...prev, [adsetId]: false }));
+    const variationCount = Math.max(parsed.primaryTexts.length, parsed.headlines.length, parsed.descriptions.length);
+    toast({ title: `Parsed ${variationCount} variations from text` });
+  };
+
+  const renderField = (adsetId: string, field: CopyListField, values: string[]) => {
+    const labels = COPY_FIELD_LABELS[field];
+    const isPrimary = field === "primaryTexts";
+    return (
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {labels.title} ({values.length})
+          </Label>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs rounded-lg"
+            onClick={() => updateField(adsetId, field, (list) => [...list, ""])}
+            data-testid={`button-add-${field}-${adsetId}`}
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            Add variation
+          </Button>
+        </div>
+        <div className={isPrimary ? "space-y-3" : "space-y-2"}>
+          {values.map((text, idx) => {
+            const removeButton = values.length > 1 && (
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                aria-label={`Remove ${labels.item.toLowerCase()} ${idx + 1}`}
+                onClick={() => updateField(adsetId, field, (list) => list.filter((_, i) => i !== idx))}
+                data-testid={`button-remove-${field}-${adsetId}-${idx}`}
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            );
+            if (isPrimary) {
+              return (
+                <div key={idx} className="rounded-xl border border-border bg-muted/50 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                      {labels.item} {idx + 1}
+                    </span>
+                    {removeButton}
+                  </div>
+                  <textarea
+                    className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-none overflow-hidden"
+                    value={text}
+                    ref={resizeTextareaToContent}
+                    onChange={(e) => {
+                      resizeTextareaToContent(e.currentTarget);
+                      const value = e.target.value;
+                      updateField(adsetId, field, (list) => list.map((t, i) => (i === idx ? value : t)));
+                    }}
+                    placeholder={labels.placeholder}
+                    data-testid={`textarea-${field}-${adsetId}-${idx}`}
+                  />
+                </div>
+              );
+            }
+            return (
+              <div key={idx} className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-muted-foreground w-5 text-right shrink-0">{idx + 1}.</span>
+                <input
+                  type="text"
+                  className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-border bg-card"
+                  value={text}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    updateField(adsetId, field, (list) => list.map((t, i) => (i === idx ? value : t)));
+                  }}
+                  placeholder={labels.placeholder}
+                  data-testid={`input-${field}-${adsetId}-${idx}`}
+                />
+                {removeButton}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="flex flex-col w-[calc(100vw-32px)] max-w-[1100px] sm:max-w-[1100px] h-[92vh] p-0 gap-0 rounded-2xl"
+        data-testid="dialog-edit-ad-copy"
+      >
+        <div className="px-6 pt-6 pb-4 border-b space-y-3">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Edit className="h-5 w-5" />
+              Edit Ad Copy
+            </DialogTitle>
+            <DialogDescription>
+              All {adSets.length} ad set{adSets.length !== 1 ? "s" : ""} — scroll or jump to any of them. Changes are saved together.
+            </DialogDescription>
+          </DialogHeader>
+          {adSets.length > 1 && (
+            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Jump to ad set">
+              {adSets.map((adset) => {
+                const isActive = adset.id === activeAdSetId;
+                return (
+                  <button
+                    key={adset.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={() => scrollToAdSet(adset.id)}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      isActive
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-card text-foreground hover:bg-muted"
+                    }`}
+                    data-testid={`button-jump-adset-${adset.id}`}
+                  >
+                    {adset.name}
+                    {changedIds.has(adset.id) && (
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-primary-foreground" : "bg-primary"}`}
+                        aria-label="edited"
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div ref={scrollRef} onScroll={handleScroll} className="relative flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+          {adSets.map((adset) => {
+            const draft = drafts[adset.id];
+            if (!draft) return null;
+            const isPasteOpen = !!pasteOpen[adset.id];
+            return (
+              <section
+                key={adset.id}
+                ref={(el) => {
+                  sectionRefs.current[adset.id] = el;
+                }}
+                className="pt-5"
+                aria-label={`Ad copy for ${adset.name}`}
+                data-testid={`section-edit-copy-${adset.id}`}
+              >
+                <div className="sticky top-0 z-10 -mx-6 px-6 py-2.5 bg-background/95 backdrop-blur border-b flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{adset.name}</p>
+                    {adset.folderName && adset.folderName !== adset.name && (
+                      <p className="text-xs text-muted-foreground truncate">{adset.folderName}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {changedIds.has(adset.id) && (
+                      <Badge variant="secondary" className="text-[11px]">Edited</Badge>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={() => setPasteOpen((prev) => ({ ...prev, [adset.id]: !prev[adset.id] }))}
+                      data-testid={`button-toggle-paste-${adset.id}`}
+                    >
+                      <Upload className="h-3.5 w-3.5 mr-1" />
+                      Paste text
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-6 pt-4">
+                  {isPasteOpen && (
+                    <div className="rounded-xl border border-dashed border-input bg-muted/50 p-4 space-y-2">
+                      <textarea
+                        className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-y font-mono"
+                        placeholder={"Primary text: Your ad text here\nHeadline: Your headline\nDescription: Your description\n---\nPrimary text: Second variation\nHeadline: Second headline\nDescription: Second description"}
+                        value={pasteTexts[adset.id] || ""}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPasteTexts((prev) => ({ ...prev, [adset.id]: value }));
+                        }}
+                        data-testid={`textarea-paste-copy-${adset.id}`}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs rounded-lg"
+                        disabled={!(pasteTexts[adset.id] || "").trim()}
+                        onClick={() => applyPaste(adset.id)}
+                        data-testid={`button-parse-pasted-text-${adset.id}`}
+                      >
+                        Parse & fill fields
+                      </Button>
+                    </div>
+                  )}
+                  {renderField(adset.id, "primaryTexts", draft.primaryTexts)}
+                  {renderField(adset.id, "headlines", draft.headlines)}
+                  {renderField(adset.id, "descriptions", draft.descriptions)}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+
+        <DialogFooter className="flex items-center gap-2 sm:gap-2 px-6 py-4 border-t">
+          <p className="text-xs text-muted-foreground mr-auto" data-testid="text-copy-changes">
+            {changes.length === 0
+              ? "No changes yet"
+              : `${changes.length} ad set${changes.length !== 1 ? "s" : ""} changed`}
+          </p>
+          <Button
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => onOpenChange(false)}
+            data-testid="button-cancel-copy-edit"
+          >
+            Cancel
+          </Button>
+          <Button
+            className="rounded-xl"
+            onClick={() => onSave(changes)}
+            disabled={isSaving || changes.length === 0}
+            data-testid="button-save-copy-edit"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Saving...
+              </>
+            ) : (
+              "Save Copy"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+});
 
 const CreativeEditDialog = memo(function CreativeEditDialog({
   open,
@@ -612,29 +1014,17 @@ const CreativeEditDialog = memo(function CreativeEditDialog({
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-website-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Website URL</Label>
-              <Input
-                id="edit-website-url"
-                value={draft.websiteUrl}
-                onChange={(e) => setDraft(prev => ({ ...prev, websiteUrl: e.target.value }))}
-                placeholder="https://example.com"
-                className="rounded-xl"
-                data-testid="input-edit-website-url"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-default-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Default URL</Label>
-              <Input
-                id="edit-default-url"
-                value={draft.defaultUrl}
-                onChange={(e) => setDraft(prev => ({ ...prev, defaultUrl: e.target.value }))}
-                placeholder="https://example.com/landing"
-                className="rounded-xl"
-                data-testid="input-edit-default-url"
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-website-url" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Website URL</Label>
+            <Input
+              id="edit-website-url"
+              value={draft.websiteUrl}
+              onChange={(e) => setDraft(prev => ({ ...prev, websiteUrl: e.target.value }))}
+              placeholder="https://yourshop.com/product"
+              className="rounded-xl"
+              data-testid="input-edit-website-url"
+            />
+            <p className="text-xs text-muted-foreground">Where the ad sends people</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-display-link" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Display Link</Label>
@@ -686,6 +1076,166 @@ const CreativeEditDialog = memo(function CreativeEditDialog({
             data-testid="button-save-creative"
           >
             Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+});
+
+interface TargetingDraft {
+  geoTargeting: string[];
+  ageMin: number;
+  ageMax: number;
+  gender: "ALL" | "MALE" | "FEMALE";
+}
+
+// Holds its own draft so a keystroke re-renders this dialog instead of the
+// whole launch page. Editing in place made every character re-render the
+// entire ad set list, which is what made typing here feel stuck.
+const TargetingEditDialog = memo(function TargetingEditDialog({
+  open,
+  onOpenChange,
+  initialDraft,
+  isSaving,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialDraft: TargetingDraft;
+  isSaving: boolean;
+  onSave: (draft: TargetingDraft) => void;
+}) {
+  const [draft, setDraft] = useState<TargetingDraft>(initialDraft);
+
+  useEffect(() => {
+    if (open) {
+      setDraft(initialDraft);
+    }
+  }, [open, initialDraft]);
+
+  const keepCountryPickerOpen = (event: { target: EventTarget | null; preventDefault: () => void }) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[data-country-picker-popover="true"]')) {
+      event.preventDefault();
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="sm:max-w-2xl rounded-2xl"
+        onPointerDownOutside={keepCountryPickerOpen}
+        onInteractOutside={keepCountryPickerOpen}
+      >
+        <DialogHeader>
+          <DialogTitle className="text-lg font-bold">Edit Targeting</DialogTitle>
+          <DialogDescription>
+            Change audience targeting settings for your ads
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 py-2">
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Countries</Label>
+            <div className="flex flex-wrap gap-1.5 min-h-[40px] p-2.5 border rounded-xl bg-muted/30" data-testid="input-edit-geo">
+              {draft.geoTargeting.map((code) => {
+                const country = META_COUNTRIES.find(c => c.code === code);
+                return (
+                  <Badge key={code} variant="secondary" className="gap-1 text-xs rounded-lg px-2 py-1">
+                    {country ? country.name : code}
+                    <button
+                      type="button"
+                      className="ml-0.5 hover:text-destructive"
+                      onClick={() => setDraft(prev => ({
+                        ...prev,
+                        geoTargeting: prev.geoTargeting.filter(c => c !== code)
+                      }))}
+                      data-testid={`remove-country-${code}`}
+                    >
+                      <XCircle className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                );
+              })}
+            </div>
+            <CountryPicker
+              selectedCountries={draft.geoTargeting}
+              onToggle={(code) => {
+                setDraft(prev => {
+                  const exists = prev.geoTargeting.includes(code);
+                  return {
+                    ...prev,
+                    geoTargeting: exists
+                      ? prev.geoTargeting.filter(c => c !== code)
+                      : [...prev.geoTargeting, code]
+                  };
+                });
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-age-min" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min Age</Label>
+              <Input
+                id="edit-age-min"
+                type="number"
+                min={13}
+                max={65}
+                value={draft.ageMin}
+                onChange={(e) => setDraft(prev => ({ ...prev, ageMin: parseInt(e.target.value) || 18 }))}
+                className="rounded-xl"
+                data-testid="input-edit-age-min"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-age-max" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Max Age</Label>
+              <Input
+                id="edit-age-max"
+                type="number"
+                min={13}
+                max={65}
+                value={draft.ageMax}
+                onChange={(e) => setDraft(prev => ({ ...prev, ageMax: parseInt(e.target.value) || 65 }))}
+                className="rounded-xl"
+                data-testid="input-edit-age-max"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-gender" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gender</Label>
+            <Select
+              value={draft.gender}
+              onValueChange={(val) => setDraft(prev => ({ ...prev, gender: val as "ALL" | "MALE" | "FEMALE" }))}
+            >
+              <SelectTrigger id="edit-gender" className="rounded-xl" data-testid="select-edit-gender">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All</SelectItem>
+                <SelectItem value="MALE">Male</SelectItem>
+                <SelectItem value="FEMALE">Female</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)} data-testid="button-cancel-targeting">
+            Cancel
+          </Button>
+          <Button
+            className="rounded-xl"
+            onClick={() => onSave(draft)}
+            disabled={isSaving}
+            data-testid="button-save-targeting"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Saving...
+              </>
+            ) : (
+              "Save"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -852,6 +1402,7 @@ export default function BulkAds() {
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null);
   const [initialEstimatedTime, setInitialEstimatedTime] = useState<number | null>(null);
   const [launchStartTime, setLaunchStartTime] = useState<number | null>(null);
+  const [adSetNameDrafts, setAdSetNameDrafts] = useState<Record<string, string>>({});
   const [adSetOverrides, setAdSetOverrides] = useState<Record<string, { 
     name?: string; 
     dailyBudget?: number;
@@ -914,13 +1465,7 @@ export default function BulkAds() {
   const [showCopyEditModal, setShowCopyEditModal] = useState(false);
   const [editingAdSetId, setEditingAdSetId] = useState<string | null>(null);
   const [campaignPopoverOpen, setCampaignPopoverOpen] = useState(false);
-  const [editingAdSetCopy, setEditingAdSetCopy] = useState<{
-    primaryTexts: string[];
-    headlines: string[];
-    descriptions: string[];
-  }>({ primaryTexts: [], headlines: [], descriptions: [] });
   const [isApplyingGlobalCopy, setIsApplyingGlobalCopy] = useState(false);
-  const [pasteText, setPasteText] = useState("");
   const [showTargetingEditDialog, setShowTargetingEditDialog] = useState(false);
   const [showCreativeEditDialog, setShowCreativeEditDialog] = useState(false);
   const [editingTargeting, setEditingTargeting] = useState({
@@ -935,7 +1480,6 @@ export default function BulkAds() {
     pixelId: "",
     defaultCta: "LEARN_MORE",
     websiteUrl: "",
-    defaultUrl: "",
     displayLink: "",
     beneficiaryName: "",
     payerName: "",
@@ -999,13 +1543,35 @@ export default function BulkAds() {
   );
   const connectionUpdatedAt = adAccountsData?.connectionUpdatedAt || null;
 
+  // Meta runs each ad account on its own clock; a scheduled start is a time on
+  // that clock, whatever the browser's time zone is.
+  const { data: adAccountTimezone, isError: adAccountTimezoneFailed } = useQuery<{ timezoneName: string; utcOffset: string }>({
+    queryKey: ["/api/meta/ad-account-timezone", selectedAdAccountId],
+    queryFn: async () => {
+      const res = await fetch(`/api/meta/ad-account-timezone?adAccountId=${encodeURIComponent(selectedAdAccountId)}`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        throw new Error((await res.text()) || `Failed to fetch ad account time zone (${res.status})`);
+      }
+      return res.json();
+    },
+    enabled: hasSelectedUsableAdAccount,
+    staleTime: 60 * 60 * 1000,
+    retry: 1,
+  });
+  const accountTimezoneName = adAccountTimezone?.timezoneName ?? null;
+  const accountNow = accountTimezoneName ? getNowInTimeZone(accountTimezoneName) : null;
+  const isScheduledTimeInPast = Boolean(
+    scheduledDate && accountNow && `${scheduledDate}T${scheduledTime || "00:00"}` <= `${accountNow.date}T${accountNow.time}`,
+  );
+
   // Load per-ad-account settings to check if configured
   const { data: adAccountSettingsData, isLoading: adAccountSettingsLoading, isFetched: adAccountSettingsFetched, dataUpdatedAt } = useQuery<{
     settings: {
       pixelId?: string;
       pixelName?: string;
       websiteUrl?: string;
-      defaultUrl?: string;
       displayLink?: string;
       isConfigured?: boolean;
       geoTargeting?: string[];
@@ -1023,6 +1589,7 @@ export default function BulkAds() {
       instagramPageId?: string;
       instagramPageName?: string;
       creativeEnhancements?: Record<string, boolean>;
+      dailyMinSpendTarget?: number | null;
     } | null;
     adAccountId: string | null;
     adAccountName: string | null;
@@ -1242,24 +1809,11 @@ export default function BulkAds() {
   const selectedInstagram = instagramAccounts.find(a => a.id === savedIgId) || (instagramAccounts.length > 0 ? instagramAccounts[0] : null);
   const hasLinkedInstagram = Boolean(selectedInstagram?.id);
 
-  const { data: campaignsData, isLoading: campaignsLoading, isError: campaignsError } = useQuery<{
-    data: Array<{ 
-      id: string; 
-      name: string; 
-      status: string; 
-      effective_status?: string;
-      objective?: string;
-      daily_budget?: string;
-      lifetime_budget?: string;
-    }>;
-    source: string;
-  }>({
-    queryKey: ["/api/meta/campaigns", selectedAdAccountId || "none"],
-    queryFn: async () => {
-      const res = await fetch("/api/meta/campaigns", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch campaigns");
-      return res.json();
-    },
+  // Usually already in the cache: usePrefetchMetaData loads it as soon as the
+  // ad account is known.
+  const { data: campaignsData, isLoading: campaignsLoading, isError: campaignsError } = useQuery<MetaCampaignList>({
+    queryKey: metaCampaignsQueryKey(selectedAdAccountId),
+    queryFn: fetchMetaCampaigns,
     enabled: !!selectedAdAccountId,
   });
 
@@ -1476,7 +2030,9 @@ export default function BulkAds() {
     queryFn: async () => { const res = await fetch("/api/meta/pixels", { credentials: "include" }); if (!res.ok) throw new Error("Failed to fetch pixels"); return res.json(); },
     enabled: !!selectedAdAccountId && hasSelectedUsableAdAccount,
   });
-  const availablePixels = pixelsData?.data || [];
+  // Memoized so the fallback [] keeps its identity between renders — a fresh
+  // array every render defeats memo() on the dialogs that receive it.
+  const availablePixels = useMemo(() => pixelsData?.data || [], [pixelsData?.data]);
 
   // Compute effective settings - use imported ad set values if selected, otherwise use ad account settings
   const importedAdSet = importAdSetId ? importAdSets.find(a => a.id === importAdSetId) : null;
@@ -1940,40 +2496,52 @@ export default function BulkAds() {
     }
   }, [launchStatus, currentStep, launchProgress, launchLogs, adSetStatuses, launchResults, jobId, campaignName, isPolling, estimatedTimeRemaining]);
 
-  const updateAdSetCopyMutation = useMutation({
-    mutationFn: async ({ adsetId, copy }: { 
-      adsetId: string; 
-      copy: { primaryTexts: string[]; headlines: string[]; descriptions: string[] } 
-    }) => {
-      const res = await apiRequest("POST", `/api/drive/adsets/${adsetId}/copy`, copy);
-      return res.json();
+  // Saves the copy of every ad set edited in the copy dialog, one request
+  // each. Each saved ad set is applied at once, so a failure part-way keeps
+  // what was already saved.
+  const saveAdSetCopiesMutation = useMutation({
+    mutationFn: async (changes: Array<{ adsetId: string; copy: ParsedCopy }>) => {
+      for (const { adsetId, copy } of changes) {
+        await apiRequest("POST", `/api/drive/adsets/${adsetId}/copy`, copy);
+        setAdSets(prev => prev.map(a =>
+          a.id === adsetId
+            ? {
+                ...a,
+                hasDocx: true,
+                docxSource: a.docxSource === 'missing' ? 'per-dct' : a.docxSource,
+                status: a.status === 'invalid' && a.validationErrors?.includes('No ad copy found')
+                  ? ((a.validationErrors?.filter(e => e !== 'No ad copy found').length || 0) > 0 ? 'invalid' : 'valid')
+                  : a.status,
+                validationErrors: a.validationErrors?.filter(e => e !== 'No ad copy found') || [],
+                parsedCopy: {
+                  ...(a.parsedCopy || { primaryTexts: [], headlines: [], descriptions: [] }),
+                  ...copy,
+                },
+              }
+            : a
+        ));
+      }
+      return changes.length;
     },
-    onSuccess: (_, variables) => {
-      setAdSets(prev => prev.map(a => 
-        a.id === variables.adsetId 
-          ? { 
-              ...a, 
-              hasDocx: true, 
-              docxSource: a.docxSource === 'missing' ? 'per-dct' : a.docxSource,
-              status: a.status === 'invalid' && a.validationErrors?.includes('No ad copy found') 
-                ? ((a.validationErrors?.filter(e => e !== 'No ad copy found').length || 0) > 0 ? 'invalid' : 'valid')
-                : a.status,
-              validationErrors: a.validationErrors?.filter(e => e !== 'No ad copy found') || [],
-              parsedCopy: {
-                ...(a.parsedCopy || { primaryTexts: [], headlines: [], descriptions: [] }),
-                ...variables.copy,
-              },
-            }
-          : a
-      ));
+    onSuccess: (count) => {
       setShowCopyEditModal(false);
       setEditingAdSetId(null);
-      toast({ title: "Ad copy updated" });
+      toast({ title: count === 1 ? "Ad copy updated" : `Ad copy updated for ${count} ad sets` });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update copy", description: error.message, variant: "destructive" });
     },
   });
+
+  const handleCopyEditOpenChange = useCallback((open: boolean) => {
+    setShowCopyEditModal(open);
+    if (!open) setEditingAdSetId(null);
+  }, []);
+  const handleCopyEditSave = useCallback(
+    (changes: Array<{ adsetId: string; copy: ParsedCopy }>) => saveAdSetCopiesMutation.mutate(changes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const updateAdSetMutation = useMutation({
     mutationFn: async ({ adsetId, updates }: { adsetId: string; updates: Partial<AdSetInfo> }) => {
@@ -1995,6 +2563,49 @@ export default function BulkAds() {
       );
     },
   });
+
+  // Ad set names are edited locally while typing and saved on blur, so a
+  // rename costs one request instead of one per keystroke.
+  const setAdSetNameDraft = (adsetId: string, value: string) => {
+    setAdSetNameDrafts((prev) => ({ ...prev, [adsetId]: value }));
+  };
+
+  const commitAdSetName = (adsetId: string, currentName: string) => {
+    const draft = adSetNameDrafts[adsetId];
+    if (draft === undefined) return;
+
+    const trimmed = draft.trim();
+    if (trimmed === currentName) {
+      setAdSetNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[adsetId];
+        return next;
+      });
+      return;
+    }
+
+    if (!trimmed) {
+      toast({
+        title: "Ad set name cannot be empty",
+        description: "Reverted to the previous name.",
+        variant: "destructive",
+      });
+      setAdSetNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[adsetId];
+        return next;
+      });
+      return;
+    }
+
+    setAdSets((prev) => prev.map((a) => (a.id === adsetId ? { ...a, name: trimmed } : a)));
+    setAdSetNameDrafts((prev) => {
+      const next = { ...prev };
+      delete next[adsetId];
+      return next;
+    });
+    updateAdSetMutation.mutate({ adsetId, updates: { name: trimmed } });
+  };
 
   const updateAdSetDailyMinSpendTarget = (adsetId: string, rawValue: string) => {
     const trimmed = rawValue.trim();
@@ -2308,6 +2919,7 @@ export default function BulkAds() {
   });
 
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
 
   const cancelUploadMutation = useMutation({
     mutationFn: async () => {
@@ -2382,7 +2994,6 @@ export default function BulkAds() {
       }
       if (importedWebsiteUrl) {
         settingsUpdate.websiteUrl = importedWebsiteUrl;
-        settingsUpdate.defaultUrl = importedDisplayLink || importedWebsiteUrl;
       }
       if (importedCta) {
         settingsUpdate.defaultCta = importedCta;
@@ -2412,7 +3023,6 @@ export default function BulkAds() {
         payerName: importedAdSet?.dsa_payor || prev.payerName,
         defaultCta: importedCta || prev.defaultCta,
         websiteUrl: importedWebsiteUrl || prev.websiteUrl,
-        defaultUrl: importedDisplayLink || importedWebsiteUrl || prev.defaultUrl,
         displayLink: importedDisplayLink || prev.displayLink,
       }));
       
@@ -2488,8 +3098,8 @@ export default function BulkAds() {
       if (ads.defaultCta && !editingCopy.cta) {
         setEditingCopy((prev) => ({ ...prev, cta: ads.defaultCta! }));
       }
-      if (ads.defaultUrl && !editingCopy.url) {
-        setEditingCopy((prev) => ({ ...prev, url: ads.defaultUrl! }));
+      if (ads.websiteUrl && !editingCopy.url) {
+        setEditingCopy((prev) => ({ ...prev, url: ads.websiteUrl! }));
       }
       if (ads.defaultUtm && !editingCopy.utm) {
         setEditingCopy((prev) => ({ ...prev, utm: ads.defaultUtm! }));
@@ -2808,7 +3418,6 @@ export default function BulkAds() {
     setShowCreateCampaignModal(false);
     setShowTargetingEditDialog(false);
     setShowCreativeEditDialog(false);
-    setPasteText("");
     setEditingAdSetId(null);
     setCurrentAdSetIndex(0);
     setShowInfoModal(false);
@@ -2920,8 +3529,8 @@ export default function BulkAds() {
       <div className="glass-panel rounded-2xl p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2">
-            <span className="material-symbols-outlined text-[#1877F2] text-lg">ads_click</span>
-            <h2 className="text-base font-semibold text-slate-800 dark:text-white">Select Campaign</h2>
+            <span className="material-symbols-outlined text-meta text-lg">ads_click</span>
+            <h2 className="text-base font-semibold text-foreground">Select Campaign</h2>
           </div>
         </div>
         <p className="text-[13px] text-muted-foreground mb-4">Select existing campaign or create new</p>
@@ -2944,7 +3553,7 @@ export default function BulkAds() {
           >
             <SelectTrigger 
               data-testid="select-campaign-step1" 
-              className="w-full h-auto min-h-[38px] bg-white/40 dark:bg-black/20 backdrop-blur-md border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 shadow-sm hover:border-[#1877F2]/50 transition-all [&>span]:line-clamp-none [&>span]:overflow-visible"
+              className="w-full h-auto min-h-[38px] bg-white/40 dark:bg-black/20 backdrop-blur-md border-border rounded-xl px-4 py-2 shadow-sm hover:border-primary/50 transition-all [&>span]:line-clamp-none [&>span]:overflow-visible"
             >
               <SelectValue placeholder={campaignsLoading ? "Loading campaigns..." : "Select campaign"} />
             </SelectTrigger>
@@ -2956,7 +3565,7 @@ export default function BulkAds() {
                   <SelectItem key={campaign.id} value={campaign.id}>
                     <span className="flex items-center gap-1.5 text-[13px]">
                       {campaign.name}
-                      <span className={`text-[10px] px-1.5 py-px rounded border ${isCBO ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 border-blue-200 dark:border-blue-800" : "bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300 border-gray-200 dark:border-gray-800"}`}>
+                      <span className={`text-[10px] px-1.5 py-px rounded border ${isCBO ? "bg-primary/10 text-primary dark:bg-primary dark:text-primary/70 border-primary/20 border-primary/40" : "bg-muted text-foreground dark:text-muted-foreground/60 border-border"}`}>
                         {isCBO ? "CBO" : "ABO"}
                       </span>
                       <span className={`text-[10px] px-1.5 py-px rounded border ${isActive ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 border-green-200 dark:border-green-800" : "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 border-orange-200 dark:border-orange-800"}`}>
@@ -2970,9 +3579,9 @@ export default function BulkAds() {
           </Select>
 
           {!selectedCampaignId && (
-            <div className="rounded-xl border border-[#1877F2]/30 dark:border-[#1877F2]/50 p-3 bg-[#1877F2]/10 dark:bg-[#1877F2]/20 flex items-center gap-2">
-              <span className="material-symbols-outlined text-[#1877F2] text-lg">warning</span>
-              <span className="text-sm text-[#1556b6] dark:text-blue-200">
+            <div className="rounded-xl border border-primary/30 dark:border-primary/50 p-3 bg-primary/10 dark:bg-primary/20 flex items-center gap-2">
+              <span className="material-symbols-outlined text-meta text-lg">warning</span>
+              <span className="text-sm text-primary">
                 Select a campaign to continue
               </span>
             </div>
@@ -2984,11 +3593,11 @@ export default function BulkAds() {
       <div className="glass-panel rounded-2xl p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2">
-            <span className="material-symbols-outlined text-[#1877F2] text-lg">folder_open</span>
-            <h2 className="text-base font-semibold text-slate-800 dark:text-white">Import Ad Folder</h2>
+            <span className="material-symbols-outlined text-meta text-lg">folder_open</span>
+            <h2 className="text-base font-semibold text-foreground">Import Ad Folder</h2>
           </div>
           <button
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/60 hover:bg-muted dark:hover:bg-muted transition-all"
             data-testid="button-help"
             onClick={() => setShowInfoModal(true)}
           >
@@ -2996,25 +3605,25 @@ export default function BulkAds() {
             How it works
           </button>
         </div>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Connect your assets to start the launch</p>
+        <p className="text-sm text-muted-foreground mb-4">Connect your assets to start the launch</p>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
           <button
             type="button"
             disabled={isSyncInProgress}
-            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "private" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
+            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "private" ? "ring-2 ring-primary" : "border-transparent hover:border-border dark:hover:border-border"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
             onClick={() => setDriveMode("private")}
             data-testid="radio-drive-private"
           >
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 shrink-0">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center text-primary shrink-0">
                 <span className="material-symbols-outlined text-lg">lock</span>
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-sm">Private Folder</h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Share with email</p>
+                <p className="text-[11px] text-muted-foreground">Share with email</p>
               </div>
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "private" ? "bg-[#1877F2]" : "border-2 border-slate-200 dark:border-slate-700"}`}>
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "private" ? "bg-primary" : "border-2 border-border"}`}>
                 {driveMode === "private" && <span className="material-symbols-outlined text-white text-[13px]">check</span>}
               </div>
             </div>
@@ -3023,7 +3632,7 @@ export default function BulkAds() {
           <button
             type="button"
             disabled={isSyncInProgress}
-            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "public" ? "ring-2 ring-[#1877F2]" : "border-transparent hover:border-slate-200 dark:hover:border-slate-700"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
+            className={`text-left glass-card p-3 rounded-xl transition-all ${driveMode === "public" ? "ring-2 ring-primary" : "border-transparent hover:border-border dark:hover:border-border"} ${isSyncInProgress ? "opacity-60 cursor-not-allowed" : ""}`}
             onClick={() => setDriveMode("public")}
             data-testid="radio-drive-public"
           >
@@ -3033,9 +3642,9 @@ export default function BulkAds() {
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-sm">Public URL</h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Shared link</p>
+                <p className="text-[11px] text-muted-foreground">Shared link</p>
               </div>
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "public" ? "bg-[#1877F2]" : "border-2 border-slate-200 dark:border-slate-700"}`}>
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors ${driveMode === "public" ? "bg-primary" : "border-2 border-border"}`}>
                 {driveMode === "public" && <span className="material-symbols-outlined text-white text-[13px]">check</span>}
               </div>
             </div>
@@ -3043,24 +3652,24 @@ export default function BulkAds() {
         </div>
 
         {driveMode === "private" && (
-          <div className="mb-3 p-[1px] bg-gradient-to-r from-blue-500/20 via-emerald-500/20 to-transparent rounded-xl">
-            <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-md rounded-[11px] p-3 flex items-center gap-3 border border-white/40 dark:border-slate-700/40">
-              <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center text-blue-600 shrink-0">
+          <div className="mb-3 p-[1px] bg-gradient-to-r from-primary via-emerald-500/20 to-transparent rounded-xl">
+            <div className="bg-white/60 backdrop-blur-md rounded-[11px] p-3 flex items-center gap-3 border border-white/40">
+              <div className="w-7 h-7 rounded-full bg-primary/10 dark:bg-primary/10 flex items-center justify-center text-primary shrink-0">
                 <span className="material-symbols-outlined text-base">mail</span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Share your folder with</div>
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Share your folder with</div>
                 <div className="flex items-center gap-2 mt-0.5">
                   {driveEmailLoading ? (
                     <div className="flex items-center gap-2">
-                      <Loader2 className="h-3 w-3 animate-spin text-slate-400" />
-                      <span className="text-xs text-slate-400">Loading...</span>
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Loading...</span>
                     </div>
                   ) : driveConnectedEmail ? (
                     <>
-                      <code className="font-semibold text-xs text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded select-all" data-testid="text-service-account-email">{driveConnectedEmail}</code>
+                      <code className="font-semibold text-xs text-foreground bg-muted px-2 py-0.5 rounded select-all" data-testid="text-service-account-email">{driveConnectedEmail}</code>
                       <button
-                        className="text-[#1877F2] hover:text-[#1877F2]/70 transition-colors"
+                        className="text-meta hover:text-meta/70 transition-colors"
                         onClick={() => {
                           navigator.clipboard.writeText(driveConnectedEmail);
                           toast({ title: "Email copied!" });
@@ -3071,7 +3680,7 @@ export default function BulkAds() {
                       </button>
                     </>
                   ) : (
-                    <span className="text-xs text-slate-400">Service account not configured</span>
+                    <span className="text-xs text-muted-foreground">Service account not configured</span>
                   )}
                 </div>
               </div>
@@ -3081,18 +3690,18 @@ export default function BulkAds() {
 
         {/* Folder URL input */}
         <div className="space-y-2 mb-4">
-          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 ml-1">Folder URL</label>
+          <label className="block text-xs font-bold text-muted-foreground ml-1">Folder URL</label>
           <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[16px]">link</span>
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-[16px]">link</span>
             <Input
               data-testid="input-folder-url"
-              className="pl-9 py-2 h-auto text-sm bg-white/40 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 rounded-xl focus-visible:ring-2 focus-visible:ring-[#1877F2]/20 transition-all"
+              className="pl-9 py-2 h-auto text-sm bg-white/40 border-border rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 transition-all"
               placeholder="Paste Google Drive folder URL..."
               value={folderUrl}
               onChange={(e) => setFolderUrl(e.target.value)}
             />
           </div>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 ml-1">
+          <p className="text-[10px] text-muted-foreground ml-1">
             {driveMode === "private" 
               ? "Share your folder with the email above, then paste the folder URL. Each DCT subfolder becomes an Ad Set."
               : "Paste a public folder URL. Each DCT subfolder becomes an Ad Set."}
@@ -3115,10 +3724,10 @@ export default function BulkAds() {
         {/* Geo Split toggle */}
         <div className="flex items-center justify-between px-1 mb-6">
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-sm text-slate-500 dark:text-slate-400">public</span>
+            <span className="material-symbols-outlined text-sm text-muted-foreground">public</span>
             <div>
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">Geo Split</p>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500">Split ad sets by market (US, UK, AU...) in filenames</p>
+              <p className="text-xs font-medium text-foreground">Geo Split</p>
+              <p className="text-[10px] text-muted-foreground">Split ad sets by market (US, UK, AU...) in filenames</p>
             </div>
           </div>
           <button
@@ -3128,7 +3737,7 @@ export default function BulkAds() {
             disabled={isSyncInProgress}
             data-testid="toggle-geo-split"
             onClick={() => setGeoSplit(!geoSplit)}
-            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ${geoSplit ? 'bg-[#1877F2]' : 'bg-slate-200 dark:bg-slate-700'} ${isSyncInProgress ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ${geoSplit ? 'bg-primary' : 'bg-muted'} ${isSyncInProgress ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
           >
             <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${geoSplit ? 'translate-x-4' : 'translate-x-0'}`} />
           </button>
@@ -3136,7 +3745,7 @@ export default function BulkAds() {
 
         {/* Sync button */}
         <Button
-          className="w-full h-10 rounded-xl bg-[#1877F2] text-white font-bold text-xs shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 transition-all mt-auto"
+          className="w-full h-10 rounded-xl bg-primary text-white font-bold text-xs shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all mt-auto"
           data-testid="button-sync-drive"
           onClick={handleDCTSync}
           disabled={(syncStep > 0 && syncStep < 5) || !folderUrl.trim() || (driveMode === "private" && !driveConnectedEmail)}
@@ -3164,7 +3773,7 @@ export default function BulkAds() {
     
     return (
     <div className="glass-panel rounded-2xl p-6 relative overflow-hidden space-y-5">
-      <div className="absolute -top-32 -right-32 w-96 h-96 bg-[#1877F2] opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute -top-32 -right-32 w-96 h-96 bg-primary opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-10 left-10 w-64 h-64 bg-emerald-400 opacity-[0.04] rounded-full blur-[80px] pointer-events-none" />
       <div className="mb-4 relative z-10">
         <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
@@ -3185,13 +3794,13 @@ export default function BulkAds() {
             <div className="text-[11px] text-muted-foreground">Creatives</div>
           </div>
           <div className="text-center">
-            <div className={`text-base font-semibold ${validCount === adSets.length ? "text-green-600" : "text-[#1877F2]"}`}>
+            <div className={`text-base font-semibold ${validCount === adSets.length ? "text-green-600" : "text-meta"}`}>
               {validCount}/{adSets.length}
             </div>
             <div className="text-[11px] text-muted-foreground">Valid</div>
           </div>
           <div className="text-center">
-            <div className={`text-base font-semibold ${withDocx === adSets.length ? "text-green-600" : "text-[#1877F2]"}`}>
+            <div className={`text-base font-semibold ${withDocx === adSets.length ? "text-green-600" : "text-meta"}`}>
               {withDocx}/{adSets.length}
             </div>
             <div className="text-[11px] text-muted-foreground">With text</div>
@@ -3199,10 +3808,10 @@ export default function BulkAds() {
         </div>
         
         {withDocx < adSets.length && adSets.length > 0 && (
-          <div className="rounded-xl border border-dashed border-[#1877F2]/35 dark:border-[#1877F2]/55 bg-[#1877F2]/8 dark:bg-[#1877F2]/18 p-4 space-y-3" data-testid="global-docx-upload-card">
+          <div className="rounded-xl border border-dashed border-primary/35 dark:border-primary/55 bg-primary/8 dark:bg-primary/18 p-4 space-y-3" data-testid="global-docx-upload-card">
             <div className="flex items-center gap-2">
-              <Upload className="h-4 w-4 text-[#1877F2] dark:text-blue-300" />
-              <span className="text-sm font-medium text-[#1556b6] dark:text-blue-200">
+              <Upload className="h-4 w-4 text-meta dark:text-primary/70" />
+              <span className="text-sm font-medium text-primary">
                 Upload ad copy for missing ad sets
               </span>
               <span className="text-xs text-muted-foreground ml-auto">
@@ -3322,7 +3931,7 @@ export default function BulkAds() {
                 </div>
                 <div className="flex items-center gap-2">
                   {adset.geoSplitMarket && (
-                    <Badge variant="outline" className="gap-1 text-[10px] border-blue-300 text-blue-700 dark:border-blue-600 dark:text-blue-400">
+                    <Badge variant="outline" className="gap-1 text-[10px] border-primary/20 text-primary dark:border-primary/50 dark:text-primary">
                       <span className="material-symbols-outlined text-xs">public</span>
                       {adset.geoSplitMarket}
                       {adset.geoTargeting && (
@@ -3352,12 +3961,6 @@ export default function BulkAds() {
                         data-testid={`button-add-copy-${adset.id}`}
                         onClick={() => {
                           setEditingAdSetId(adset.id);
-                          setEditingAdSetCopy({
-                            primaryTexts: [""],
-                            headlines: [""],
-                            descriptions: [""],
-                          });
-                          setPasteText("");
                           setShowCopyEditModal(true);
                         }}
                       >
@@ -3380,12 +3983,6 @@ export default function BulkAds() {
                       data-testid={`button-edit-copy-${adset.id}`}
                       onClick={() => {
                         setEditingAdSetId(adset.id);
-                        setEditingAdSetCopy({
-                          primaryTexts: adset.parsedCopy?.primaryTexts || [],
-                          headlines: adset.parsedCopy?.headlines || [],
-                          descriptions: adset.parsedCopy?.descriptions || [],
-                        });
-                        setPasteText("");
                         setShowCopyEditModal(true);
                       }}
                     >
@@ -3443,8 +4040,8 @@ export default function BulkAds() {
         </div>
 
         {invalidAdSets.length > 0 && (
-          <div className="rounded-md bg-[#1877F2]/10 dark:bg-[#1877F2]/20 border border-[#1877F2]/30 dark:border-[#1877F2]/50 p-3">
-            <p className="text-sm text-[#1556b6] dark:text-blue-200">
+          <div className="rounded-md bg-primary/10 dark:bg-primary/20 border border-primary/30 dark:border-primary/50 p-3">
+            <p className="text-sm text-primary">
               <AlertTriangle className="h-4 w-4 inline mr-1" />
               {invalidAdSets.length} Ad Sets have errors and will be skipped.
             </p>
@@ -3457,7 +4054,7 @@ export default function BulkAds() {
 
   const renderStep3 = () => (
     <div className="glass-panel rounded-2xl p-6 relative overflow-hidden space-y-5">
-      <div className="absolute -top-32 -right-32 w-96 h-96 bg-[#1877F2] opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute -top-32 -right-32 w-96 h-96 bg-primary opacity-[0.06] rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-10 left-10 w-64 h-64 bg-emerald-400 opacity-[0.04] rounded-full blur-[80px] pointer-events-none" />
 
       {/* Import Settings from Existing Campaign */}
@@ -3498,7 +4095,7 @@ export default function BulkAds() {
                             <span>{campaign.name}</span>
                             <Badge 
                               variant="outline" 
-                              className={`text-xs ${isCBO ? "bg-blue-500/20 text-blue-400 border-blue-500/50" : "bg-gray-500/20 text-gray-400 border-gray-500/50"}`}
+                              className={`text-xs ${isCBO ? "bg-primary/20 text-primary border-primary/50" : "bg-muted-foreground/20 text-muted-foreground border-border/50"}`}
                             >
                               {isCBO ? "CBO" : "ABO"}
                             </Badge>
@@ -3623,7 +4220,7 @@ export default function BulkAds() {
             </Button>
           </div>
           {effectiveSettings.isImported && (
-            <p className="text-xs text-[#1877F2]">Imported from: {importedAdSet?.name}</p>
+            <p className="text-xs text-meta">Imported from: {importedAdSet?.name}</p>
           )}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="p-3 rounded-lg bg-muted/50 border">
@@ -3651,19 +4248,19 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Countries</p>
-              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {effectiveSettings.geoTargeting.length > 0 ? effectiveSettings.geoTargeting.join(", ") : "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Age</p>
-              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {effectiveSettings.ageMin} - {effectiveSettings.ageMax}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Gender</p>
-              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {effectiveSettings.gender === "MALE" ? "Male" : effectiveSettings.gender === "FEMALE" ? "Female" : "All"}
               </p>
             </div>
@@ -3685,7 +4282,6 @@ export default function BulkAds() {
                   pixelId: effectiveSettings.pixelId || "",
                   defaultCta: importedCta || adAccountSettingsData?.settings?.defaultCta || "LEARN_MORE",
                   websiteUrl: importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl || "",
-                  defaultUrl: adAccountSettingsData?.settings?.defaultUrl || "",
                   displayLink: importedDisplayLink || adAccountSettingsData?.settings?.displayLink || "",
                   beneficiaryName: effectiveSettings.beneficiaryName || "",
                   payerName: effectiveSettings.payerName || "",
@@ -3699,12 +4295,12 @@ export default function BulkAds() {
             </Button>
           </div>
           {effectiveSettings.isImported && effectiveSettings.pixelId && (
-            <p className="text-xs text-[#1877F2]">Pixel imported from: {importedAdSet?.name}</p>
+            <p className="text-xs text-meta">Pixel imported from: {importedAdSet?.name}</p>
           )}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="p-3 rounded-lg bg-muted/50 border">
               <div className="flex items-center gap-1.5 mb-1">
-                <div className="w-4 h-4 rounded-full bg-[#1877F2] flex items-center justify-center flex-shrink-0">
+                <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
                   <SiFacebook className="w-2.5 h-2.5 text-white" />
                 </div>
                 <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Facebook Page</p>
@@ -3715,7 +4311,7 @@ export default function BulkAds() {
                   <p className="text-sm text-muted-foreground">Loading...</p>
                 </div>
               ) : (
-                <p className={`text-sm font-medium truncate ${selectedPage ? "" : "text-[#1877F2]"}`}>
+                <p className={`text-sm font-medium truncate ${selectedPage ? "" : "text-meta"}`}>
                   {selectedPage?.name || "Not set"}
                 </p>
               )}
@@ -3740,7 +4336,7 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Pixel</p>
-              <p className={`text-sm font-medium truncate ${effectiveSettings.pixelId ? (effectiveSettings.isImported && importedPromotedObject?.pixel_id ? "text-[#1877F2]" : "") : "text-[#1877F2]"}`}>
+              <p className={`text-sm font-medium truncate ${effectiveSettings.pixelId ? (effectiveSettings.isImported && importedPromotedObject?.pixel_id ? "text-meta" : "") : "text-meta"}`}>
                 {effectiveSettings.isImported && importedPromotedObject?.pixel_id 
                   ? effectiveSettings.pixelId 
                   : (adAccountSettingsData?.settings?.pixelName || effectiveSettings.pixelId || "Not set")}
@@ -3748,37 +4344,31 @@ export default function BulkAds() {
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">CTA</p>
-              <p className={`text-sm font-medium ${importedCta && effectiveSettings.isImported ? "text-[#1877F2]" : ""}`}>
+              <p className={`text-sm font-medium ${importedCta && effectiveSettings.isImported ? "text-meta" : ""}`}>
                 {defaultSettings.defaultCta || importedCta || adAccountSettingsData?.settings?.defaultCta || "LEARN_MORE"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Website URL</p>
-              <p className={`text-sm font-medium truncate ${!(defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl) ? "text-[#1877F2]" : (importedWebsiteUrl && effectiveSettings.isImported ? "text-[#1877F2]" : "")}`}>
+              <p className={`text-sm font-medium truncate ${!(defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl) ? "text-meta" : (importedWebsiteUrl && effectiveSettings.isImported ? "text-meta" : "")}`}>
                 {defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl || "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Default URL</p>
-              <p className={`text-sm font-medium truncate ${(defaultSettings.defaultUrl || adAccountSettingsData?.settings?.defaultUrl) ? "" : "text-muted-foreground"}`}>
-                {defaultSettings.defaultUrl || adAccountSettingsData?.settings?.defaultUrl || "Not set"}
-              </p>
-            </div>
-            <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Display Link</p>
-              <p className={`text-sm font-medium truncate ${importedDisplayLink && effectiveSettings.isImported ? "text-[#1877F2]" : ((defaultSettings.displayLink || adAccountSettingsData?.settings?.displayLink) ? "" : "text-muted-foreground")}`}>
+              <p className={`text-sm font-medium truncate ${importedDisplayLink && effectiveSettings.isImported ? "text-meta" : ((defaultSettings.displayLink || adAccountSettingsData?.settings?.displayLink) ? "" : "text-muted-foreground")}`}>
                 {defaultSettings.displayLink || importedDisplayLink || adAccountSettingsData?.settings?.displayLink || "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Beneficiary</p>
-              <p className={`text-sm font-medium truncate ${effectiveSettings.beneficiaryName ? (effectiveSettings.isImported && importedAdSet?.dsa_beneficiary ? "text-[#1877F2]" : "") : "text-muted-foreground"}`}>
+              <p className={`text-sm font-medium truncate ${effectiveSettings.beneficiaryName ? (effectiveSettings.isImported && importedAdSet?.dsa_beneficiary ? "text-meta" : "") : "text-muted-foreground"}`}>
                 {effectiveSettings.beneficiaryName || "Not set"}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-muted/50 border">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Payer</p>
-              <p className={`text-sm font-medium truncate ${effectiveSettings.payerName ? (effectiveSettings.isImported && importedAdSet?.dsa_payor ? "text-[#1877F2]" : "") : "text-muted-foreground"}`}>
+              <p className={`text-sm font-medium truncate ${effectiveSettings.payerName ? (effectiveSettings.isImported && importedAdSet?.dsa_payor ? "text-meta" : "") : "text-muted-foreground"}`}>
                 {effectiveSettings.payerName || "Not set"}
               </p>
             </div>
@@ -3807,14 +4397,45 @@ export default function BulkAds() {
                 data-testid={`adset-row-${adset.id}`}
               >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <div className="min-w-0">
-                    <span className={`font-medium truncate block ${isDisabled ? "line-through text-muted-foreground" : ""}`}>{adset.name}</span>
-                    {adset.folderName && adset.folderName !== adset.name && (
-                      <span className="text-xs text-muted-foreground truncate block">{adset.folderName}</span>
+                  <div className="min-w-0 flex-1">
+                    {/* Reads as an editable field at rest — a dashed underline
+                        plus a pencil — rather than looking like plain text. */}
+                    <div className="group/name relative">
+                      <Input
+                        aria-label={`Ad set name for ${adset.folderName || adset.name}`}
+                        title="Click to rename this ad set"
+                        data-testid={`input-adset-name-${adset.id}`}
+                        value={adSetNameDrafts[adset.id] ?? adset.name}
+                        disabled={isDisabled}
+                        onChange={(event) => setAdSetNameDraft(adset.id, event.target.value)}
+                        onBlur={() => commitAdSetName(adset.id, adset.name)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.currentTarget.blur();
+                          } else if (event.key === "Escape") {
+                            setAdSetNameDraft(adset.id, adset.name);
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        className={`h-8 pl-2 pr-8 font-medium cursor-text rounded-md
+                          border-0 border-b border-dashed border-muted-foreground/40 bg-transparent
+                          hover:border-solid hover:border-input hover:bg-muted/40
+                          focus-visible:border-solid focus-visible:border-input focus-visible:bg-background
+                          transition-colors ${isDisabled ? "line-through text-muted-foreground" : ""}`}
+                      />
+                      <Pencil
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5
+                          text-muted-foreground/50 opacity-0 transition-opacity
+                          group-hover/name:opacity-100 group-focus-within/name:opacity-100"
+                      />
+                    </div>
+                    {adset.folderName && adset.folderName !== (adSetNameDrafts[adset.id] ?? adset.name) && (
+                      <span className="text-xs text-muted-foreground truncate block px-2">{adset.folderName}</span>
                     )}
                   </div>
                   {adset.geoSplitMarket && (
-                    <Badge variant="outline" className="gap-1 text-[10px] border-blue-300 text-blue-700 dark:border-blue-600 dark:text-blue-400 flex-shrink-0">
+                    <Badge variant="outline" className="gap-1 text-[10px] border-primary/20 text-primary dark:border-primary/50 dark:text-primary flex-shrink-0">
                       <span className="material-symbols-outlined text-xs">public</span>
                       {adset.geoSplitMarket}
                     </Badge>
@@ -3881,13 +4502,196 @@ export default function BulkAds() {
     }
   };
 
+  // Everything the launch will use, shown once more before anything is sent
+  // to Meta: the settings most often wrong first, the ad copy last.
+  const renderLaunchConfirmDialog = () => {
+    const websiteUrl = defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl || "";
+    const accountMinSpend = adAccountSettingsData?.settings?.dailyMinSpendTarget ?? undefined;
+    const minSpendFor = (adset: AdSetInfo) => getAdSetDailyMinSpendTarget(adset) ?? accountMinSpend;
+    const minSpendValues = Array.from(new Set(enabledAdSets.map((adset) => minSpendFor(adset) ?? null)));
+    const minSpendSummary = minSpendValues.length > 1
+      ? "Varies per ad set"
+      : minSpendValues[0] == null ? "No minimum" : `${minSpendValues[0]} / day`;
+    const geoFor = (adset: AdSetInfo): string[] =>
+      adset.geoTargeting?.length
+        ? adset.geoTargeting
+        : (adset.overrideSettings?.geoTargeting as string[] | undefined)?.length
+          ? (adset.overrideSettings!.geoTargeting as string[])
+          : effectiveSettings.geoTargeting;
+    const hasGeoSplit = enabledAdSets.some((adset) => adset.geoSplitMarket);
+    const placementsSummary = hasLinkedInstagram
+      ? "Automatic — Facebook & Instagram"
+      : "Automatic — Facebook only (no Instagram linked)";
+    const copyFor = (adset: AdSetInfo) => {
+      const override = adSetCopyOverrides[adset.id];
+      const split = (value: string) => value.split("\n\n---\n\n").map((text) => text.trim()).filter(Boolean);
+      return {
+        primaryTexts: override?.primaryText ? split(override.primaryText) : adset.parsedCopy?.primaryTexts || [],
+        headlines: override?.headline ? split(override.headline) : adset.parsedCopy?.headlines || [],
+      };
+    };
+    const budgetSummary = campaignHasCBO && campaignBudget !== null
+      ? `${campaignBudget} ${campaignBudgetType === "LIFETIME" ? "lifetime" : "/ day"} (campaign budget)`
+      : `${effectiveSettings.budgetAmount} ${effectiveSettings.budgetType === "LIFETIME" ? "lifetime" : "/ day"}`;
+
+    const keySettings: Array<{ label: string; value: string; missing?: boolean }> = [
+      { label: "Min daily spend", value: minSpendSummary },
+      { label: "Website URL", value: websiteUrl || "Not set", missing: !websiteUrl },
+      { label: "Placements", value: placementsSummary },
+      {
+        label: "Geography",
+        value: hasGeoSplit
+          ? "Geo split — per ad set below"
+          : effectiveSettings.geoTargeting.length > 0 ? effectiveSettings.geoTargeting.join(", ") : "Not set",
+        missing: !hasGeoSplit && effectiveSettings.geoTargeting.length === 0,
+      },
+    ];
+    const otherSettings: Array<{ label: string; value: string }> = [
+      { label: "Campaign", value: selectedCampaign?.name || campaignName || "New campaign" },
+      { label: "Budget", value: budgetSummary },
+      { label: "Age", value: `${effectiveSettings.ageMin} – ${effectiveSettings.ageMax}` },
+      { label: "Gender", value: effectiveSettings.gender === "ALL" ? "All" : effectiveSettings.gender === "MALE" ? "Men" : "Women" },
+      { label: "Facebook Page", value: selectedPage?.name || "Not set" },
+      { label: "Instagram", value: selectedInstagram?.username || selectedInstagram?.name || "Not connected" },
+      { label: "Pixel", value: adAccountSettingsData?.settings?.pixelName || effectiveSettings.pixelId || "Not set" },
+      { label: "CTA", value: defaultSettings.defaultCta || importedCta || adAccountSettingsData?.settings?.defaultCta || "LEARN_MORE" },
+      { label: "Display link", value: defaultSettings.displayLink || importedDisplayLink || adAccountSettingsData?.settings?.displayLink || "Not set" },
+      {
+        label: "Start",
+        value: scheduledDate
+          ? `${scheduledDate} ${scheduledTime || "00:00"}${accountTimezoneName ? ` (${accountTimezoneName})` : ""}`
+          : "Now",
+      },
+    ];
+
+    return (
+      <Dialog open={showLaunchConfirm} onOpenChange={setShowLaunchConfirm}>
+        <DialogContent
+          className="flex flex-col w-[calc(100vw-32px)] max-w-[1280px] sm:max-w-[1280px] h-[92vh] p-0 gap-0"
+          data-testid="dialog-launch-confirm"
+        >
+          <div className="px-6 pt-6 pb-4 border-b">
+          <DialogHeader>
+            <DialogTitle>Review before publishing</DialogTitle>
+            <DialogDescription>
+              {enabledAdSets.length} ad set{enabledAdSets.length !== 1 ? "s" : ""} will be created on Meta with these settings.
+            </DialogDescription>
+          </DialogHeader>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {keySettings.map((item) => (
+                <div key={item.label} className="p-3 rounded-lg border bg-muted/50 min-w-0">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{item.label}</p>
+                  <p className={`text-sm font-semibold break-words ${item.missing ? "text-red-600 dark:text-red-400" : "text-foreground"}`}>
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-2.5 px-1">
+              {otherSettings.map((item) => (
+                <div key={item.label} className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{item.label}</p>
+                  <p className="text-[13px] text-foreground truncate" title={item.value}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2.5">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">Ad copy</h4>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 items-start">
+              {enabledAdSets.map((adset) => {
+                const copy = copyFor(adset);
+                const minSpend = minSpendFor(adset);
+                return (
+                  <div key={adset.id} className="rounded-lg border p-3 space-y-2.5" data-testid={`launch-confirm-adset-${adset.id}`}>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="text-sm font-semibold text-foreground mr-1 break-words">{adSetNameDrafts[adset.id] ?? adset.name}</p>
+                      <Badge variant="secondary" className="text-[11px]">
+                        {(adset.videoCount || 0) + (adset.imageCount || 0)} creatives
+                      </Badge>
+                      {minSpend != null && (
+                        <Badge variant="outline" className="text-[11px]">Min {minSpend} / day</Badge>
+                      )}
+                      {hasGeoSplit && (
+                        <Badge variant="outline" className="text-[11px]">{geoFor(adset).join(", ") || "No countries"}</Badge>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                        Primary text ({copy.primaryTexts.length})
+                      </p>
+                      {copy.primaryTexts.length > 0 ? (
+                        <ol className="space-y-1.5">
+                          {copy.primaryTexts.map((text, idx) => (
+                            <li key={idx} className="text-[13px] text-foreground whitespace-pre-wrap break-words rounded-md bg-muted/50 px-2.5 py-1.5">
+                              {text}
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="text-[13px] text-red-600 dark:text-red-400">No primary text</p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                        Headline ({copy.headlines.length})
+                      </p>
+                      {copy.headlines.length > 0 ? (
+                        <ul className="flex flex-wrap gap-1.5">
+                          {copy.headlines.map((headline, idx) => (
+                            <li key={idx} className="text-[13px] font-medium text-foreground rounded-md bg-muted/50 px-2.5 py-1 break-words">
+                              {headline}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-[13px] text-muted-foreground">No headline</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:gap-2 px-6 py-4 border-t bg-background rounded-b-lg">
+            <Button
+              variant="outline"
+              data-testid="button-launch-confirm-back"
+              onClick={() => setShowLaunchConfirm(false)}
+            >
+              Go back
+            </Button>
+            <Button
+              data-testid="button-launch-confirm"
+              disabled={launchMutation.isPending || isScheduledTimeInPast}
+              onClick={() => {
+                setShowLaunchConfirm(false);
+                setCurrentStep(5);
+                launchMutation.mutate();
+              }}
+            >
+              <Rocket className="h-4 w-4 mr-2" />
+              {scheduledDate ? `Schedule ${scheduledDate}` : "Publish Ads"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   const renderStep4 = () => (
     <div className="glass-panel rounded-2xl p-6 relative overflow-hidden">
-      <div className="absolute -top-32 -right-32 w-96 h-96 bg-[#1877F2] opacity-[0.08] rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute -top-32 -right-32 w-96 h-96 bg-primary opacity-[0.08] rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute top-20 left-10 w-64 h-64 bg-emerald-400 opacity-[0.05] rounded-full blur-[80px] pointer-events-none" />
       <div className="flex items-start justify-between mb-4 relative z-10">
         <div className="flex items-center space-x-3">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/30 dark:to-slate-800 flex items-center justify-center text-[#1877F2] border border-blue-100 dark:border-blue-800 shadow-[0_4px_12px_rgba(24,119,242,0.1)]">
+          <div className="p-2 rounded-xl bg-gradient-to-br from-primary/5 to-card flex items-center justify-center text-meta border border-primary/20 border-primary/40 shadow-[0_4px_12px_hsl(var(--primary)/0.1)]">
             <Rocket className="h-5 w-5" />
           </div>
           <div>
@@ -3928,14 +4732,14 @@ export default function BulkAds() {
                         <span className="text-sm font-semibold text-foreground">{totalAssets}</span>
                         <span className="text-[10px] text-muted-foreground uppercase tracking-wide">creatives</span>
                       </div>
-                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <span className="text-muted-foreground">·</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-semibold text-foreground">{enabledAdSets.length}</span>
                         <span className="text-[10px] text-muted-foreground uppercase tracking-wide">ad sets</span>
                       </div>
-                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <span className="text-muted-foreground">·</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold text-[#1877F2]">~{estimatedAds}</span>
+                        <span className="text-sm font-semibold text-meta">~{estimatedAds}</span>
                         <span className="text-[10px] text-muted-foreground uppercase tracking-wide">ads</span>
                       </div>
                     </div>
@@ -3961,8 +4765,8 @@ export default function BulkAds() {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2.5">
-                      <div className="w-5 h-5 rounded-full border flex items-center justify-center shadow-sm border-blue-200 bg-white dark:bg-slate-800">
-                        <div className="w-2.5 h-2.5 rounded-full bg-[#1877F2] shadow-[0_0_8px_#1877F2]" />
+                      <div className="w-5 h-5 rounded-full border flex items-center justify-center shadow-sm border-primary/20 bg-card">
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" />
                       </div>
                       <span className="text-sm font-semibold text-foreground">Dynamic</span>
                     </div>
@@ -3987,7 +4791,7 @@ export default function BulkAds() {
               </div>
             </div>
 
-            <div className="w-full h-px bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent" />
+            <div className="w-full h-px bg-gradient-to-r from-transparent via-border dark:via-white/10 to-transparent" />
 
             {/* Creative Enhancements Section - Images & Videos */}
             <div className="space-y-4">
@@ -3997,7 +4801,7 @@ export default function BulkAds() {
                   Advantage+ Creative
                 </h3>
                 <button
-                  className="text-[11px] font-medium text-muted-foreground hover:text-[#1877F2] transition-colors px-3 py-1 rounded-lg hover:bg-white/50 dark:hover:bg-white/10"
+                  className="text-[11px] font-medium text-muted-foreground hover:text-meta transition-colors px-3 py-1 rounded-lg hover:bg-white/50 dark:hover:bg-white/10"
                   onClick={() => setCreativeEnhancements({ image: { ...DEFAULT_IMAGE_ENHANCEMENTS }, video: { ...DEFAULT_VIDEO_ENHANCEMENTS } })}
                   data-testid="button-toggle-all-enhancements"
                 >
@@ -4081,7 +4885,7 @@ export default function BulkAds() {
               </div>
             </div>
 
-            <div className="w-full h-px bg-gradient-to-r from-transparent via-slate-200 dark:via-white/10 to-transparent" />
+            <div className="w-full h-px bg-gradient-to-r from-transparent via-border dark:via-white/10 to-transparent" />
 
             {/* Schedule Section - Simplified */}
             <div className="glass-card rounded-xl p-4 space-y-4">
@@ -4090,10 +4894,51 @@ export default function BulkAds() {
                   <span className="material-symbols-outlined mr-2 text-muted-foreground">schedule</span>
                   Schedule
                 </h3>
-                <div className={`glass-tag px-3 py-1.5 rounded-full text-xs font-semibold ${scheduledDate ? "text-[#1877F2]" : "text-muted-foreground"}`}>
-                  {scheduledDate ? `${scheduledDate} ${scheduledTime || "00:00"}` : "Launch Now"}
+                <div className={`glass-tag px-3 py-1.5 rounded-full text-xs font-semibold ${scheduledDate ? "text-meta" : "text-muted-foreground"}`}>
+                  {scheduledDate
+                    ? `${scheduledDate} ${scheduledTime || "00:00"}${accountTimezoneName ? ` ${accountTimezoneName}` : ""}`
+                    : "Launch Now"}
                 </div>
               </div>
+
+              {/* Always say which clock the schedule runs on: the zone read
+                  from the ad account on Meta, not the browser's. */}
+              <div
+                className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 ${
+                  adAccountTimezoneFailed
+                    ? "border-amber-400/40 bg-amber-50/70 dark:border-amber-500/50 dark:bg-amber-500/10"
+                    : "border-border bg-muted/50"
+                }`}
+                data-testid="text-schedule-timezone"
+              >
+                <span className="material-symbols-outlined text-[18px] text-muted-foreground mt-px">public</span>
+                <div className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Ad account time zone</p>
+                  {accountTimezoneName ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground break-words">
+                        {accountTimezoneName} · {adAccountTimezone?.utcOffset}
+                        {accountNow && <span className="font-normal text-muted-foreground"> · now {accountNow.time}</span>}
+                      </p>
+                      <p className="text-[12px] text-muted-foreground">
+                        Read from your Meta ad account. The date and time below are on this clock.
+                      </p>
+                    </>
+                  ) : adAccountTimezoneFailed ? (
+                    <p className="text-sm text-amber-900 dark:text-amber-200">
+                      Could not read the time zone from Meta. It is read again when you publish, and scheduling stops if it still can't be read.
+                    </p>
+                  ) : hasSelectedUsableAdAccount ? (
+                    <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Reading from Meta...
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Select an ad account to see its time zone.</p>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="text-sm">Date (optional)</Label>
@@ -4121,7 +4966,11 @@ export default function BulkAds() {
                             setLaunchMode("now");
                           }
                         }}
-                        disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                        disabled={(date) =>
+                          accountNow
+                            ? format(date, "yyyy-MM-dd") < accountNow.date
+                            : date < new Date(new Date().setHours(0, 0, 0, 0))
+                        }
                         initialFocus
                       />
                       {scheduledDate && (
@@ -4143,7 +4992,9 @@ export default function BulkAds() {
                   </Popover>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="schedule-time" className="text-sm">Time</Label>
+                  <Label htmlFor="schedule-time" className="text-sm">
+                    Time{accountTimezoneName && <span className="text-muted-foreground font-normal"> ({accountTimezoneName})</span>}
+                  </Label>
                   <Input
                     id="schedule-time"
                     type="time"
@@ -4155,13 +5006,18 @@ export default function BulkAds() {
                   />
                 </div>
               </div>
+              {isScheduledTimeInPast && (
+                <p className="text-xs font-medium text-red-600 dark:text-red-400" data-testid="text-schedule-in-past">
+                  This time has already passed in {accountTimezoneName}. Pick a later time.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Leave empty for immediate launch. Set date for scheduled launch.
               </p>
             </div>
 
             {!selectedPageId && (
-              <div className="rounded-md border border-[#1877F2]/30 dark:border-[#1877F2]/50 bg-[#1877F2]/10 dark:bg-[#1877F2]/20 p-3 text-sm text-[#1556b6] dark:text-blue-200">
+              <div className="rounded-md border border-primary/30 dark:border-primary/50 bg-primary/10 dark:bg-primary/20 p-3 text-sm text-primary">
                 Select a Facebook Page in the sidebar to enable launch.
               </div>
             )}
@@ -4205,12 +5061,10 @@ export default function BulkAds() {
                   !hasSelectedUsableAdAccount ||
                   launchMutation.isPending ||
                   !jobId ||
-                  !selectedPageId
+                  !selectedPageId ||
+                  isScheduledTimeInPast
                 }
-                onClick={() => {
-                  setCurrentStep(5);
-                  launchMutation.mutate();
-                }}
+                onClick={() => setShowLaunchConfirm(true)}
               >
                 {launchMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -4222,6 +5076,7 @@ export default function BulkAds() {
               </div>
               <p className="text-[13px] text-muted-foreground">Dry Run simulates the publish without creating ads — use it to check for errors first.</p>
             </div>
+            {renderLaunchConfirmDialog()}
             
             {dryRunPreview && dryRunPreview.length > 0 && (
               <div className="rounded-md border p-4 space-y-3">
@@ -4305,17 +5160,17 @@ export default function BulkAds() {
         <div>
           <div className="flex items-center gap-2.5 mb-0.5">
             {isRunning ? (
-              <div className="w-5 h-5 border-2 border-[#1877F2]/10 border-t-[#1877F2] rounded-full animate-spin" style={{ filter: "drop-shadow(0 0 4px #1877F2)" }} />
+              <div className="w-5 h-5 border-2 border-primary/10 border-t-primary rounded-full animate-spin" style={{ filter: "drop-shadow(0 0 4px hsl(var(--primary)))" }} />
             ) : isComplete ? (
               hasWarnings ? (
-                <AlertTriangle className="h-5 w-5 text-[#1877F2]" />
+                <AlertTriangle className="h-5 w-5 text-meta" />
               ) : (
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               )
             ) : (
               <XCircle className="h-5 w-5 text-red-500" />
             )}
-            <h2 className="text-base font-semibold tracking-tight text-slate-800 dark:text-white">
+            <h2 className="text-base font-semibold tracking-tight text-foreground">
               {launchStatus === "idle" ? "Preparing..." : launchStatus === "launching" ? "Creating ads..." : isComplete ? (hasWarnings ? "Completed with warnings" : "Ads created successfully") : "Upload failed"}
             </h2>
           </div>
@@ -4328,31 +5183,44 @@ export default function BulkAds() {
               ? `${totalCreated} ad${totalCreated !== 1 ? "s" : ""} created across ${launchResults.adSets.length} ad set${launchResults.adSets.length !== 1 ? "s" : ""}`
               : "Upload stopped due to validation errors — see details below"}
           </p>
+          {/* The server runs an upload in 5-minute runs; between runs the
+              queue reads "retrying". Say so, so nobody uploads it again. */}
+          {launchStatus === "launching" && (jobDetails?.queueStatus === "retrying" || jobDetails?.progressStatus === "retrying") && (
+            <div
+              className="mt-2 ml-8 flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-[12px] text-foreground"
+              data-testid="notice-launch-continuing"
+            >
+              <Loader2 className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 animate-spin text-primary" />
+              <span>
+                Continuing automatically where it stopped. Ads already created are kept — no need to upload again.
+              </span>
+            </div>
+          )}
 
           {/* Progress Section */}
-          <div className="space-y-2 bg-white/40 dark:bg-slate-800/40 p-3 rounded-lg border border-white/40 dark:border-white/5 shadow-inner mt-3">
+          <div className="space-y-2 bg-white/40 p-3 rounded-lg border border-white/40 dark:border-white/5 shadow-inner mt-3">
             <div className="flex justify-between items-end">
-              <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Overall Progress</span>
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Overall Progress</span>
               <div className="flex items-center gap-2">
                 {launchStatus === "launching" && estimatedTimeRemaining !== null && (
-                  <span className={`text-[11px] font-medium ${estimatedTimeRemaining < 0 ? "text-red-500" : "text-slate-400"}`}>
+                  <span className={`text-[11px] font-medium ${estimatedTimeRemaining < 0 ? "text-red-500" : "text-muted-foreground"}`}>
                     {estimatedTimeRemaining >= 0 
                       ? `~${Math.floor(estimatedTimeRemaining / 60)}:${(estimatedTimeRemaining % 60).toString().padStart(2, '0')} remaining`
                       : `+${Math.floor(Math.abs(estimatedTimeRemaining) / 60)}:${(Math.abs(estimatedTimeRemaining) % 60).toString().padStart(2, '0')} over time`
                     }
                   </span>
                 )}
-                <span className="text-base font-black bg-clip-text text-transparent bg-gradient-to-br from-[#1877F2] to-blue-300">{Math.round(launchProgress)}%</span>
+                <span className="text-base font-black bg-clip-text text-transparent bg-gradient-to-br from-primary to-primary">{Math.round(launchProgress)}%</span>
               </div>
             </div>
-            <div className="h-2 w-full bg-slate-200/50 dark:bg-slate-700/30 rounded-full overflow-hidden backdrop-blur-sm p-[2px] border border-white/50 dark:border-white/5 shadow-inner">
+            <div className="h-2 w-full bg-muted/50 rounded-full overflow-hidden backdrop-blur-sm p-[2px] border border-white/50 dark:border-white/5 shadow-inner">
               <div 
                 className="h-full rounded-full relative transition-all duration-500"
                 style={{ 
                   width: `${launchProgress}%`,
                   background: estimatedTimeRemaining !== null && estimatedTimeRemaining < 0 
-                    ? "linear-gradient(90deg, #eab308 0%, #ef4444 100%)"
-                    : "linear-gradient(90deg, #1877F2 0%, #60A5FA 50%, #1877F2 100%)",
+                    ? "linear-gradient(90deg, hsl(var(--warning)) 0%, hsl(var(--destructive)) 100%)"
+                    : "linear-gradient(90deg, hsl(var(--primary)) 0%, hsl(224 84% 66%) 50%, hsl(var(--primary)) 100%)",
                   backgroundSize: "200% 100%",
                   animation: "shimmer 2s linear infinite",
                   boxShadow: "0 0 12px rgba(59, 130, 246, 0.5)",
@@ -4368,21 +5236,21 @@ export default function BulkAds() {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
           {(campaignName || selectedCampaignId) && (
             <div className="md:col-span-7 glass-card rounded-lg p-3 flex items-center gap-3 min-w-0" data-testid="results-campaign-info">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-600/5 flex items-center justify-center text-[#1877F2] shadow-inner border border-white/20 shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-[hsl(224_84%_66%)]/5 flex items-center justify-center text-meta shadow-inner border border-white/20 shrink-0">
                 <Rocket className="h-4 w-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Campaign</p>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{campaignName || selectedCampaignId}</p>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Campaign</p>
+                <p className="text-sm font-semibold text-foreground truncate">{campaignName || selectedCampaignId}</p>
               </div>
               {(launchResults.campaign?.id || selectedCampaignId) && (
                 <button
                   onClick={() => copyToClipboard(launchResults.campaign?.id || selectedCampaignId, "Campaign")}
-                  className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1.5 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                  className="flex items-center gap-1.5 bg-white/50 px-2 py-1.5 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                   data-testid="copy-campaign-id-results"
                 >
-                  <span className="text-[10px] font-mono text-slate-500 hidden sm:inline">{(launchResults.campaign?.id || selectedCampaignId).slice(-8)}</span>
-                  <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                  <span className="text-[10px] font-mono text-muted-foreground hidden sm:inline">{(launchResults.campaign?.id || selectedCampaignId).slice(-8)}</span>
+                  <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                 </button>
               )}
             </div>
@@ -4395,11 +5263,11 @@ export default function BulkAds() {
                   <FolderOpen className="h-4 w-4" />
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Ad Sets</p>
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{enabledAdSets.length} total</p>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Ad Sets</p>
+                  <p className="text-sm font-semibold text-foreground">{enabledAdSets.length} total</p>
                 </div>
               </div>
-              <span className="inline-block px-2 py-1 rounded-md bg-slate-200/60 dark:bg-slate-700/60 text-[11px] font-semibold backdrop-blur-sm shrink-0">
+              <span className="inline-block px-2 py-1 rounded-md bg-muted/60 text-[11px] font-semibold backdrop-blur-sm shrink-0">
                 {enabledAdSets.reduce((sum, a) => sum + (a.videoCount || 0) + (a.imageCount || 0), 0)} CREATIVES
               </span>
             </div>
@@ -4415,7 +5283,7 @@ export default function BulkAds() {
                 className={`flex items-center justify-between p-2.5 rounded-lg transition-colors duration-200 glass-card ${
                   adSetStatuses[adset.id] === "completed" ? "border-emerald-200/40 dark:border-emerald-800/30"
                   : adSetStatuses[adset.id] === "failed" ? "border-red-200/40 dark:border-red-800/30"
-                  : adSetStatuses[adset.id] === "processing" ? "border-blue-200/40 dark:border-blue-800/30"
+                  : adSetStatuses[adset.id] === "processing" ? "border-primary/20 border-primary/40"
                   : ""
                 }`}
                 data-testid={`progress-adset-${idx}`}
@@ -4426,14 +5294,14 @@ export default function BulkAds() {
                   ) : adSetStatuses[adset.id] === "failed" ? (
                     <XCircle className="h-4 w-4 text-red-500" />
                   ) : adSetStatuses[adset.id] === "processing" ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-[#1877F2]" />
+                    <Loader2 className="h-4 w-4 animate-spin text-meta" />
                   ) : (
-                    <Clock className="h-4 w-4 text-slate-400" />
+                    <Clock className="h-4 w-4 text-muted-foreground" />
                   )}
                   <span className="text-sm font-medium">{adset.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="inline-block px-2 py-0.5 rounded-md bg-slate-200/60 dark:bg-slate-700/60 text-[10px] font-semibold backdrop-blur-sm">
+                  <span className="inline-block px-2 py-0.5 rounded-md bg-muted/60 text-[10px] font-semibold backdrop-blur-sm">
                     {(adset.videoCount || 0) + (adset.imageCount || 0)} {((adset.videoCount || 0) + (adset.imageCount || 0)) === 1 ? "CREATIVE" : "CREATIVES"}
                   </span>
                   {adSetStatuses[adset.id] !== "completed" && adSetStatuses[adset.id] !== "failed" && (() => {
@@ -4441,7 +5309,7 @@ export default function BulkAds() {
                     const imgs = adset.imageCount || 0;
                     const secs = Math.ceil(((vids * 90) + (imgs * 10) + ((vids + imgs) * 5) + 10) * 1.2);
                     return (
-                      <span className="text-[10px] font-medium text-slate-400">
+                      <span className="text-[10px] font-medium text-muted-foreground">
                         ~{secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`}
                       </span>
                     );
@@ -4457,7 +5325,7 @@ export default function BulkAds() {
           <div className="space-y-3">
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Activity Log</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activity Log</h3>
                 {isRunning && (
                   <span className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 rounded-full text-[10px] font-semibold border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -4474,9 +5342,9 @@ export default function BulkAds() {
                 )}
               </div>
               <div className="flex gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-300/80 dark:bg-slate-600/80 backdrop-blur-sm" />
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-300/80 dark:bg-slate-600/80 backdrop-blur-sm" />
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-300/80 dark:bg-slate-600/80 backdrop-blur-sm" />
+                <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/80 backdrop-blur-sm" />
+                <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/80 backdrop-blur-sm" />
+                <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/80 backdrop-blur-sm" />
               </div>
             </div>
             <div 
@@ -4496,7 +5364,7 @@ export default function BulkAds() {
               }} />
               <div className="space-y-1.5 relative z-20">
                 {launchLogs.length === 0 ? (
-                  <div className="text-slate-400 flex gap-2">
+                  <div className="text-muted-foreground flex gap-2">
                     <span className="opacity-50 select-none">$</span>
                     <span>{launchStatus === "idle" ? "Connecting to Meta API..." : "Waiting to start..."}<span className="animate-pulse">_</span></span>
                   </div>
@@ -4514,9 +5382,9 @@ export default function BulkAds() {
                         className={`flex gap-2 ${
                           isError ? "text-red-400" :
                           isSuccess ? "text-emerald-400" :
-                          isWarning ? "text-blue-400" :
-                          isAction ? "text-blue-400" :
-                          "text-slate-400"
+                          isWarning ? "text-primary" :
+                          isAction ? "text-primary" :
+                          "text-muted-foreground"
                         }`}
                       >
                         <span className={`select-none ${isSuccess ? "opacity-80" : isAction ? "animate-pulse" : "opacity-50"}`}>
@@ -4534,7 +5402,7 @@ export default function BulkAds() {
             </div>
             {isRunning && (
               <div className="flex items-center justify-between gap-3 mt-3">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Your upload will continue in the background even if you close this page.
                 </p>
                 <button
@@ -4583,7 +5451,7 @@ export default function BulkAds() {
             {launchResults.adSets.length > 0 && (
               <div className="glass-card rounded-xl p-4 relative z-10">
                 <div className="mb-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm">folder_open</span>
                     Ad Sets
                     <Badge variant="secondary" className="text-xs">{launchResults.adSets.length}</Badge>
@@ -4591,18 +5459,18 @@ export default function BulkAds() {
                 </div>
                 <div className="space-y-1.5">
                   {launchResults.adSets.map((adset, idx) => (
-                    <div key={adset.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 dark:bg-slate-800/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
+                    <div key={adset.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
                       <div className="flex items-center gap-2 min-w-0">
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                         <span className="text-xs font-medium truncate">{adset.name}</span>
                       </div>
                       <button
                         onClick={() => copyToClipboard(adset.id, "Ad Set")}
-                        className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                        className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                         data-testid={`copy-adset-id-${idx}`}
                       >
-                        <span className="text-[10px] font-mono text-slate-500">{adset.id.slice(-8)}</span>
-                        <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{adset.id.slice(-8)}</span>
+                        <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                       </button>
                     </div>
                   ))}
@@ -4613,7 +5481,7 @@ export default function BulkAds() {
             {launchResults.creatives.length > 0 && (
               <div className="glass-card rounded-xl p-4 relative z-10">
                 <div className="mb-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm">image</span>
                     Creatives
                     <Badge variant="secondary" className="text-xs">{launchResults.creatives.length}</Badge>
@@ -4621,10 +5489,10 @@ export default function BulkAds() {
                 </div>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
                   {launchResults.creatives.map((creative, idx) => (
-                    <div key={creative.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 dark:bg-slate-800/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
+                    <div key={creative.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
                       <div className="flex items-center gap-2 min-w-0">
                         {creative.type === "video" ? (
-                          <FileVideo className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                          <FileVideo className="h-3.5 w-3.5 text-primary shrink-0" />
                         ) : (
                           <Image className="h-3.5 w-3.5 text-purple-500 shrink-0" />
                         )}
@@ -4632,11 +5500,11 @@ export default function BulkAds() {
                       </div>
                       <button
                         onClick={() => copyToClipboard(creative.id, "Creative")}
-                        className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                        className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                         data-testid={`copy-creative-id-${idx}`}
                       >
-                        <span className="text-[10px] font-mono text-slate-500">{creative.id.slice(-8)}</span>
-                        <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{creative.id.slice(-8)}</span>
+                        <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                       </button>
                     </div>
                   ))}
@@ -4647,7 +5515,7 @@ export default function BulkAds() {
             {launchResults.ads.length > 0 && (
               <div className="glass-card rounded-xl p-4 relative z-10">
                 <div className="mb-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
                     <span className="material-symbols-outlined text-sm">description</span>
                     Ads
                     <Badge variant="secondary" className="text-xs">{launchResults.ads.length}</Badge>
@@ -4655,18 +5523,18 @@ export default function BulkAds() {
                 </div>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
                   {launchResults.ads.map((ad, idx) => (
-                    <div key={ad.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 dark:bg-slate-800/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
+                    <div key={ad.id || idx} className="flex items-center justify-between gap-2 rounded-lg bg-white/30 p-2.5 border border-white/30 dark:border-white/5 transition-colors duration-150">
                       <div className="flex items-center gap-2 min-w-0">
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                         <span className="text-xs truncate">{ad.name}</span>
                       </div>
                       <button
                         onClick={() => copyToClipboard(ad.id, "Ad")}
-                        className="flex items-center gap-1.5 bg-white/50 dark:bg-slate-900/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
+                        className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-md border border-white/40 dark:border-white/10 shadow-sm backdrop-blur-md cursor-pointer shrink-0"
                         data-testid={`copy-ad-id-${idx}`}
                       >
-                        <span className="text-[10px] font-mono text-slate-500">{ad.id.slice(-8)}</span>
-                        <span className="material-symbols-outlined text-xs text-slate-400">content_copy</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{ad.id.slice(-8)}</span>
+                        <span className="material-symbols-outlined text-xs text-muted-foreground">content_copy</span>
                       </button>
                     </div>
                   ))}
@@ -4678,7 +5546,7 @@ export default function BulkAds() {
               <Button
                 variant="ghost"
                 onClick={() => resetSession()}
-                className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                className="text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/60"
                 data-testid="button-start-new"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -4712,7 +5580,7 @@ export default function BulkAds() {
           <div className="flex justify-end gap-3 mt-2">
             <Button
               variant="ghost"
-              className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              className="text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/60"
               disabled
               data-testid="button-view-analytics-disabled"
             >
@@ -4726,7 +5594,7 @@ export default function BulkAds() {
             <Button
               variant="ghost"
               onClick={() => resetSession()}
-              className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              className="text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/60"
               data-testid="button-start-new-error"
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -4746,8 +5614,8 @@ export default function BulkAds() {
     if (!selectedPageId) errors.push("Facebook Page is required");
     const effectiveCta = defaultSettings.defaultCta || importedCta || adAccountSettingsData?.settings?.defaultCta;
     if (!effectiveCta) errors.push("CTA is required");
-    const effectiveUrl = defaultSettings.defaultUrl || defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.defaultUrl || adAccountSettingsData?.settings?.websiteUrl;
-    if (!effectiveUrl) errors.push("Website URL or Default URL is required");
+    const effectiveUrl = defaultSettings.websiteUrl || importedWebsiteUrl || adAccountSettingsData?.settings?.websiteUrl;
+    if (!effectiveUrl) errors.push("Website URL is required");
     if (!((selectedCampaignId && selectedCampaignId !== "__create_new__") || campaignName.trim().length > 0)) {
       errors.push("Campaign name is required");
     }
@@ -4767,13 +5635,36 @@ export default function BulkAds() {
     }
   };
 
+  const handleTargetingSave = useCallback((draft: TargetingDraft) => {
+    const normalizedGeoTargeting = Array.from(
+      new Set(
+        (draft.geoTargeting || [])
+          .map((code) => String(code || "").trim().toUpperCase())
+          .filter((code) => /^[A-Z]{2}$/.test(code)),
+      ),
+    );
+
+    if (normalizedGeoTargeting.length === 0) {
+      toast({
+        title: "Select at least one country",
+        description: "Geo targeting is required before launch.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    saveTargetingSettingsMutation.mutate({
+      ...draft,
+      geoTargeting: normalizedGeoTargeting,
+    });
+  }, [saveTargetingSettingsMutation, toast]);
+
   const handleCreativeSave = useCallback((draft: CreativeDraft) => {
     setDefaultSettings(prev => ({
       ...prev,
       pixelId: draft.pixelId,
       defaultCta: draft.defaultCta,
       websiteUrl: draft.websiteUrl,
-      defaultUrl: draft.defaultUrl,
       displayLink: draft.displayLink,
       beneficiaryName: draft.beneficiaryName,
       payerName: draft.payerName,
@@ -4783,7 +5674,6 @@ export default function BulkAds() {
       pixelId: draft.pixelId,
       defaultCta: draft.defaultCta,
       websiteUrl: draft.websiteUrl,
-      defaultUrl: draft.defaultUrl,
       displayLink: draft.displayLink,
       beneficiaryName: draft.beneficiaryName,
       payerName: draft.payerName,
@@ -4805,8 +5695,8 @@ export default function BulkAds() {
             onClick={() => navigateToStep(1)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 1 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 1 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 1 ? "" : "bg-muted"}`}>
+            {currentStep > 1 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={2} 
@@ -4815,8 +5705,8 @@ export default function BulkAds() {
             onClick={() => navigateToStep(2)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 2 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 2 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 2 ? "" : "bg-muted"}`}>
+            {currentStep > 2 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={3} 
@@ -4825,8 +5715,8 @@ export default function BulkAds() {
             onClick={() => navigateToStep(3)}
             disabled={launchStatus !== "idle" || currentStep === 5}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 3 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 3 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 3 ? "" : "bg-muted"}`}>
+            {currentStep > 3 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={4} 
@@ -4834,8 +5724,8 @@ export default function BulkAds() {
             title="Launch"
             disabled={true}
           />
-          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 4 ? "" : "bg-slate-200 dark:bg-slate-700"}`}>
-            {currentStep > 4 && <div className="absolute inset-y-0 left-0 w-full bg-[#1877F2]/20" />}
+          <div className={`flex-1 h-0.5 mx-4 relative ${currentStep > 4 ? "" : "bg-muted"}`}>
+            {currentStep > 4 && <div className="absolute inset-y-0 left-0 w-full bg-primary/20" />}
           </div>
           <WizardStep 
             step={5} 
@@ -4860,7 +5750,7 @@ export default function BulkAds() {
                 <Button
                   variant="outline"
                   size="lg"
-                  className="h-10 px-6 rounded-xl bg-white/80 hover:bg-white dark:bg-slate-800/80 dark:hover:bg-slate-700 border-slate-200/50 dark:border-slate-600/50 shadow-sm font-semibold transition-all"
+                  className="h-10 px-6 rounded-xl bg-white/80 hover:bg-card/80 dark:hover:bg-muted border-border/50 shadow-sm font-semibold transition-all"
                   data-testid="button-prev-step"
                   onClick={() => navigateToStep(currentStep - 1)}
                 >
@@ -4870,7 +5760,7 @@ export default function BulkAds() {
               )}
               <Button
                 variant="outline"
-                className="h-10 px-4 rounded-xl bg-white/60 hover:bg-white dark:bg-slate-800/60 dark:hover:bg-slate-700 border-slate-200/50 dark:border-slate-600/50 shadow-sm font-medium text-xs transition-all"
+                className="h-10 px-4 rounded-xl bg-white/60 hover:bg-card/60 dark:hover:bg-muted border-border/50 shadow-sm font-medium text-xs transition-all"
                 data-testid="button-new-upload"
                 onClick={() => resetSession()}
               >
@@ -4881,7 +5771,7 @@ export default function BulkAds() {
             {currentStep < 4 && launchStatus === "idle" && (
               <div className="flex items-center gap-3">
                 {currentStep === 3 && getStep3Errors().length > 0 && (
-                  <div className="text-xs text-[#1877F2] dark:text-blue-300 text-right max-w-[300px]" data-testid="text-step3-errors">
+                  <div className="text-xs text-meta dark:text-primary/70 text-right max-w-[300px]" data-testid="text-step3-errors">
                     {getStep3Errors().map((err, i) => (
                       <div key={i}>{err}</div>
                     ))}
@@ -4889,7 +5779,7 @@ export default function BulkAds() {
                 )}
                 <Button
                   size="lg"
-                  className="h-10 px-8 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-semibold shadow-[0_15px_30px_-5px_rgba(24,119,242,0.4)] transition-all transform hover:-translate-y-0.5"
+                  className="h-10 px-8 rounded-xl bg-primary hover:bg-primary/90 text-white font-semibold shadow-[0_15px_30px_-5px_hsl(var(--primary)/0.4)] transition-all transform hover:-translate-y-0.5"
                   data-testid="button-next-step"
                   onClick={() => setCurrentStep((s) => Math.min(4, s + 1))}
                   disabled={!canGoNext()}
@@ -4927,7 +5817,7 @@ export default function BulkAds() {
               <textarea
                 id="edit-primary-text"
                 data-testid="input-edit-primary-text"
-                className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-none overflow-hidden"
+                className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-none overflow-hidden"
                 value={editingCopy.primaryText}
                 ref={(el) => autoResizeTextarea(el)}
                 onChange={(e) => {
@@ -5126,7 +6016,7 @@ export default function BulkAds() {
           <div className="px-8 pt-8 pb-4">
             <DialogHeader className="space-y-1">
               <DialogTitle className="text-xl font-semibold tracking-tight">How it works</DialogTitle>
-              <DialogDescription className="text-sm text-slate-400">
+              <DialogDescription className="text-sm text-muted-foreground">
                 A quick guide to importing and launching your ads
               </DialogDescription>
             </DialogHeader>
@@ -5134,47 +6024,47 @@ export default function BulkAds() {
 
           <div className="px-8 pb-8 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-3">
+              <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-[#1877F2]/10 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-[#1877F2] text-lg">lock</span>
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-meta text-lg">lock</span>
                   </div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Private Folder</h4>
+                  <h4 className="text-sm font-semibold text-foreground">Private Folder</h4>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   Share your Google Drive folder with the service account email shown in the app, then paste the folder URL and sync.
                 </p>
-                <ol className="text-xs text-slate-500 dark:text-slate-400 space-y-1.5 list-none">
-                  <li className="flex items-start gap-2"><span className="text-[#1877F2] font-semibold shrink-0">1.</span>Copy the service account email</li>
-                  <li className="flex items-start gap-2"><span className="text-[#1877F2] font-semibold shrink-0">2.</span>Share your Drive folder with that email</li>
-                  <li className="flex items-start gap-2"><span className="text-[#1877F2] font-semibold shrink-0">3.</span>Paste the folder URL & click Sync</li>
+                <ol className="text-xs text-muted-foreground space-y-1.5 list-none">
+                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">1.</span>Copy the service account email</li>
+                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">2.</span>Share your Drive folder with that email</li>
+                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">3.</span>Paste the folder URL & click Sync</li>
                 </ol>
               </div>
 
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-3">
+              <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
                     <span className="material-symbols-outlined text-purple-500 text-lg">public</span>
                   </div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Public URL</h4>
+                  <h4 className="text-sm font-semibold text-foreground">Public URL</h4>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   If your folder is set to "Anyone with the link can view", just paste the URL and sync. No sharing step needed.
                 </p>
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-4">
+            <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-blue-500 text-lg">description</span>
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-primary text-lg">description</span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">DOCX Ad Copy Format</h4>
-                  <p className="text-[11px] text-slate-400">Use numbered fields. Separate A/B variants with _1, _2, etc.</p>
+                  <h4 className="text-sm font-semibold text-foreground">DOCX Ad Copy Format</h4>
+                  <p className="text-[11px] text-muted-foreground">Use numbered fields. Separate A/B variants with _1, _2, etc.</p>
                 </div>
               </div>
-              <div className="rounded-lg bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 p-4 font-mono text-xs text-slate-600 dark:text-slate-400 leading-relaxed overflow-x-auto">
+              <div className="rounded-lg bg-card border border-border p-4 font-mono text-xs text-muted-foreground leading-relaxed overflow-x-auto">
 {`DCT 161:
 
 Primary text_1:
@@ -5191,51 +6081,51 @@ Your description`}
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-5 space-y-4">
+            <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-[#1877F2]/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[#1877F2] text-lg">folder_open</span>
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-meta text-lg">folder_open</span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Folder Structure</h4>
-                  <p className="text-[11px] text-slate-400">Each subfolder becomes an Ad Set. One DOCX file for all ad copy.</p>
+                  <h4 className="text-sm font-semibold text-foreground">Folder Structure</h4>
+                  <p className="text-[11px] text-muted-foreground">Each subfolder becomes an Ad Set. One DOCX file for all ad copy.</p>
                 </div>
               </div>
-              <div className="rounded-lg bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 p-4 font-mono text-xs text-slate-600 dark:text-slate-400 leading-relaxed overflow-x-auto">
-                <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-semibold mb-1">
-                  <span className="material-symbols-outlined text-sm text-[#1877F2]">folder</span>
+              <div className="rounded-lg bg-card border border-border p-4 font-mono text-xs text-muted-foreground leading-relaxed overflow-x-auto">
+                <div className="flex items-center gap-2 text-foreground font-semibold mb-1">
+                  <span className="material-symbols-outlined text-sm text-meta">folder</span>
                   Campaign Folder/
                 </div>
                 <div className="ml-5 space-y-0.5">
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 161 - Spring_Sale/</div>
-                  <div className="ml-7 text-slate-400">creative files</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 162 - Comparison/</div>
-                  <div className="ml-7 text-slate-400">creative files</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-blue-400">folder</span>DCT 163 - Video_Ads/</div>
-                  <div className="ml-7 text-slate-400">video1.mp4</div>
-                  <div className="flex items-center gap-2 text-[#1877F2]"><span className="material-symbols-outlined text-sm">description</span>ad_copy.docx</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 161 - Spring_Sale/</div>
+                  <div className="ml-7 text-muted-foreground">creative files</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 162 - Comparison/</div>
+                  <div className="ml-7 text-muted-foreground">creative files</div>
+                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 163 - Video_Ads/</div>
+                  <div className="ml-7 text-muted-foreground">video1.mp4</div>
+                  <div className="flex items-center gap-2 text-meta"><span className="material-symbols-outlined text-sm">description</span>ad_copy.docx</div>
                 </div>
               </div>
             </div>
 
             <div>
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-4 space-y-2">
+              <div className="rounded-xl border border-border bg-muted/50 p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-md bg-green-500/10 flex items-center justify-center">
                     <span className="material-symbols-outlined text-green-500 text-sm">movie</span>
                   </div>
-                  <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300">Videos</h4>
+                  <h4 className="text-xs font-semibold text-foreground">Videos</h4>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {[".mp4", ".mov", ".avi", ".mkv"].map(f => (
-                    <span key={f} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 text-[11px] font-mono text-slate-500">{f}</span>
+                    <span key={f} className="px-2 py-0.5 rounded-md bg-card border border-border text-[11px] font-mono text-muted-foreground">{f}</span>
                   ))}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="px-8 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/30 rounded-b-2xl">
+          <div className="px-8 py-4 border-t border-border bg-muted/30 rounded-b-2xl">
             <Button
               onClick={() => setShowInfoModal(false)}
               className="w-full rounded-xl"
@@ -5247,408 +6137,22 @@ Your description`}
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showCopyEditModal} onOpenChange={(open) => {
-        setShowCopyEditModal(open);
-        if (!open) { setPasteText(""); }
-      }}>
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
-              <Edit className="h-5 w-5" />
-              Edit Ad Copy
-            </DialogTitle>
-            <DialogDescription>
-              {(() => {
-                const editingAdSet = adSets.find(a => a.id === editingAdSetId);
-                return editingAdSet ? `Editing copy for ${editingAdSet.folderName || editingAdSet.name}` : "Edit the ad copy for this DCT folder";
-              })()}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-6 py-2">
-            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 p-4 space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <Upload className="h-4 w-4" />
-                Paste text
-              </div>
-              <div className="space-y-2">
-                <textarea
-                  className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-y font-mono"
-                  placeholder={"Primary text: Your ad text here\nHeadline: Your headline\nDescription: Your description\n---\nPrimary text: Second variation\nHeadline: Second headline\nDescription: Second description"}
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                  data-testid="textarea-paste-copy"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-xs rounded-lg"
-                  data-testid="button-parse-pasted-text"
-                  disabled={!pasteText.trim()}
-                  onClick={() => {
-                    const parsed = parsePastedCopyText(pasteText);
-                    if (parsed.primaryTexts.length === 0 && parsed.headlines.length === 0 && parsed.descriptions.length === 0) {
-                      toast({
-                        title: "Could not parse text",
-                        description: "Use labels like Primary text_1:, Headline_1:, Description_1: (or separate entries with ---).",
-                        variant: "destructive",
-                      });
-                      return;
-                    }
-                    setEditingAdSetCopy({
-                      primaryTexts: parsed.primaryTexts.length > 0 ? parsed.primaryTexts : [""],
-                      headlines: parsed.headlines.length > 0 ? parsed.headlines : [""],
-                      descriptions: parsed.descriptions.length > 0 ? parsed.descriptions : [""],
-                    });
-                    setPasteText("");
-                    const variationCount = Math.max(parsed.primaryTexts.length, parsed.headlines.length, parsed.descriptions.length);
-                    toast({ title: `Parsed ${variationCount} variations from text` });
-                  }}
-                >
-                  Parse & fill fields
-                </Button>
-              </div>
-            </div>
+      <AdCopyEditDialog
+        open={showCopyEditModal}
+        onOpenChange={handleCopyEditOpenChange}
+        adSets={adSets}
+        focusAdSetId={editingAdSetId}
+        isSaving={saveAdSetCopiesMutation.isPending}
+        onSave={handleCopyEditSave}
+      />
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Primary Texts ({editingAdSetCopy.primaryTexts.length})</Label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs rounded-lg"
-                  onClick={() => setEditingAdSetCopy(prev => ({ ...prev, primaryTexts: [...prev.primaryTexts, ""] }))}
-                  data-testid="button-add-primary-text"
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Add variation
-                </Button>
-              </div>
-              <div className="space-y-3">
-                {editingAdSetCopy.primaryTexts.map((text, idx) => (
-                  <div key={idx} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Primary text {idx + 1}</span>
-                      {editingAdSetCopy.primaryTexts.length > 1 && (
-                        <button
-                          type="button"
-                          className="text-slate-400 hover:text-destructive transition-colors"
-                          onClick={() => setEditingAdSetCopy(prev => ({
-                            ...prev,
-                            primaryTexts: prev.primaryTexts.filter((_, i) => i !== idx),
-                          }))}
-                          data-testid={`button-remove-primary-${idx}`}
-                        >
-                          <XCircle className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                    <textarea
-                      className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 resize-none overflow-hidden"
-                      value={text}
-                      ref={(el) => autoResizeTextarea(el)}
-                      onChange={(e) => {
-                        autoResizeTextarea(e.currentTarget);
-                        setEditingAdSetCopy(prev => ({
-                          ...prev,
-                          primaryTexts: prev.primaryTexts.map((t, i) => i === idx ? e.target.value : t),
-                        }));
-                      }}
-                      placeholder="Enter primary text..."
-                      data-testid={`textarea-primary-text-${idx}`}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Headlines ({editingAdSetCopy.headlines.length})</Label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs rounded-lg"
-                  onClick={() => setEditingAdSetCopy(prev => ({ ...prev, headlines: [...prev.headlines, ""] }))}
-                  data-testid="button-add-headline"
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Add variation
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {editingAdSetCopy.headlines.map((text, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <span className="text-[11px] font-medium text-muted-foreground w-5 text-right shrink-0">{idx + 1}.</span>
-                    <input
-                      type="text"
-                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
-                      value={text}
-                      onChange={(e) => setEditingAdSetCopy(prev => ({
-                        ...prev,
-                        headlines: prev.headlines.map((t, i) => i === idx ? e.target.value : t),
-                      }))}
-                      placeholder="Enter headline..."
-                      data-testid={`input-headline-${idx}`}
-                    />
-                    {editingAdSetCopy.headlines.length > 1 && (
-                      <button
-                        type="button"
-                        className="text-slate-400 hover:text-destructive transition-colors shrink-0"
-                        onClick={() => setEditingAdSetCopy(prev => ({
-                          ...prev,
-                          headlines: prev.headlines.filter((_, i) => i !== idx),
-                        }))}
-                        data-testid={`button-remove-headline-${idx}`}
-                      >
-                        <XCircle className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Descriptions ({editingAdSetCopy.descriptions.length})</Label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs rounded-lg"
-                  onClick={() => setEditingAdSetCopy(prev => ({ ...prev, descriptions: [...prev.descriptions, ""] }))}
-                  data-testid="button-add-description"
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Add variation
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {editingAdSetCopy.descriptions.map((text, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <span className="text-[11px] font-medium text-muted-foreground w-5 text-right shrink-0">{idx + 1}.</span>
-                    <input
-                      type="text"
-                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
-                      value={text}
-                      onChange={(e) => setEditingAdSetCopy(prev => ({
-                        ...prev,
-                        descriptions: prev.descriptions.map((t, i) => i === idx ? e.target.value : t),
-                      }))}
-                      placeholder="Enter description..."
-                      data-testid={`input-description-${idx}`}
-                    />
-                    {editingAdSetCopy.descriptions.length > 1 && (
-                      <button
-                        type="button"
-                        className="text-slate-400 hover:text-destructive transition-colors shrink-0"
-                        onClick={() => setEditingAdSetCopy(prev => ({
-                          ...prev,
-                          descriptions: prev.descriptions.filter((_, i) => i !== idx),
-                        }))}
-                        data-testid={`button-remove-description-${idx}`}
-                      >
-                        <XCircle className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="border-t border-slate-100 dark:border-slate-800 pt-4">
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => {
-                setShowCopyEditModal(false);
-                setEditingAdSetId(null);
-              }}
-              data-testid="button-cancel-copy-edit"
-            >
-              Cancel
-            </Button>
-            <Button
-              className="rounded-xl"
-              onClick={() => {
-                if (editingAdSetId) {
-                  updateAdSetCopyMutation.mutate({
-                    adsetId: editingAdSetId,
-                    copy: {
-                      ...editingAdSetCopy,
-                      primaryTexts: editingAdSetCopy.primaryTexts.filter(t => t.trim()),
-                      headlines: editingAdSetCopy.headlines.filter(t => t.trim()),
-                      descriptions: editingAdSetCopy.descriptions.filter(t => t.trim()),
-                    },
-                  });
-                }
-              }}
-              disabled={updateAdSetCopyMutation.isPending}
-              data-testid="button-save-copy-edit"
-            >
-              {updateAdSetCopyMutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                "Save Copy"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Targeting Edit Dialog */}
-      <Dialog open={showTargetingEditDialog} onOpenChange={setShowTargetingEditDialog}>
-        <DialogContent
-          className="sm:max-w-2xl rounded-2xl"
-          onPointerDownOutside={(event) => {
-            const target = event.target as HTMLElement | null;
-            if (target?.closest('[data-country-picker-popover="true"]')) {
-              event.preventDefault();
-            }
-          }}
-          onInteractOutside={(event) => {
-            const target = event.target as HTMLElement | null;
-            if (target?.closest('[data-country-picker-popover="true"]')) {
-              event.preventDefault();
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">Edit Targeting</DialogTitle>
-            <DialogDescription>
-              Change audience targeting settings for your ads
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5 py-2">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Countries</Label>
-              <div className="flex flex-wrap gap-1.5 min-h-[40px] p-2.5 border rounded-xl bg-muted/30" data-testid="input-edit-geo">
-                {editingTargeting.geoTargeting.map((code) => {
-                  const country = META_COUNTRIES.find(c => c.code === code);
-                  return (
-                    <Badge key={code} variant="secondary" className="gap-1 text-xs rounded-lg px-2 py-1">
-                      {country ? country.name : code}
-                      <button
-                        type="button"
-                        className="ml-0.5 hover:text-destructive"
-                        onClick={() => setEditingTargeting(prev => ({
-                          ...prev,
-                          geoTargeting: prev.geoTargeting.filter(c => c !== code)
-                        }))}
-                        data-testid={`remove-country-${code}`}
-                      >
-                        <XCircle className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  );
-                })}
-              </div>
-              <CountryPicker
-                selectedCountries={editingTargeting.geoTargeting}
-                onToggle={(code) => {
-                  setEditingTargeting(prev => {
-                    const exists = prev.geoTargeting.includes(code);
-                    return {
-                      ...prev,
-                      geoTargeting: exists
-                        ? prev.geoTargeting.filter(c => c !== code)
-                        : [...prev.geoTargeting, code]
-                    };
-                  });
-                }}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-age-min" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min Age</Label>
-                <Input
-                  id="edit-age-min"
-                  type="number"
-                  min={13}
-                  max={65}
-                  value={editingTargeting.ageMin}
-                  onChange={(e) => setEditingTargeting(prev => ({ ...prev, ageMin: parseInt(e.target.value) || 18 }))}
-                  className="rounded-xl"
-                  data-testid="input-edit-age-min"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-age-max" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Max Age</Label>
-                <Input
-                  id="edit-age-max"
-                  type="number"
-                  min={13}
-                  max={65}
-                  value={editingTargeting.ageMax}
-                  onChange={(e) => setEditingTargeting(prev => ({ ...prev, ageMax: parseInt(e.target.value) || 65 }))}
-                  className="rounded-xl"
-                  data-testid="input-edit-age-max"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-gender" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gender</Label>
-              <Select
-                value={editingTargeting.gender}
-                onValueChange={(val) => setEditingTargeting(prev => ({ ...prev, gender: val as "ALL" | "MALE" | "FEMALE" }))}
-              >
-                <SelectTrigger id="edit-gender" className="rounded-xl" data-testid="select-edit-gender">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All</SelectItem>
-                  <SelectItem value="MALE">Male</SelectItem>
-                  <SelectItem value="FEMALE">Female</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" className="rounded-xl" onClick={() => setShowTargetingEditDialog(false)} data-testid="button-cancel-targeting">
-              Cancel
-            </Button>
-            <Button
-              className="rounded-xl"
-              onClick={() => {
-                const normalizedGeoTargeting = Array.from(
-                  new Set(
-                    (editingTargeting.geoTargeting || [])
-                      .map((code) => String(code || "").trim().toUpperCase())
-                      .filter((code) => /^[A-Z]{2}$/.test(code)),
-                  ),
-                );
-
-                if (normalizedGeoTargeting.length === 0) {
-                  toast({
-                    title: "Select at least one country",
-                    description: "Geo targeting is required before launch.",
-                    variant: "destructive",
-                  });
-                  return;
-                }
-
-                saveTargetingSettingsMutation.mutate({
-                  ...editingTargeting,
-                  geoTargeting: normalizedGeoTargeting,
-                });
-              }}
-              disabled={saveTargetingSettingsMutation.isPending}
-              data-testid="button-save-targeting"
-            >
-              {saveTargetingSettingsMutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                "Save"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TargetingEditDialog
+        open={showTargetingEditDialog}
+        onOpenChange={setShowTargetingEditDialog}
+        initialDraft={editingTargeting}
+        isSaving={saveTargetingSettingsMutation.isPending}
+        onSave={handleTargetingSave}
+      />
 
       <CreativeEditDialog
         open={showCreativeEditDialog}

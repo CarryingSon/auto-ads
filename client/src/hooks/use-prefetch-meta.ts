@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
+import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
 
 interface Connection {
   id: number;
@@ -8,18 +9,10 @@ interface Connection {
   status: string;
 }
 
-interface Campaign {
-  id: string;
-  name: string;
-  status: string;
-  effective_status?: string;
-  objective?: string;
-  daily_budget?: string;
-  lifetime_budget?: string;
-}
-
 const MAX_CONCURRENT_PREFETCH = 1;
 const DELAY_BETWEEN_BATCHES_MS = 4000;
+// Only the per-campaign ad set prefetch waits: those are live Meta calls. The
+// campaign list is read from the app's cache and loads right away.
 const PREFETCH_START_DELAY_MS = 2500;
 
 export function usePrefetchMetaData() {
@@ -40,19 +33,26 @@ export function usePrefetchMetaData() {
     (c) => c.provider === "meta" && c.status === "connected"
   );
 
-  const { data: campaignsData } = useQuery<{
-    data: Campaign[];
-    source: string;
-  }>({
-    queryKey: ["/api/meta/campaigns"],
-    enabled: metaConnected && prefetchReady,
+  // Same query and key as the sidebar, so this costs no extra request.
+  const { data: adAccountsData } = useQuery<{ selectedAdAccountId: string | null }>({
+    queryKey: ["/api/meta/ad-accounts"],
+    enabled: metaConnected,
+  });
+  const selectedAdAccountId = adAccountsData?.selectedAdAccountId || "";
+
+  // Load the campaign list as soon as the ad account is known, under the key
+  // the Launch page reads, so the campaign picker does not wait.
+  const { data: campaignsData } = useQuery<MetaCampaignList>({
+    queryKey: metaCampaignsQueryKey(selectedAdAccountId),
+    queryFn: fetchMetaCampaigns,
+    enabled: metaConnected && !!selectedAdAccountId,
     retry: 1,
   });
 
   const campaigns = campaignsData?.data || [];
 
   useEffect(() => {
-    if (!metaConnected || campaigns.length === 0 || prefetchingRef.current) return;
+    if (!metaConnected || !prefetchReady || campaigns.length === 0 || prefetchingRef.current) return;
 
     const activeCampaigns = campaigns.filter((campaign) => 
       campaign.effective_status === "ACTIVE" || campaign.status === "ACTIVE"

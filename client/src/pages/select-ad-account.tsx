@@ -25,12 +25,12 @@ interface PendingAdAccountsResponse {
 
 function getAccountStatusBadge(accountStatus: number) {
   if (accountStatus === 1) {
-    return { label: "ACTIVE", className: "border-emerald-200 bg-emerald-100 text-emerald-700" };
+    return { label: "ACTIVE", className: "border-success/25 bg-success/10 text-success" };
   }
   if (accountStatus === 3) {
-    return { label: "UNSETTLED", className: "border-orange-200 bg-orange-100 text-orange-700" };
+    return { label: "UNSETTLED", className: "border-warning/30 bg-warning/10 text-warning" };
   }
-  return { label: "INACTIVE", className: "border-slate-200 bg-slate-100 text-slate-600" };
+  return { label: "INACTIVE", className: "border-border bg-muted text-muted-foreground" };
 }
 
 function describePendingAccessIssue(issue?: string | null) {
@@ -180,15 +180,17 @@ export default function SelectAdAccountPage() {
         <div className="blob blob-3" />
       </div>
 
-      <div className="relative z-10 flex min-h-screen items-center justify-center p-4" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.01em" }}>
-        <div className="w-full max-w-[560px] rounded-[28px] border border-white/65 bg-white/55 p-6 shadow-[0_28px_90px_rgba(60,78,108,0.18)] backdrop-blur-2xl sm:p-8 dark:border-white/20 dark:bg-white/10">
-          <h1 className="text-3xl font-bold tracking-tight text-[#151f3b] sm:text-4xl">Select Ad Accounts</h1>
-          <p className="mt-3 text-base leading-snug text-[#5f6f8f] sm:text-lg">
+      {/* Plus Jakarta Sans was named here but never loaded, so this silently
+          fell back to the generic sans. The app's font stack is on :root. */}
+      <div className="relative z-10 flex min-h-screen items-center justify-center p-4">
+        <div className="w-full max-w-[560px] rounded-[28px] border border-card-border bg-card/70 p-6 shadow-lg backdrop-blur-2xl sm:p-8">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Select Ad Accounts</h1>
+          <p className="mt-3 text-base leading-snug text-muted-foreground sm:text-lg">
             Select which ad accounts you want to manage with Auto-ads. You can select multiple accounts for bulk launching.
           </p>
 
-          <div className="mt-5 rounded-2xl border border-emerald-200/80 bg-emerald-50/55 px-4 py-3 backdrop-blur-sm">
-            <div className="flex items-start gap-3 text-emerald-800">
+          <div className="mt-5 rounded-2xl border border-success/25 bg-success/10 px-4 py-3 backdrop-blur-sm">
+            <div className="flex items-start gap-3 text-success">
               <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
               <p className="text-sm sm:text-[15px]">
                 <span className="font-semibold">Your data is safe.</span> We only use features for adding ads and reading data for campaign optimization.
@@ -229,20 +231,20 @@ export default function SelectAdAccountPage() {
                 type="button"
                 onClick={toggleSelectAll}
                 aria-pressed={allSelected}
-                className={`flex w-full items-center gap-4 rounded-xl border px-2 py-2 text-left backdrop-blur-sm transition duration-150 active:scale-[0.99] dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10 ${
+                className={`flex w-full items-center gap-4 rounded-xl border px-3 py-2.5 text-left backdrop-blur-sm transition duration-150 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card ${
                   allSelected
-                    ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
-                    : "border-white/55 bg-white/35 hover:bg-white/50"
+                    ? "border-primary/45 bg-primary/10"
+                    : "border-border bg-background/50 hover:bg-muted"
                 }`}
               >
                 <span className={`flex h-8 w-8 items-center justify-center rounded-full border transition duration-150 ${
                   allSelected
-                    ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
-                    : "border-slate-300 bg-white text-transparent"
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-background text-transparent"
                 }`}>
                   <Check className={`h-4 w-4 transition duration-150 ${allSelected ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
                 </span>
-                <span className="text-xl leading-none font-medium text-[#31405e] sm:text-[22px]">Select all accounts</span>
+                <span className="text-base font-semibold leading-none text-foreground">Select all accounts</span>
               </button>
 
               <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
@@ -255,33 +257,33 @@ export default function SelectAdAccountPage() {
                       type="button"
                       onClick={() => toggleAccount(acc.id)}
                       aria-pressed={checked}
-                      className={`flex w-full items-center gap-3 rounded-xl border px-2 py-2.5 text-left backdrop-blur-sm transition duration-150 active:scale-[0.99] dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10 ${
+                      className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left backdrop-blur-sm transition duration-150 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card ${
                         checked
-                          ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
-                          : "border-white/55 bg-white/35 hover:bg-white/50"
+                          ? "border-primary/45 bg-primary/10"
+                          : "border-border bg-background/50 hover:bg-muted"
                       }`}
                     >
                       <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition duration-150 ${
                         checked
-                          ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
-                          : "border-slate-300 bg-white text-transparent"
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-input bg-background text-transparent"
                       }`}>
                         <Check className={`h-4 w-4 transition duration-150 ${checked ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
                       </span>
 
-                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition duration-150 ${
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition duration-150 ${
                         checked
-                          ? "border-[#1877F2]/20 bg-[#1877F2]/10 text-[#1877F2]"
-                          : "border-white/60 bg-white/70 text-[#6b7b99]"
+                          ? "border-primary/25 bg-primary/10 text-primary"
+                          : "border-border bg-background text-muted-foreground"
                       }`}>
                         <Building2 className="h-5 w-5" />
                       </span>
 
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[22px] leading-none font-semibold text-[#1d2845]">
+                        <span className="block truncate text-base font-semibold leading-tight text-foreground">
                           {acc.name || acc.id}
                         </span>
-                        <span className="mt-1 block truncate text-sm leading-none text-[#8a98b5] sm:text-base">
+                        <span className="mt-0.5 block truncate font-mono text-xs leading-none text-muted-foreground">
                           {acc.id}
                         </span>
                       </span>
@@ -295,7 +297,7 @@ export default function SelectAdAccountPage() {
               </div>
 
               {blockedPendingAdAccounts.length > 0 && (
-                <div className="pt-2 text-xs text-amber-900/85">
+                <div className="pt-2 text-xs text-warning">
                   {blockedPendingAdAccounts.length} account(s) are unavailable:
                   {blockedPendingAdAccounts.map((acc) => (
                     <div key={`blocked-${acc.id}`}>
@@ -308,7 +310,7 @@ export default function SelectAdAccountPage() {
               <Button
                 onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
                 disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
-                className="mt-4 h-14 w-full rounded-2xl border border-[#1877F2]/70 bg-[#1877F2] text-lg font-semibold text-white shadow-[0_12px_28px_rgba(24,119,242,0.26)] transition duration-150 hover:bg-[#166fe5] active:scale-[0.99] disabled:cursor-not-allowed disabled:border-[#1877F2]/15 disabled:bg-[#1877F2]/35 disabled:text-white/75 disabled:shadow-none disabled:opacity-100 sm:text-xl"
+                className="mt-4 h-14 w-full rounded-2xl text-base font-semibold shadow-lg shadow-primary/20 transition duration-150 active:scale-[0.99] disabled:cursor-not-allowed disabled:shadow-none"
                 data-testid="button-confirm-select-ad-account"
               >
                 {confirmPendingAccountsMutation.isPending ? (

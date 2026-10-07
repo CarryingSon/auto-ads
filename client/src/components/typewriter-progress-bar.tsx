@@ -88,32 +88,32 @@ export function TypewriterProgressBar({
   }, []);
 
   return (
-    <div className="bg-white/40 dark:bg-black/30 rounded-xl px-4 py-3 border border-slate-200/60 dark:border-slate-700/60 backdrop-blur-md relative overflow-hidden" data-testid="typewriter-progress-bar">
+    <div className="bg-white/40 dark:bg-black/30 rounded-xl px-4 py-3 border border-border/60 backdrop-blur-md relative overflow-hidden" data-testid="typewriter-progress-bar">
       <div className="flex items-center justify-between mb-3 relative z-10">
         <div className="flex items-center space-x-2.5">
-          {!isComplete && <div className="animate-spin w-3.5 h-3.5 border-2 border-[#1877F2] border-t-transparent rounded-full" />}
+          {!isComplete && <div className="animate-spin w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full" />}
           {isComplete && <span className="material-symbols-outlined text-green-500 text-base">check_circle</span>}
           <span
-            className="text-[13px] font-semibold text-slate-800 dark:text-white"
+            className="text-[13px] font-semibold text-foreground"
             data-testid="text-progress-status"
           >
             {displayedText}
             {displayedText.length < (targetMessageRef.current?.length || 0) && (
-              <span className="inline-block w-[2px] h-3.5 bg-[#1877F2] ml-px animate-pulse align-middle" />
+              <span className="inline-block w-[2px] h-3.5 bg-primary ml-px animate-pulse align-middle" />
             )}
           </span>
         </div>
-        <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400" data-testid="text-progress-percent">
+        <span className="text-[10px] font-mono text-muted-foreground" data-testid="text-progress-percent">
           {isComplete ? "100%" : `${Math.round(smoothProgress)}%`}
         </span>
       </div>
 
-      <div className="relative h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+      <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
         <div
-          className="absolute inset-y-0 left-0 rounded-full shadow-[0_0_10px_rgba(24,119,242,0.4)]"
+          className="absolute inset-y-0 left-0 rounded-full shadow-[0_0_10px_hsl(var(--primary)/0.4)]"
           style={{
             width: `${isComplete ? 100 : smoothProgress}%`,
-            background: "linear-gradient(90deg, #1877F2, #60A5FA, #1877F2)",
+            background: "linear-gradient(90deg, hsl(var(--primary)), hsl(224 84% 66%), hsl(var(--primary)))",
             backgroundSize: "200% 100%",
             animation: isComplete ? "none" : "liquidFlow 2s linear infinite",
             transition: isComplete ? "width 0.5s ease-out" : "width 0.15s linear",

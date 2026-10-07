@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+
+const SpendCpaChart = lazy(() => import("@/components/spend-cpa-chart"));
 
 function WaveLoadingDots({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
   const dotSize = size === "sm" ? "w-1.5 h-1.5" : size === "lg" ? "w-3 h-3" : "w-2 h-2";
@@ -12,7 +13,7 @@ function WaveLoadingDots({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className={`${dotSize} rounded-full bg-[#1877F2]`}
+          className={`${dotSize} rounded-full bg-primary`}
           style={{
             animation: `waveDot 1.2s ease-in-out ${i * 0.15}s infinite`,
             ["--wave-bounce" as string]: bounce,
@@ -183,13 +184,13 @@ export default function Dashboard() {
       {/* Header */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2">
         <div>
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-1" data-testid="text-page-title">Dashboard Overview</h2>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">Overview of your ad creative performance</p>
+          <h2 className="text-3xl font-bold text-foreground mb-1" data-testid="text-page-title">Dashboard Overview</h2>
+          <p className="text-muted-foreground text-sm">Overview of your ad creative performance</p>
         </div>
         <div className="flex items-center gap-4">
           <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger className="w-[180px] h-11 rounded-xl glass-card border-white/40 dark:border-white/10 font-medium text-gray-700 dark:text-gray-200" data-testid="select-date-range">
-              <span className="material-symbols-outlined text-gray-400 text-lg mr-2">calendar_today</span>
+            <SelectTrigger className="w-[180px] h-11 rounded-xl glass-card border-white/40 dark:border-white/10 font-medium text-foreground" data-testid="select-date-range">
+              <span className="material-symbols-outlined text-muted-foreground text-lg mr-2">calendar_today</span>
               <SelectValue placeholder="Select date range" />
             </SelectTrigger>
             <SelectContent>
@@ -214,14 +215,14 @@ export default function Dashboard() {
               data-testid={`card-kpi-${kpi.title.toLowerCase().replace(/\s+/g, '-')}`}
             >
               <div className="flex justify-between items-start mb-4">
-                <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">{kpi.title}</h3>
-                <span className="material-symbols-outlined text-gray-400 text-lg">{kpi.icon}</span>
+                <h3 className="text-sm font-medium text-muted-foreground">{kpi.title}</h3>
+                <span className="material-symbols-outlined text-muted-foreground text-lg">{kpi.icon}</span>
               </div>
               <div className="flex flex-col">
                 {kpi.value === null ? (
                   <div className="mb-1"><WaveLoadingDots size="sm" /></div>
                 ) : (
-                  <span className="text-3xl font-bold text-gray-900 dark:text-white mb-1">{kpi.value}</span>
+                  <span className="text-3xl font-bold text-foreground mb-1">{kpi.value}</span>
                 )}
                 {kpi.change && kpi.change.value > 0 ? (
                   <div className="flex items-center mt-1">
@@ -231,10 +232,10 @@ export default function Dashboard() {
                     <span className={`text-xs font-medium ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
                       {kpi.change.value.toFixed(1)}%
                     </span>
-                    <span className="text-xs text-gray-400 ml-1">vs last period</span>
+                    <span className="text-xs text-muted-foreground ml-1">vs last period</span>
                   </div>
                 ) : kpi.subtitle ? (
-                  <span className="text-xs text-gray-400">{kpi.subtitle}</span>
+                  <span className="text-xs text-muted-foreground">{kpi.subtitle}</span>
                 ) : null}
 
                 {kpi.progressBar && (
@@ -252,103 +253,43 @@ export default function Dashboard() {
       <div className="glass-panel rounded-3xl p-6 lg:p-8 relative overflow-hidden">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Ad Performance</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Spend and cost per acquisition</p>
+            <h3 className="text-lg font-bold text-foreground">Ad Performance</h3>
+            <p className="text-sm text-muted-foreground">Spend and cost per acquisition</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" />
-              <span className="text-sm text-gray-600 dark:text-gray-300">Ad Spend</span>
+              <span className="w-3 h-3 rounded-full bg-primary shadow-[0_0_8px_rgba(59,130,246,0.6)]" />
+              <span className="text-sm text-muted-foreground">Ad Spend</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.6)]" />
-              <span className="text-sm text-gray-600 dark:text-gray-300">CPA</span>
+              <span className="text-sm text-muted-foreground">CPA</span>
             </div>
           </div>
         </div>
 
         {!hasData && !insightsLoading ? (
-          <div className="flex items-center justify-center h-[300px] text-gray-400 text-sm">
+          <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
             No data available for the selected date range
           </div>
         ) : insightsLoading ? (
           <div className="flex flex-col items-center justify-center h-[300px] gap-3">
             <WaveLoadingDots size="lg" />
-            <span className="text-xs text-gray-400">Loading performance data</span>
+            <span className="text-xs text-muted-foreground">Loading performance data</span>
           </div>
         ) : (
           <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center">
+                  <WaveLoadingDots size="lg" />
+                </div>
+              }
+            >
+              <SpendCpaChart
                 data={chartData.length > 0 ? chartData : [{ name: dateRangeLabel[dateRange], spend: spend, cpa: cpa }]}
-                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              >
-                <defs>
-                  <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3B82F6" stopOpacity={1} />
-                    <stop offset="100%" stopColor="rgba(59, 130, 246, 0.3)" stopOpacity={0.3} />
-                  </linearGradient>
-                  <linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#F472B6" />
-                    <stop offset="100%" stopColor="#EC4899" />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="4 4" stroke="rgba(156, 163, 175, 0.1)" vertical={false} />
-                <XAxis 
-                  dataKey="name" 
-                  tick={{ fill: '#9CA3AF', fontSize: 12, fontFamily: "'Inter', sans-serif" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis 
-                  yAxisId="left"
-                  tick={{ fill: '#9CA3AF', fontSize: 11, fontFamily: "'Inter', sans-serif" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(value) => `€${value}`}
-                />
-                <YAxis 
-                  yAxisId="right"
-                  orientation="right"
-                  tick={{ fill: '#9CA3AF', fontSize: 11, fontFamily: "'Inter', sans-serif" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(value) => `€${value}`}
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-                    backdropFilter: 'blur(12px)',
-                    border: '1px solid rgba(255, 255, 255, 0.5)',
-                    borderRadius: '12px',
-                    padding: '12px',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
-                  }}
-                  formatter={(value: number, name: string) => [
-                    `€${value.toFixed(2)}`,
-                    name === 'spend' ? 'Ad Spend' : 'CPA'
-                  ]}
-                />
-                <Bar 
-                  yAxisId="left"
-                  dataKey="spend" 
-                  fill="url(#barGradient)"
-                  radius={[6, 6, 0, 0]}
-                  name="spend"
-                  barSize={40}
-                />
-                <Line 
-                  yAxisId="right"
-                  type="monotone" 
-                  dataKey="cpa" 
-                  stroke="#F43F5E"
-                  strokeWidth={3}
-                  dot={{ fill: '#fff', strokeWidth: 2, stroke: '#F43F5E', r: 5 }}
-                  activeDot={{ r: 7, fill: '#F43F5E', stroke: '#fff', strokeWidth: 2 }}
-                  name="cpa"
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+              />
+            </Suspense>
           </div>
         )}
       </div>

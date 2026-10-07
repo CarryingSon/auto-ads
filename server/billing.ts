@@ -1,7 +1,8 @@
 import Stripe from "stripe";
-import { and, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 
 import { db } from "./db.js";
+import { monthlyLaunchCount, monthlyLaunchUsageWhere } from "./job-queue.js";
 import {
   billingPayments,
   billingSubscriptions,
@@ -13,7 +14,6 @@ import {
 } from "../shared/schema.js";
 
 export const FREE_MONTHLY_UPLOAD_LIMIT = 3;
-export const COUNTED_QUEUE_STATUSES = ["queued", "processing", "retrying", "completed"] as const;
 const FALLBACK_PRICING = {
   monthly: { interval: "month" as const, unitAmountCents: 2900 },
   yearly: { interval: "year" as const, unitAmountCents: 29000 },
@@ -209,18 +209,9 @@ export async function countLaunchSlotsForUtcMonth(
   bounds: UtcMonthBounds = getUtcMonthBounds(),
 ): Promise<number> {
   const [row] = await db
-    .select({
-      count: sql<number>`count(*)::int`,
-    })
+    .select({ count: monthlyLaunchCount })
     .from(jobQueue)
-    .where(
-      and(
-        eq(jobQueue.userId, userId),
-        inArray(jobQueue.status, COUNTED_QUEUE_STATUSES as unknown as string[]),
-        gte(jobQueue.createdAt, bounds.start),
-        lt(jobQueue.createdAt, bounds.end),
-      ),
-    );
+    .where(monthlyLaunchUsageWhere(userId, bounds.start, bounds.end));
   return Number(row?.count || 0);
 }
 

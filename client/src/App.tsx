@@ -12,6 +12,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import NotFound from "@/pages/not-found";
 import { usePrefetchMetaData } from "@/hooks/use-prefetch-meta";
+import { MetaConnectionBanner } from "@/components/meta-connection-banner";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -82,6 +83,7 @@ function DashboardLayout() {
                 <SidebarTrigger data-testid="button-sidebar-toggle" className="text-muted-foreground hover:text-foreground" />
                 <ThemeToggle />
               </header>
+              <MetaConnectionBanner />
               <DashboardRouter />
             </main>
           </div>

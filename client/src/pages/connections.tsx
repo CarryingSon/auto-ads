@@ -60,7 +60,7 @@ function getPendingAccountStatusBadge(accountStatus: number) {
   if (accountStatus === 3) {
     return { label: "UNSETTLED", className: "border-orange-200 bg-orange-100 text-orange-700" };
   }
-  return { label: "UNKNOWN", className: "border-slate-200 bg-slate-100 text-slate-600" };
+  return { label: "UNKNOWN", className: "border-border bg-muted text-muted-foreground" };
 }
 
 export default function Connections() {
@@ -286,7 +286,7 @@ export default function Connections() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 px-2 pb-8 pt-2 md:px-4">
-      <div className="rounded-2xl border border-white/60 bg-white/60 p-5 shadow-[0_8px_30px_-20px_rgba(15,23,42,0.5)] backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/45">
+      <div className="rounded-2xl border border-white/60 bg-white/60 p-5 shadow-[0_8px_30px_-20px_rgba(15,23,42,0.5)] backdrop-blur-sm dark:border-white/10">
         <h1 className="text-2xl font-semibold tracking-tight" data-testid="text-page-title">Connections</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Connect your Meta Ads account to enable bulk uploads and keep launch defaults in sync.
@@ -294,13 +294,13 @@ export default function Connections() {
       </div>
 
       <div className="grid gap-4">
-        <Card data-testid="card-connection-meta" className="overflow-hidden border border-white/70 bg-white/80 shadow-[0_16px_34px_-24px_rgba(15,23,42,0.65)] backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/55">
-          <div className="h-1 w-full bg-gradient-to-r from-[#1877F2] via-sky-400 to-emerald-400" />
+        <Card data-testid="card-connection-meta" className="overflow-hidden border border-white/70 bg-white/80 shadow-[0_16px_34px_-24px_rgba(15,23,42,0.65)] backdrop-blur-sm dark:border-white/10">
+          <div className="h-1 w-full bg-gradient-to-r from-meta via-sky-400 to-emerald-400" />
           <CardHeader className="pb-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#1877F2]/10 ring-1 ring-[#1877F2]/15 dark:bg-[#1877F2]/20 dark:ring-[#1877F2]/30">
-                  <SiFacebook className="h-6 w-6 text-[#1877F2]" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-meta/10 ring-1 ring-meta/15 dark:bg-meta/20 dark:ring-meta/30">
+                  <SiFacebook className="h-6 w-6 text-meta" />
                 </div>
                 <div>
                   <CardTitle className="text-lg">Meta Ads</CardTitle>
@@ -338,7 +338,7 @@ export default function Connections() {
           </CardHeader>
           <CardContent className="space-y-5">
             {metaConnected && authStatus?.meta?.accountName && (
-              <div className="rounded-xl border border-slate-200/70 bg-slate-50/75 p-3 dark:border-slate-700/60 dark:bg-slate-800/40">
+              <div className="rounded-xl border border-border/70 bg-muted/75 p-3">
                 <p className="text-sm font-medium">{authStatus.meta.accountName}</p>
                 {authStatus.meta.accountEmail && (
                   <p className="text-xs text-muted-foreground">{authStatus.meta.accountEmail}</p>
@@ -414,7 +414,7 @@ export default function Connections() {
               </div>
             )}
 
-            <div className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-slate-700/60 dark:bg-slate-800/35">
+            <div className="rounded-xl border border-border/70 bg-muted/70 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <Info className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Permissions requested</span>
@@ -437,7 +437,7 @@ export default function Connections() {
                     size="sm"
                     onClick={() => testMetaMutation.mutate()}
                     disabled={testMetaMutation.isPending}
-                    className="bg-white/70 dark:bg-slate-900/40"
+                    className="bg-card/70"
                     data-testid="button-test-meta"
                   >
                     {testMetaMutation.isPending ? (
@@ -461,7 +461,7 @@ export default function Connections() {
                     variant="outline"
                     size="sm"
                     onClick={() => disconnectMetaMutation.mutate()}
-                    className="bg-white/70 text-destructive hover:text-destructive dark:bg-slate-900/40"
+                    className="bg-white/70 text-destructive hover:text-destructive"
                     disabled={disconnectMetaMutation.isPending}
                     data-testid="button-disconnect-meta"
                   >
@@ -487,10 +487,10 @@ export default function Connections() {
       <Dialog open={metaHasPendingSelection}>
         <DialogContent className="sm:max-w-[840px] rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_28px_90px_rgba(60,78,108,0.22)] backdrop-blur-xl sm:p-8 [&>button]:hidden">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-3xl font-bold tracking-tight text-[#151f3b] sm:text-4xl">
+            <DialogTitle className="text-3xl font-bold tracking-tight text-[hsl(var(--foreground))] sm:text-4xl">
               Select Ad Accounts
             </DialogTitle>
-            <DialogDescription className="mt-2 text-base leading-snug text-[#5f6f8f] sm:text-lg">
+            <DialogDescription className="mt-2 text-base leading-snug text-[hsl(var(--muted-foreground))] sm:text-lg">
               Select which ad accounts you want to manage with Auto-ads. You can select multiple accounts for bulk launching.
             </DialogDescription>
           </DialogHeader>
@@ -511,18 +511,18 @@ export default function Connections() {
               aria-pressed={allPendingSelected}
               className={`flex w-full items-center gap-4 rounded-2xl border px-4 py-4 text-left transition duration-150 active:scale-[0.99] ${
                 allPendingSelected
-                  ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
-                  : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                  ? "border-meta/45 bg-meta/10 shadow-[0_8px_22px_hsl(var(--primary)/0.12)]"
+                  : "border-border bg-muted hover:bg-muted"
               }`}
             >
               <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition duration-150 ${
                 allPendingSelected
-                  ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
-                  : "border-slate-300 bg-white text-transparent"
+                  ? "border-meta bg-meta text-white shadow-[0_6px_14px_hsl(var(--primary)/0.28)]"
+                  : "border-input bg-white text-transparent"
               }`}>
                 <Check className={`h-4 w-4 transition duration-150 ${allPendingSelected ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
               </span>
-              <span className="text-xl leading-none font-medium text-[#24304a] sm:text-2xl">Select all accounts</span>
+              <span className="text-xl leading-none font-medium text-[hsl(var(--foreground))] sm:text-2xl">Select all accounts</span>
             </button>
 
             <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
@@ -537,31 +537,31 @@ export default function Connections() {
                     aria-pressed={checked}
                     className={`flex w-full items-center gap-4 rounded-2xl border px-4 py-4 text-left transition duration-150 active:scale-[0.99] ${
                       checked
-                        ? "border-[#1877F2]/45 bg-[#1877F2]/10 shadow-[0_8px_22px_rgba(24,119,242,0.12)]"
-                        : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                        ? "border-meta/45 bg-meta/10 shadow-[0_8px_22px_hsl(var(--primary)/0.12)]"
+                        : "border-border bg-muted hover:bg-muted"
                     }`}
                   >
                     <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition duration-150 ${
                       checked
-                        ? "border-[#1877F2] bg-[#1877F2] text-white shadow-[0_6px_14px_rgba(24,119,242,0.28)]"
-                        : "border-slate-300 bg-white text-transparent"
+                        ? "border-meta bg-meta text-white shadow-[0_6px_14px_hsl(var(--primary)/0.28)]"
+                        : "border-input bg-white text-transparent"
                     }`}>
                       <Check className={`h-4 w-4 transition duration-150 ${checked ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} />
                     </span>
 
                     <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border transition duration-150 ${
                       checked
-                        ? "border-[#1877F2]/20 bg-[#1877F2]/10 text-[#1877F2]"
-                        : "border-slate-200 bg-slate-100 text-[#7587a8]"
+                        ? "border-meta/20 bg-meta/10 text-meta"
+                        : "border-border bg-muted text-[hsl(var(--muted-foreground))]"
                     }`}>
                       <Building2 className="h-6 w-6" />
                     </span>
 
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[22px] leading-none font-semibold text-[#1d2845] sm:text-[26px]">
+                      <span className="block truncate text-[22px] leading-none font-semibold text-[hsl(var(--foreground))] sm:text-[26px]">
                         {acc.name || acc.id}
                       </span>
-                      <span className="mt-2 block truncate text-sm leading-none text-[#8a98b5] sm:text-lg">
+                      <span className="mt-2 block truncate text-sm leading-none text-[hsl(var(--muted-foreground))] sm:text-lg">
                         {acc.id}
                       </span>
                     </span>
@@ -588,7 +588,7 @@ export default function Connections() {
             <Button
               onClick={() => confirmPendingAccountsMutation.mutate(selectedPendingAdAccountIds)}
               disabled={confirmPendingAccountsMutation.isPending || selectedPendingAdAccountIds.length === 0}
-              className="mt-4 h-14 w-full rounded-2xl border border-[#1877F2]/70 bg-[#1877F2] text-lg font-semibold text-white shadow-[0_12px_28px_rgba(24,119,242,0.26)] transition duration-150 hover:bg-[#166fe5] active:scale-[0.99] disabled:cursor-not-allowed disabled:border-[#1877F2]/15 disabled:bg-[#1877F2]/35 disabled:text-white/75 disabled:shadow-none disabled:opacity-100 sm:text-xl"
+              className="mt-4 h-14 w-full rounded-2xl border border-meta/70 bg-meta text-lg font-semibold text-white shadow-[0_12px_28px_hsl(var(--primary)/0.26)] transition duration-150 hover:bg-meta-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:border-meta/15 disabled:bg-meta/35 disabled:text-white/75 disabled:shadow-none disabled:opacity-100 sm:text-xl"
               data-testid="button-confirm-pending-ad-accounts"
             >
               {confirmPendingAccountsMutation.isPending ? (
@@ -601,7 +601,7 @@ export default function Connections() {
         </DialogContent>
       </Dialog>
 
-      <Card className="border border-slate-200/70 bg-white/65 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.6)] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/40">
+      <Card className="border border-border/70 bg-white/65 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.6)] backdrop-blur-sm">
         <CardContent className="py-6">
           <div className="flex items-start gap-4">
             <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
