@@ -13,6 +13,9 @@ for (const f of FIELD_NAMES) {
   PRECOMPILED_LINE[f] = new RegExp(`${f}\\s*\\d*\\s*:\\s*([^\\n]+)`, "i");
 }
 
+// Separates text variations held in one field; the launch splits on it.
+export const DOCX_VARIATION_SEPARATOR = "\n\n---\n\n";
+
 const SECTION_SPLIT_RE = /(?=(?:Ad|DCT)\s*\d{1,3}:?)/i;
 const INDEX_RE = /^(?:Ad|DCT)\s*(\d{1,3}):?/i;
 
@@ -135,6 +138,19 @@ function normalizeNewlines(text: string): string {
     .trim();
 }
 
+// Just the document's text. Callers that parse the copy themselves use this
+// instead of parseDocx, which may call the AI parser when its own fails.
+export async function extractDocxText(buffer: Buffer): Promise<{ rawText: string; method: "zip" | "mammoth" }> {
+  try {
+    return { rawText: extractTextFromDocxZip(buffer), method: "zip" };
+  } catch {
+    console.log("[DOCX Parser] ZIP extraction failed, falling back to mammoth");
+    const mammoth = await import("mammoth");
+    const result = await mammoth.default.extractRawText({ buffer });
+    return { rawText: result.value, method: "mammoth" };
+  }
+}
+
 export async function parseDocxDeterministic(buffer: Buffer): Promise<{
   rawText: string;
   ads: ExtractedAdData[];
@@ -142,17 +158,7 @@ export async function parseDocxDeterministic(buffer: Buffer): Promise<{
 }> {
   const startTime = performance.now();
 
-  let rawText: string;
-  let extractMethod = "zip";
-  try {
-    rawText = extractTextFromDocxZip(buffer);
-  } catch (zipErr) {
-    console.log("[DOCX Parser] ZIP extraction failed, falling back to mammoth");
-    const mammoth = await import("mammoth");
-    const result = await mammoth.default.extractRawText({ buffer });
-    rawText = result.value;
-    extractMethod = "mammoth";
-  }
+  const { rawText, method: extractMethod } = await extractDocxText(buffer);
 
   const extractTime = performance.now();
   console.log(`[DOCX Parser] Besedilo izvlečeno iz datoteke (${extractMethod}), ${rawText.length} znakov v ${(extractTime - startTime).toFixed(0)}ms`);
@@ -350,11 +356,13 @@ export async function parseDocx(buffer: Buffer): Promise<{
     const dctBlocks = parseDCTCopyFromText(deterministicResult.rawText);
     const validBlocks = dctBlocks.filter(b => b.primaryTexts.length > 0 && b.headlines.length > 0);
     if (validBlocks.length > 0) {
+      // Keep every variation, joined the way the launch splits them again.
+      const joinVariations = (values: string[]) => values.filter(Boolean).join(DOCX_VARIATION_SEPARATOR);
       const fallbackAds: ExtractedAdData[] = validBlocks.map((block, idx) => ({
         index: idx + 1,
-        primary_text: block.primaryTexts[0] || "",
-        headline: block.headlines[0] || "",
-        description: block.descriptions[0] || "",
+        primary_text: joinVariations(block.primaryTexts),
+        headline: joinVariations(block.headlines),
+        description: joinVariations(block.descriptions),
         cta: "LEARN_MORE" as ExtractedAdData["cta"],
         url: "",
         utm: "",

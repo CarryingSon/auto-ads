@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 
 import { db, pool } from "./db.js";
 import {
@@ -7,7 +7,7 @@ import {
   type JobQueue,
 } from "../shared/schema.js";
 
-export type QueueStatus = "queued" | "processing" | "retrying" | "completed" | "failed";
+export type QueueStatus = "queued" | "processing" | "retrying" | "completed" | "failed" | "cancelled";
 export type QueueAttemptDetails = Record<string, unknown>;
 
 export interface LaunchQueuePayload {
@@ -43,6 +43,22 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 // platform kills a run.
 const LOCK_WINDOW_MINUTES = 6;
 const MONTHLY_COUNTED_STATUSES: QueueStatus[] = ["queued", "processing", "retrying", "completed"];
+
+// What uses up a monthly launch: one launch (job), however many queue rows
+// its retries add. Failed launches are free; a cancelled one counts once it
+// had started running, since it may already have created ads.
+export function monthlyLaunchUsageWhere(userId: string, monthStart: Date, monthEnd: Date) {
+  return and(
+    eq(jobQueue.userId, userId),
+    gte(jobQueue.createdAt, monthStart),
+    lt(jobQueue.createdAt, monthEnd),
+    or(
+      inArray(jobQueue.status, MONTHLY_COUNTED_STATUSES),
+      and(eq(jobQueue.status, "cancelled"), isNotNull(jobQueue.startedAt)),
+    ),
+  );
+}
+export const monthlyLaunchCount = sql<number>`count(distinct ${jobQueue.jobId})::int`;
 let ensureQueueTablesPromise: Promise<void> | null = null;
 
 async function ensureQueueTables(): Promise<void> {
@@ -137,18 +153,9 @@ export async function enqueueLaunchJobWithMonthlyQuotaGuard(params: {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${params.userId}))`);
 
     const [usageRow] = await tx
-      .select({
-        count: sql<number>`count(*)::int`,
-      })
+      .select({ count: monthlyLaunchCount })
       .from(jobQueue)
-      .where(
-        and(
-          eq(jobQueue.userId, params.userId),
-          inArray(jobQueue.status, MONTHLY_COUNTED_STATUSES),
-          gte(jobQueue.createdAt, params.monthStart),
-          lt(jobQueue.createdAt, params.monthEnd),
-        ),
-      );
+      .where(monthlyLaunchUsageWhere(params.userId, params.monthStart, params.monthEnd));
 
     const used = Number(usageRow?.count || 0);
     if (used >= params.monthlyLimit) {
@@ -438,7 +445,7 @@ export async function getQueueItemById(queueId: string) {
 async function recordAttempt(
   queueId: string,
   attemptNumber: number,
-  status: "processing" | "completed" | "retrying" | "failed" | "yielded",
+  status: "processing" | "completed" | "retrying" | "failed" | "yielded" | "cancelled",
   errorMessage?: string,
   details?: QueueAttemptDetails,
 ) {
@@ -453,10 +460,32 @@ async function recordAttempt(
   });
 }
 
+// Stops a job's pending queue rows. They are kept as "cancelled" rather than
+// deleted, so a launch that already ran still counts towards the monthly
+// limit and its history stays.
 export async function clearQueueForJob(jobId: string): Promise<void> {
   await ensureQueueTables();
 
   await db
-    .delete(jobQueue)
+    .update(jobQueue)
+    .set({ status: "cancelled", lockedBy: null, lockedUntil: null, completedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(jobQueue.jobId, jobId), inArray(jobQueue.status, ["queued", "retrying", "processing"])));
+}
+
+export async function markQueueCancelled(queueId: string, details: QueueAttemptDetails = {}): Promise<void> {
+  await ensureQueueTables();
+
+  const current = await getQueueItemById(queueId);
+  if (!current) return;
+
+  await db
+    .update(jobQueue)
+    .set({ status: "cancelled", lockedBy: null, lockedUntil: null, completedAt: new Date(), updatedAt: new Date() })
+    .where(eq(jobQueue.id, queueId));
+
+  await recordAttempt(queueId, current.attempts, "cancelled", "Upload cancelled by user", {
+    jobId: current.jobId,
+    userId: current.userId,
+    ...details,
+  });
 }

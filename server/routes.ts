@@ -5,7 +5,7 @@ import multer from "multer";
 import { z } from "zod";
 import { storage } from "./storage.js";
 // Google Drive functions imported dynamically where needed
-import { parseDocx, validateAds } from "./docx-parser.js";
+import { DOCX_VARIATION_SEPARATOR, extractDocxText, parseDocx, validateAds } from "./docx-parser.js";
 import type { ExtractedAdData } from "../shared/schema.js";
 import { MetaAdsApi, VideoReadyDeadlineError, createSyncLog, isMetaRateLimitError, updateSyncLog } from "./meta-ads-api.js";
 import { validateMetaLaunchData, validateAdSetBeforeCreation } from "./meta-ads-validation.js";
@@ -35,6 +35,7 @@ import {
   failOrRetryQueueItem,
   getLatestQueueForJob,
   clearQueueForJob,
+  markQueueCancelled,
   markQueueFailed,
   yieldQueueItem,
   type LaunchQueuePayload,
@@ -1214,6 +1215,37 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching connections:", error);
       res.status(500).json({ error: "Failed to fetch connections" });
+    }
+  });
+
+  // How long the Meta connection has left. Meta user tokens last about 60
+  // days and cannot be refreshed, so the app warns before a launch fails.
+  app.get("/api/meta/connection-health", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const [metaOAuth] = await db.select()
+        .from(oauthConnections)
+        .where(and(eq(oauthConnections.userId, userId), eq(oauthConnections.provider, "meta")))
+        .orderBy(sql`${oauthConnections.updatedAt} DESC`, sql`${oauthConnections.connectedAt} DESC`)
+        .limit(1);
+
+      if (!metaOAuth || metaOAuth.status !== "connected") {
+        return res.json({ connected: false, tokenExpiresAt: null, daysLeft: null, expired: false });
+      }
+      const expiresAt = metaOAuth.tokenExpiresAt ? new Date(metaOAuth.tokenExpiresAt) : null;
+      const msLeft = expiresAt ? expiresAt.getTime() - Date.now() : null;
+      res.json({
+        connected: true,
+        tokenExpiresAt: expiresAt?.toISOString() ?? null,
+        daysLeft: msLeft === null ? null : Math.max(0, Math.floor(msLeft / (24 * 60 * 60 * 1000))),
+        expired: msLeft !== null && msLeft <= 0,
+      });
+    } catch (error) {
+      console.error("Error reading Meta connection health:", error);
+      res.status(500).json({ error: "Failed to read Meta connection" });
     }
   });
 
@@ -2596,10 +2628,9 @@ export async function registerRoutes(
           }
 
           if (errorMessage.toLowerCase().includes("cancelled")) {
-            await markQueueFailed(queueItem.id, errorMessage, {
+            await markQueueCancelled(queueItem.id, {
               workerId,
               durationMs,
-              reason: "cancelled",
             });
             await storage.updateJob(payload.jobId, {
               status: "failed",
@@ -2701,6 +2732,9 @@ export async function registerRoutes(
       globalSettingsRecord,
     } = params;
 
+    // Set once logging is ready; writes any log lines not yet saved.
+    let drainLogs: (() => Promise<void>) | null = null;
+
     try {
       // Initialize Meta API in background context
       const metaApi = new MetaAdsApi(userId);
@@ -2721,6 +2755,37 @@ export async function registerRoutes(
         adAccountId,
         campaignId: campaignId ?? null,
       };
+      // The activity feed reads job.logs. Writes go out one at a time, each
+      // with the latest lines: firing one write per line let an older list
+      // land after a newer one and drop the last lines from the feed.
+      let logWriteInFlight: Promise<void> | null = null;
+      let logWritePending = false;
+      const saveLogs = () => {
+        if (logWriteInFlight) {
+          logWritePending = true;
+          return;
+        }
+        logWriteInFlight = storage.updateJob(jobId, { logs: [...logs] })
+          .then(() => undefined)
+          .catch((err) => {
+            console.error("[Launch] Failed to save log to DB:", err);
+          })
+          .finally(() => {
+            logWriteInFlight = null;
+            if (logWritePending) {
+              logWritePending = false;
+              saveLogs();
+            }
+          });
+      };
+      drainLogs = async () => {
+        while (logWriteInFlight) await logWriteInFlight;
+        if (logWritePending) {
+          logWritePending = false;
+          saveLogs();
+          while (logWriteInFlight) await logWriteInFlight;
+        }
+      };
       const log = (
         message: string,
         type: JobLogType = "info",
@@ -2728,9 +2793,7 @@ export async function registerRoutes(
         adsetId?: string | null,
       ) => {
         logs.push(message);
-        storage.updateJob(jobId, { logs }).catch(err => {
-          console.error("[Launch] Failed to save log to DB:", err);
-        });
+        saveLogs();
         emitJobLog(jobId, message, type, { ...baseDetails, ...details }, adsetId);
       };
       const launchStartedAt = Date.now();
@@ -3608,7 +3671,7 @@ export async function registerRoutes(
                 log(`Ad set "${adSetName || adset.name}" completed — ${adsCreatedForThisAdSet} ads created`, "success");
                 const adSetObj = (await storage.getMetaObjectsByJob(jobId)).find(obj => obj.objectType === "adset" && obj.adsetId === adset.id);
                 if (adSetObj) await storage.updateMetaObject(adSetObj.id, { status: "created" });
-                await storage.updateJob(jobId, { logs });
+                saveLogs();
               }
             } else {
               // DYNAMIC MODE: 1 ad per asset with all text variations for A/B testing
@@ -3696,7 +3759,7 @@ export async function registerRoutes(
                 log(`Ad set "${adSetName || adset.name}" completed — ${adsCreatedForThisAdSet} ads created`, "success");
                 const adSetObj = (await storage.getMetaObjectsByJob(jobId)).find(obj => obj.objectType === "adset" && obj.adsetId === adset.id);
                 if (adSetObj) await storage.updateMetaObject(adSetObj.id, { status: "created" });
-                await storage.updateJob(jobId, { logs });
+                saveLogs();
               }
             }
           } else {
@@ -3718,6 +3781,7 @@ export async function registerRoutes(
           totalAdsCreated,
           adSetCount: adSetIds.length,
         });
+        await drainLogs();
         await storage.updateJob(jobId, {
           status: "done",
           completedAt: new Date(),
@@ -3730,6 +3794,9 @@ export async function registerRoutes(
       console.log(`[Background] Job ${jobId} completed: ${totalAdsCreated} ads created`);
       return { totalAdsCreated, adSetCount: adSetIds.length };
     } catch (error) {
+      // Lines logged just before stopping (the hand-off note, the error)
+      // must reach the feed before the worker updates the job.
+      await drainLogs?.();
       // The job status is left to the worker, which knows whether this run
       // hands off, retries or really fails. Writing "error" here showed the
       // user a failed upload that then carried on in the background.
@@ -4235,7 +4302,6 @@ export async function registerRoutes(
         normalizeDCTName,
       } = await import("./google-drive.js");
       const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser.js");
-      const { parseDocx } = await import("./docx-parser.js");
       
       const folderId = extractFolderIdFromUrl(driveUrl);
       if (!folderId) {
@@ -4292,8 +4358,7 @@ export async function registerRoutes(
           } else {
             // Fall back to mammoth for .docx files
             const docxBuffer = await downloadFileAsBuffer(bestGlobalDocx.id!);
-            const parseResult = await parseDocx(docxBuffer);
-            rawText = parseResult.rawText;
+            rawText = (await extractDocxText(docxBuffer)).rawText;
           }
           const parsedBlocks = parseDCTCopyFromText(rawText);
           globalCopyBlocksArray = parsedBlocks; // Store for order-based matching
@@ -4359,8 +4424,7 @@ export async function registerRoutes(
               rawText = plainText;
             } else {
               const docxBuffer = await downloadFileAsBuffer(bestDocx.id);
-              const parseResult = await parseDocx(docxBuffer);
-              rawText = parseResult.rawText;
+              rawText = (await extractDocxText(docxBuffer)).rawText;
             }
             const parsedBlocks = parseDCTCopyFromText(rawText);
             parsedCopy = parsedBlocks.length === 1 ? parsedBlocks[0] : parsedBlocks.find(b => 
@@ -4801,10 +4865,12 @@ export async function registerRoutes(
       const headlines: string[] = [];
       const descriptions: string[] = [];
 
+      const variations = (value: string) =>
+        value.split(DOCX_VARIATION_SEPARATOR).map((text) => text.trim()).filter(Boolean);
       for (const ad of result.ads) {
-        if (ad.primary_text) primaryTexts.push(ad.primary_text);
-        if (ad.headline) headlines.push(ad.headline);
-        if (ad.description) descriptions.push(ad.description);
+        primaryTexts.push(...variations(ad.primary_text || ""));
+        headlines.push(...variations(ad.headline || ""));
+        descriptions.push(...variations(ad.description || ""));
       }
 
       res.json({
@@ -5146,7 +5212,6 @@ export async function registerRoutes(
         getFileType,
         getServiceAccountEmail,
       } = await import("./google-drive-service-account.js");
-      const { parseDocx } = await import("./docx-parser.js");
       const { parseDCTCopyFromText, normalizeDCTName, parseDCTFolderName } = await import("./google-drive.js");
       const { detectGeoSplits, getGeoTargetingForMarket } = await import("./geo-split-parser.js");
       
@@ -5200,8 +5265,7 @@ export async function registerRoutes(
       if (globalDocx) {
         try {
           const docxBuffer = await downloadFile(globalDocx.id);
-          const parseResult = await parseDocx(docxBuffer);
-          const parsedBlocks = parseDCTCopyFromText(parseResult.rawText);
+          const parsedBlocks = parseDCTCopyFromText((await extractDocxText(docxBuffer)).rawText);
           globalCopyBlocksArray = parsedBlocks;
           for (const block of parsedBlocks) {
             const key = normalizeDCTName(block.dctName);
@@ -5248,8 +5312,7 @@ export async function registerRoutes(
           docxSource = 'per-dct';
           try {
             const docxBuffer = await downloadFile(dct.docxFile.id);
-            const parseResult = await parseDocx(docxBuffer);
-            const parsedBlocks = parseDCTCopyFromText(parseResult.rawText);
+            const parsedBlocks = parseDCTCopyFromText((await extractDocxText(docxBuffer)).rawText);
             parsedCopy = parsedBlocks.length === 1 ? parsedBlocks[0] : parsedBlocks.find(b => 
               normalizeDCTName(b.dctName) === normalizeDCTName(dct.name || "")
             ) || parsedBlocks[0];
