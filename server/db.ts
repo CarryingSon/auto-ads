@@ -4,9 +4,26 @@ import * as schema from "../shared/schema.js";
 
 const { Pool } = pg;
 
-const connectionString = process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL;
 const isProduction = process.env.NODE_ENV === "production";
 const isVercel = Boolean(process.env.VERCEL);
+
+// `npm run dev` on a laptop loads the same .env as production, so it would
+// read and write production data (sessions, queue, launches). Local
+// development uses DEV_DATABASE_URL and refuses to start without it, unless
+// ALLOW_PRODUCTION_DB_IN_DEV=true says the production database is intended.
+const isLocalDevelopment = process.env.NODE_ENV === "development" && !isVercel;
+function resolveConnectionString(): string | undefined {
+  const configured = process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL;
+  if (!isLocalDevelopment) return configured;
+  if (process.env.DEV_DATABASE_URL) return process.env.DEV_DATABASE_URL;
+  if (process.env.ALLOW_PRODUCTION_DB_IN_DEV === "true") return configured;
+  throw new Error(
+    "Local development would use the production database. Set DEV_DATABASE_URL to a separate database " +
+      "(for example a Supabase branch), or set ALLOW_PRODUCTION_DB_IN_DEV=true if you really mean production.",
+  );
+}
+
+const connectionString = resolveConnectionString();
 
 if (!connectionString) {
   throw new Error(
