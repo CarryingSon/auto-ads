@@ -727,7 +727,7 @@ export default function Landing() {
               How <span className="text-meta">Auto-ads</span> works
             </h2>
             <p className="text-lg text-muted-foreground">
-              Three simple steps to save you 100's of hours every month.
+              Three simple steps to save you hundreds of hours every month.
             </p>
           </div>
           <div className="relative max-w-5xl mx-auto">
