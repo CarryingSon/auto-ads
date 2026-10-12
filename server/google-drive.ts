@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import { isServiceAccountConfigured } from './google-drive-service-account.js';
+import { cleanCopyText } from './copy-text.js';
 
 let cachedClient: ReturnType<typeof google.drive> | null = null;
 
@@ -567,7 +568,7 @@ function extractCopyFields(text: string): { primaryTexts: string[]; headlines: s
     );
     let match;
     while ((match = regex.exec(text)) !== null) {
-      const value = match[2].trim();
+      const value = cleanCopyText(match[2]);
       if (value) results.push(value);
     }
     return results;
