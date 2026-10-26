@@ -353,8 +353,17 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
       .where(eq(globalSettings.userId, userId))
       .limit(1),
     countFreeLaunchesUsed(userId),
-    countRewardedReferrals(userId),
-    hasRedeemedIntroOffer(userId),
+    // Invite bonuses and the offer flag only add to the free plan. If they
+    // cannot be read, the status (and paying users' Pro) must still load:
+    // count no bonus and hide the offer.
+    countRewardedReferrals(userId).catch((error) => {
+      console.warn("[Billing] Could not read referral bonuses", { userId, error: error instanceof Error ? error.message : error });
+      return 0;
+    }),
+    hasRedeemedIntroOffer(userId).catch((error) => {
+      console.warn("[Billing] Could not read offer redemptions", { userId, error: error instanceof Error ? error.message : error });
+      return true;
+    }),
   ]);
 
   const globalPlanType = settings[0]?.planType || "free";
