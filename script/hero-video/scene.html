@@ -1,0 +1,345 @@
+<!doctype html>
+<!--
+  The landing page hero film. render.mjs loads this page, pauses every
+  animation and seeks frame by frame, so all motion is defined here as Web
+  Animations with absolute start times (in seconds) on one 24s timeline.
+  Open it in a browser to preview it live.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Auto-ads hero film</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=block">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  :root {
+    --primary: #2d5bd7;
+    --primary-2: #5b82ec;
+    --meta: #1a7cf0;
+    --ink: #111827;
+    --muted: #6b7280;
+    --line: rgba(15, 23, 42, 0.07);
+    --green: #16a34a;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--ink);
+    background: linear-gradient(160deg, #eef2fc 0%, #f6f7fb 55%, #eef1fb 100%);
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+  }
+  .abs { position: absolute; }
+  .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .55; }
+
+  .caption { position: absolute; left: 0; right: 0; top: 92px; text-align: center; }
+  .caption h2 { font-size: 68px; font-weight: 800; letter-spacing: -0.035em; line-height: 1.05; }
+  .caption p { margin-top: 18px; font-size: 27px; color: var(--muted); font-weight: 500; letter-spacing: -0.01em; }
+  .accent { color: var(--meta); }
+
+  .window {
+    position: absolute; background: #fff; border-radius: 28px; overflow: hidden;
+    box-shadow: 0 50px 100px -30px rgba(30, 41, 90, .28), 0 0 0 1px rgba(15, 23, 42, .05);
+  }
+  .titlebar { height: 58px; display: flex; align-items: center; gap: 10px; padding: 0 26px; border-bottom: 1px solid var(--line); background: #fbfbfd; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; }
+  .titlebar .t { margin-left: 14px; font-size: 19px; font-weight: 500; color: var(--muted); }
+
+  .row { display: flex; align-items: center; gap: 20px; height: 76px; padding: 0 34px; border-bottom: 1px solid var(--line); font-size: 25px; font-weight: 500; }
+  .row .ico { width: 34px; text-align: center; font-size: 27px; }
+  .chip { margin-left: auto; padding: 8px 16px; border-radius: 999px; font-size: 18px; font-weight: 600; white-space: nowrap; }
+
+  .field { height: 78px; border-radius: 18px; border: 2px solid #dfe5f3; display: flex; align-items: center; gap: 16px; padding: 0 26px; font-size: 25px; color: var(--ink); background: #fafbff; }
+  .btn { height: 78px; border-radius: 18px; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; gap: 14px; font-size: 25px; font-weight: 700; box-shadow: 0 16px 30px -10px rgba(45, 91, 215, .55); }
+
+  .card { position: absolute; width: 400px; height: 500px; background: #fff; border-radius: 26px; padding: 26px; box-shadow: 0 40px 80px -30px rgba(30, 41, 90, .3), 0 0 0 1px rgba(15, 23, 42, .05); }
+  .card .name { font-size: 27px; font-weight: 700; letter-spacing: -0.02em; }
+  .card .dct { font-size: 17px; color: var(--muted); margin-top: 4px; font-weight: 500; }
+  .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
+  .thumb { aspect-ratio: 4 / 5; border-radius: 14px; display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, .92); font-size: 30px; position: relative; overflow: hidden; }
+  .thumb .play { position: absolute; right: 8px; bottom: 8px; width: 28px; height: 28px; border-radius: 50%; background: rgba(0, 0, 0, .35); display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .copy { position: absolute; left: 26px; right: 26px; bottom: 26px; border-radius: 16px; background: #f5f7fd; padding: 16px 18px; }
+  .copy .lbl { font-size: 15px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: .08em; display: flex; align-items: center; gap: 8px; }
+  .copy .txt { font-size: 20px; font-weight: 600; margin-top: 6px; }
+
+  .lrow { display: flex; align-items: center; gap: 22px; height: 92px; padding: 0 36px; border-bottom: 1px solid var(--line); font-size: 25px; font-weight: 600; }
+  .lrow .sub { font-size: 18px; color: var(--muted); font-weight: 500; }
+  .status { margin-left: auto; position: relative; width: 210px; height: 44px; }
+  .status > div { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; font-size: 19px; font-weight: 600; }
+
+  .cursor { position: absolute; left: 0; top: 0; width: 44px; height: 44px; z-index: 50; filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .25)); }
+  .ripple { position: absolute; width: 70px; height: 70px; margin: -35px 0 0 -35px; border-radius: 50%; border: 4px solid var(--primary); z-index: 49; opacity: 0; }
+</style>
+</head>
+<body>
+  <div class="blob" id="b1" style="width:760px;height:760px;left:-200px;top:-260px;background:#8ea8ff"></div>
+  <div class="blob" id="b2" style="width:680px;height:680px;right:-180px;bottom:-280px;background:#9ad7ff"></div>
+  <div class="blob" id="b3" style="width:520px;height:520px;left:820px;top:640px;background:#c9b8ff;opacity:.35"></div>
+
+  <!-- Captions -->
+  <div class="caption" id="c1"><h2>Your creatives live in <span class="accent"><i class="fab fa-google-drive"></i> Google Drive.</span></h2><p>One folder per campaign, one subfolder per ad set.</p></div>
+  <div class="caption" id="c2"><h2>Paste one folder link.</h2><p>Auto-ads reads every subfolder, creative and line of copy.</p></div>
+  <div class="caption" id="c3"><h2>Every folder becomes an ad set.</h2><p>Creatives grouped, ad copy matched automatically.</p></div>
+  <div class="caption" id="c4"><h2>Launch to <span class="accent"><i class="fab fa-meta"></i> Meta</span> in one click.</h2><p>Every ad set, every ad, published for you.</p></div>
+
+  <!-- Scene 1: Drive folder -->
+  <div class="window" id="drive" style="left:440px;top:390px;width:1040px">
+    <div class="titlebar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span class="t">My Drive › Spring Campaign</span></div>
+    <div class="row" data-r><span class="ico" style="color:#f59e0b"><i class="fas fa-folder-open"></i></span>Spring Campaign<span class="chip" style="background:#e8efff;color:var(--primary)">Campaign</span></div>
+    <div class="row" data-r style="padding-left:84px"><span class="ico" style="color:#94a3b8"><i class="fas fa-folder"></i></span>DCT 161 Spring_Sale<span class="chip" style="background:#f1f5f9;color:var(--muted)">4 images</span></div>
+    <div class="row" data-r style="padding-left:84px"><span class="ico" style="color:#94a3b8"><i class="fas fa-folder"></i></span>DCT 162 Comparison<span class="chip" style="background:#f1f5f9;color:var(--muted)">3 images</span></div>
+    <div class="row" data-r style="padding-left:84px"><span class="ico" style="color:#94a3b8"><i class="fas fa-folder"></i></span>DCT 163 Video_Ads<span class="chip" style="background:#f1f5f9;color:var(--muted)">2 videos</span></div>
+    <div class="row" data-r style="padding-left:84px"><span class="ico" style="color:#94a3b8"><i class="fas fa-folder"></i></span>DCT 164 New_Concepts<span class="chip" style="background:#f1f5f9;color:var(--muted)">5 images</span></div>
+    <div class="row" data-r style="padding-left:84px;border:0"><span class="ico" style="color:#3b82f6"><i class="fas fa-file-lines"></i></span>ad_copy<span class="chip" style="background:#fff4e0;color:#b45309">Copy for all</span></div>
+  </div>
+
+  <!-- Scene 2: Import -->
+  <div class="window" id="import" style="left:460px;top:430px;width:1000px;padding:0">
+    <div class="titlebar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span class="t">Auto-ads › Launch</span></div>
+    <div style="padding:40px 50px">
+      <div style="font-size:30px;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:14px"><i class="fas fa-folder-open" style="color:var(--meta)"></i>Import Ad Folder</div>
+      <div style="font-size:21px;color:var(--muted);margin-top:8px">Paste a Google Drive folder link. Each DCT subfolder becomes an ad set.</div>
+      <div class="field" style="margin-top:30px"><i class="fas fa-link" style="color:#94a3b8"></i><span id="url"></span><span id="caret" style="width:3px;height:32px;background:var(--primary);margin-left:-12px"></span></div>
+      <div style="position:relative;margin-top:24px;height:78px">
+        <div class="btn" id="syncBtn" style="position:absolute;inset:0"><i class="fas fa-rotate"></i>Sync Folder</div>
+        <div id="syncProg" style="position:absolute;inset:0;border-radius:18px;background:#f1f5fe;overflow:hidden;display:flex;align-items:center;padding:0 28px;font-size:23px;font-weight:600;color:var(--primary);gap:14px">
+          <div id="syncFill" style="position:absolute;left:0;top:0;bottom:0;width:100%;background:linear-gradient(90deg,#dbe6ff,#c3d4ff);transform-origin:left"></div>
+          <span style="position:relative;display:flex;align-items:center;gap:14px" id="syncTxt"><i class="fas fa-circle-notch fa-spin"></i>Scanning folder structure…</span>
+          <span style="position:absolute;left:28px;display:flex;align-items:center;gap:14px;color:var(--green)" id="syncDone"><i class="fas fa-circle-check"></i>Found 4 DCT folders · 14 creatives · copy matched</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 3: Ad set cards -->
+  <div id="cards"></div>
+
+  <!-- Scene 4: Launch -->
+  <div class="window" id="launch" style="left:360px;top:370px;width:1200px">
+    <div class="titlebar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span class="t">Auto-ads › Launch · AudioCore · Spring Sale</span></div>
+    <div id="lrows"></div>
+    <div style="display:flex;align-items:center;gap:26px;padding:30px 36px">
+      <div style="font-size:24px;font-weight:600;color:var(--muted)"><span id="adsLive" style="font-size:44px;font-weight:800;color:var(--ink);letter-spacing:-0.03em;font-variant-numeric:tabular-nums">0</span> / 14 ads live</div>
+      <div class="btn" id="pubBtn" style="margin-left:auto;width:380px"><i class="fas fa-rocket"></i>Publish Ads</div>
+    </div>
+  </div>
+
+  <!-- Scene 5: Time saved -->
+  <div id="stat" class="abs" style="left:0;right:0;top:360px;text-align:center">
+    <div style="font-size:34px;font-weight:600;color:var(--muted)">Launching 14 ads across 4 ad sets</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:56px;margin-top:40px">
+      <div id="statOld" style="position:relative;font-size:150px;font-weight:800;letter-spacing:-0.05em;color:#9ca3af">3 hours<div id="strike" style="position:absolute;left:-10px;right:-10px;top:54%;height:12px;border-radius:6px;background:#ef4444;transform-origin:left"></div></div>
+      <i class="fas fa-arrow-right" id="statArrow" style="font-size:70px;color:#cbd5e1"></i>
+      <div id="statNew" style="font-size:150px;font-weight:800;letter-spacing:-0.05em;background:linear-gradient(90deg,var(--primary),var(--meta));-webkit-background-clip:text;color:transparent">2 minutes</div>
+    </div>
+    <div id="statSub" style="font-size:30px;color:var(--muted);margin-top:40px;font-weight:500">No downloading. No re-uploading. No copy-pasting copy.</div>
+  </div>
+
+  <!-- Scene 6: End card -->
+  <div id="end" class="abs" style="left:0;right:0;top:340px;text-align:center">
+    <div style="display:inline-flex;align-items:center;gap:30px">
+      <img id="logo" src="../../client/public/favicon.png" style="width:150px;height:150px" alt="">
+      <span style="font-size:130px;font-weight:800;letter-spacing:-0.05em">Auto-ads</span>
+    </div>
+    <div id="tag" style="font-size:44px;font-weight:600;margin-top:34px;letter-spacing:-0.02em">From <span class="accent"><i class="fab fa-google-drive"></i> Google Drive</span> to <span class="accent"><i class="fab fa-meta"></i> Meta Ads</span>.</div>
+    <div id="cta" style="display:inline-flex;margin-top:48px;padding:24px 46px;border-radius:999px;background:linear-gradient(90deg,var(--primary),var(--primary-2));color:#fff;font-size:30px;font-weight:700;gap:16px;align-items:center;box-shadow:0 20px 40px -14px rgba(45,91,215,.6)">Get started free <i class="fas fa-arrow-right"></i></div>
+  </div>
+
+  <svg class="cursor" id="cursor" viewBox="0 0 24 24"><path d="M4 2l14 10.5-6.2 1.1 3.9 7.4-2.9 1.5-3.9-7.5L4 19.6z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+  <div class="ripple" id="rip1"></div>
+  <div class="ripple" id="rip2"></div>
+
+<script>
+  const DURATION = 24;
+  const $ = s => document.querySelector(s);
+  const ease = "cubic-bezier(.2,.8,.2,1)";
+  const spring = "cubic-bezier(.34,1.45,.64,1)";
+  const ms = s => s * 1000;
+
+  // anim(el, keyframes, start, duration): absolute times in seconds.
+  function anim(el, frames, start, dur, easing = ease) {
+    el.animate(frames, { delay: ms(start), duration: ms(dur), easing, fill: "both" });
+  }
+  // Visible from `inAt` to `outAt`, with a rise in and a fade out.
+  function show(el, inAt, outAt, { dy = 30, scale = 1, outDx = 0 } = {}) {
+    el.animate(
+      [
+        { opacity: 0, transform: `translateY(${dy}px) scale(${scale})`, offset: 0 },
+        { opacity: 1, transform: "none", offset: 0.55 / (outAt - inAt + 0.4) },
+        { opacity: 1, transform: "none", offset: (outAt - inAt) / (outAt - inAt + 0.4) },
+        { opacity: 0, transform: `translateX(${outDx}px) scale(.98)`, offset: 1 },
+      ],
+      { delay: ms(inAt), duration: ms(outAt - inAt + 0.4), easing: "ease-in-out", fill: "both" },
+    );
+  }
+
+  // Background drift over the whole film.
+  anim($("#b1"), [{ transform: "translate(0,0)" }, { transform: "translate(160px,90px)" }, { transform: "translate(0,0)" }], 0, DURATION, "ease-in-out");
+  anim($("#b2"), [{ transform: "translate(0,0)" }, { transform: "translate(-140px,-110px)" }, { transform: "translate(0,0)" }], 0, DURATION, "ease-in-out");
+  anim($("#b3"), [{ transform: "translate(0,0)" }, { transform: "translate(-220px,-60px)" }, { transform: "translate(0,0)" }], 0, DURATION, "ease-in-out");
+
+  // ---- Scene 1: Drive (0.2–4.2)
+  show($("#c1"), 0.2, 4.0, { dy: 24 });
+  show($("#drive"), 0.35, 4.1, { dy: 60, scale: .97, outDx: -80 });
+  document.querySelectorAll("#drive [data-r]").forEach((r, i) => {
+    anim(r, [{ opacity: 0, transform: "translateY(18px)" }, { opacity: 1, transform: "none" }], 0.8 + i * 0.22, 0.6);
+  });
+
+  // ---- Scene 2: Import (4.4–8.6)
+  show($("#c2"), 4.4, 8.4);
+  show($("#import"), 4.5, 8.5, { dy: 60, scale: .97, outDx: -80 });
+  const URL_TEXT = "https://drive.google.com/drive/folders/1AbC…SpringCampaign";
+  const TYPE_START = 5.2, TYPE_END = 6.4;
+  anim($("#caret"), [{ opacity: 1 }, { opacity: 0 }, { opacity: 1 }], 4.5, 4, "steps(1)");
+  anim($("#syncBtn"), [{ opacity: 1 }, { opacity: 0 }], 7.05, 0.2);
+  anim($("#syncProg"), [{ opacity: 0 }, { opacity: 1 }], 7.05, 0.2);
+  anim($("#syncFill"), [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], 7.1, 1.0, "ease-in-out");
+  anim($("#syncTxt"), [{ opacity: 1 }, { opacity: 0 }], 8.0, 0.2);
+  anim($("#syncDone"), [{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "none" }], 8.05, 0.3);
+
+  // ---- Scene 3: Cards (8.8–13.2)
+  show($("#c3"), 8.8, 13.0);
+  const SETS = [
+    { name: "Spring Sale", dct: "DCT 161 Spring_Sale", n: 4, video: false, hue: [222, 262], icon: "fa-headphones", copy: "Spring Sale: 30% off" },
+    { name: "Comparison", dct: "DCT 162 Comparison", n: 3, video: false, hue: [199, 230], icon: "fa-scale-balanced", copy: "Studio sound for less" },
+    { name: "Video Ads", dct: "DCT 163 Video_Ads", n: 2, video: true, hue: [280, 330], icon: "fa-music", copy: "Hear every detail" },
+    { name: "New Concepts", dct: "DCT 164 New_Concepts", n: 5, video: false, hue: [160, 200], icon: "fa-bolt", copy: "All-day comfort" },
+  ];
+  const cards = $("#cards");
+  SETS.forEach((s, i) => {
+    const c = document.createElement("div");
+    c.className = "card";
+    c.style.left = `${120 + i * 430}px`;
+    c.style.top = "400px";
+    const thumbs = Array.from({ length: 6 }, (_, k) => {
+      if (k >= s.n) return `<div class="thumb" style="background:#f3f4f8"></div>`;
+      const h = s.hue[0] + (s.hue[1] - s.hue[0]) * (k / Math.max(1, s.n - 1));
+      return `<div class="thumb" style="background:linear-gradient(150deg,hsl(${h} 85% 66%),hsl(${h + 25} 75% 48%))"><i class="fas ${s.icon}"></i>${s.video ? '<span class="play"><i class="fas fa-play"></i></span>' : ""}</div>`;
+    }).join("");
+    c.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:40px;border-radius:12px;background:#e8efff;color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:19px"><i class="fas fa-layer-group"></i></span>
+      <div><div class="name">${s.name}</div><div class="dct">${s.dct}</div></div></div>
+      <div class="thumbs">${thumbs}</div>
+      <div class="chip" data-count style="position:absolute;right:26px;top:30px;background:#f1f5f9;color:var(--muted);font-size:16px">${s.n} ${s.video ? "videos" : "images"}</div>
+      <div class="copy" data-copy><div class="lbl"><i class="fas fa-circle-check" style="color:var(--green)"></i>Copy matched</div><div class="txt">${s.copy}</div></div>`;
+    cards.appendChild(c);
+    show(c, 9.0 + i * 0.16, 12.9 + i * 0.05, { dy: 80, scale: .94 });
+    c.querySelectorAll(".thumb").forEach((t, k) => anim(t, [{ opacity: 0, transform: "scale(.6)" }, { opacity: 1, transform: "none" }], 9.5 + i * 0.16 + k * 0.07, 0.45, spring));
+    anim(c.querySelector("[data-copy]"), [{ opacity: 0, transform: "translateY(16px)" }, { opacity: 1, transform: "none" }], 10.9 + i * 0.22, 0.5, spring);
+  });
+
+  // ---- Scene 4: Launch (13.4–18.0)
+  show($("#c4"), 13.4, 17.8);
+  show($("#launch"), 13.5, 17.9, { dy: 60, scale: .97 });
+  const lrows = $("#lrows");
+  const ROWS = [];
+  SETS.forEach((s, i) => {
+    const r = document.createElement("div");
+    r.className = "lrow";
+    r.innerHTML = `<span style="width:52px;height:52px;border-radius:14px;background:linear-gradient(150deg,hsl(${s.hue[0]} 85% 66%),hsl(${s.hue[0] + 25} 75% 48%));color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px"><i class="fas ${s.icon}"></i></span>
+      <div><div>${s.name}</div><div class="sub">${s.n} ${s.video ? "videos" : "images"} · ${s.copy}</div></div>
+      <div class="status">
+        <div data-s="ready" style="color:var(--muted)">Ready</div>
+        <div data-s="up" style="color:var(--primary)"><i class="fas fa-circle-notch fa-spin"></i>Uploading</div>
+        <div data-s="live" style="color:var(--green)"><i class="fas fa-circle-check"></i>Live on Meta</div>
+      </div>`;
+    lrows.appendChild(r);
+    const tUp = 15.0 + i * 0.55, tLive = tUp + 0.6;
+    ROWS.push({ r, tUp, tLive });
+    anim(r, [{ background: "rgba(22,163,74,0)" }, { background: "rgba(22,163,74,.08)" }, { background: "rgba(22,163,74,0)" }], tLive, 0.8);
+  });
+  const LIVE_AT = [0, 1, 2, 3].map(i => 15.6 + i * 0.55);
+  const LIVE_ADS = [4, 3, 2, 5];
+
+  // ---- Scene 5: Stat (18.2–21.4)
+  show($("#stat"), 18.2, 21.2, { dy: 40 });
+  anim($("#strike"), [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], 18.9, 0.45, "ease-out");
+  anim($("#statArrow"), [{ opacity: 0, transform: "translateX(-30px)" }, { opacity: 1, transform: "none" }], 19.2, 0.4);
+  anim($("#statNew"), [{ opacity: 0, transform: "translateX(-40px) scale(.9)" }, { opacity: 1, transform: "none" }], 19.4, 0.6, spring);
+  anim($("#statSub"), [{ opacity: 0 }, { opacity: 1 }], 19.9, 0.5);
+
+  // ---- Scene 6: End card (21.6–24), fades back to the empty background for the loop.
+  show($("#end"), 21.6, 23.4, { dy: 30, scale: .96 });
+  anim($("#logo"), [{ transform: "rotate(-12deg) scale(.6)" }, { transform: "none" }], 21.6, 0.8, spring);
+  anim($("#tag"), [{ opacity: 0, transform: "translateY(16px)" }, { opacity: 1, transform: "none" }], 22.0, 0.5);
+  anim($("#cta"), [{ opacity: 0, transform: "translateY(16px) scale(.95)" }, { opacity: 1, transform: "none" }], 22.3, 0.5, spring);
+
+  // ---- Cursor. Targets are read from the layout (ignoring transforms), so
+  // the clicks land on the buttons wherever they sit.
+  function center(el, fx = 0.5, fy = 0.5) {
+    let x = 0, y = 0;
+    for (let n = el; n; n = n.offsetParent) { x += n.offsetLeft; y += n.offsetTop; }
+    return [x + el.offsetWidth * fx, y + el.offsetHeight * fy];
+  }
+  const urlAt = center($("#url").parentElement, 0.42, 0.5);
+  const syncAt = center($("#syncBtn"), 0.5, 0.5);
+  const pubAt = center($("#pubBtn"), 0.45, 0.5);
+  const tip = ([x, y]) => [x - 6, y - 4];
+  const PATH = [
+    [4.6, 1560, 1000], [5.0, ...tip(urlAt)], [6.55, ...tip(urlAt)], [6.95, ...tip(syncAt)], [7.5, syncAt[0] + 60, syncAt[1] + 40], [8.6, 1560, 1010],
+    [13.6, 1560, 1010], [14.4, ...tip(pubAt)], [15.3, pubAt[0] + 70, pubAt[1] + 60], [17.9, 1640, 1020],
+  ];
+  const cursor = $("#cursor");
+  const span = PATH.at(-1)[0] - PATH[0][0];
+  const off = t => (t - PATH[0][0]) / span;
+  cursor.animate(
+    PATH.map(([t, x, y]) => ({ transform: `translate(${x}px,${y}px)`, offset: off(t) })),
+    { delay: ms(PATH[0][0]), duration: ms(span), easing: "ease-in-out", fill: "both" },
+  );
+  cursor.animate(
+    [[4.6, 0], [4.9, 1], [8.3, 1], [8.6, 0], [13.6, 0], [13.9, 1], [17.6, 1], [17.9, 0]].map(([t, o]) => ({ opacity: o, offset: off(t) })),
+    { delay: ms(PATH[0][0]), duration: ms(span), fill: "both" },
+  );
+  for (const [el, t, [x, y]] of [[$("#rip1"), 6.95, syncAt], [$("#rip2"), 14.45, pubAt]]) {
+    el.style.left = `${x}px`; el.style.top = `${y}px`;
+    anim(el, [{ opacity: 0, offset: 0 }, { opacity: .85, transform: "scale(.3)", offset: 0.02 }, { opacity: 0, transform: "scale(1.4)" }], t, 0.5, "ease-out");
+  }
+  anim($("#pubBtn"), [{ transform: "scale(1)" }, { transform: "scale(.94)" }, { transform: "scale(1)" }], 14.45, 0.3);
+  anim($("#syncBtn"), [{ transform: "scale(1)" }, { transform: "scale(.95)" }], 6.95, 0.12);
+
+  // Text and counters that are functions of time.
+  function update(t) {
+    const k = Math.min(1, Math.max(0, (t - TYPE_START) / (TYPE_END - TYPE_START)));
+    $("#url").textContent = URL_TEXT.slice(0, Math.round(URL_TEXT.length * k));
+    $("#caret").style.visibility = t > 4.5 && t < 7.0 ? "visible" : "hidden";
+    // Row status: exactly one of Ready / Uploading / Live is shown at a time.
+    for (const { r, tUp, tLive } of ROWS) {
+      const state = t < tUp ? "ready" : t < tLive ? "up" : "live";
+      const since = t - (state === "up" ? tUp : tLive);
+      for (const d of r.querySelectorAll("[data-s]")) {
+        const on = d.dataset.s === state;
+        const k = state === "ready" ? 1 : Math.min(1, since / 0.25);
+        d.style.opacity = on ? k : 0;
+        d.style.transform = on && state === "live" ? `scale(${0.85 + 0.15 * k})` : "none";
+      }
+    }
+    let live = 0;
+    LIVE_AT.forEach((at, i) => { if (t >= at) live += LIVE_ADS[i]; });
+    $("#adsLive").textContent = live;
+    const pub = t < 14.8 ? '<i class="fas fa-rocket"></i>Publish Ads' : live < 14 ? '<i class="fas fa-circle-notch fa-spin"></i>Publishing…' : '<i class="fas fa-circle-check"></i>All ads live';
+    const btn = $("#pubBtn");
+    btn.style.filter = t >= 14.8 && live < 14 ? "saturate(.45) brightness(1.25)" : "none";
+    btn.style.background = live >= 14 ? "var(--green)" : "";
+    btn.style.boxShadow = live >= 14 ? "0 16px 30px -10px rgba(22,163,74,.5)" : "";
+    // Only touch the DOM on change, so the spinner keeps its animation.
+    if ($("#pubBtn").innerHTML !== pub) $("#pubBtn").innerHTML = pub;
+  }
+
+  // Seek every animation to time t (seconds). Used by render.mjs.
+  window.seek = t => {
+    update(t);
+    for (const a of document.getAnimations()) { a.pause(); a.currentTime = ms(t); }
+  };
+  window.ready = document.fonts.ready.then(() => new Promise(r => setTimeout(r, 300)));
+
+  // Live preview when opened directly.
+  if (!navigator.webdriver) {
+    const t0 = performance.now();
+    const tick = () => { update(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(tick); };
+    for (const a of document.getAnimations()) a.play();
+    tick();
+  }
+</script>
+</body>
+</html>
