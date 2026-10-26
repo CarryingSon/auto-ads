@@ -11,7 +11,8 @@
     "test:meta-review": "tsx script/meta-review-api-calls.ts",
     "test:edge:oauth": "tsx script/test-meta-oauth-access.ts",
     "db:push": "drizzle-kit push",
-    "test": "vitest run"
+    "test": "vitest run",
+    "record:onboarding": "node script/onboarding-video/record.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
@@ -118,6 +119,7 @@
     "autoprefixer": "^10.5.0",
     "drizzle-kit": "^0.31.8",
     "esbuild": "^0.25.0",
+    "playwright-core": "^1.56.1",
     "postcss": "^8.5.10",
     "tailwindcss": "^3.4.19",
     "tsx": "^4.21.0",

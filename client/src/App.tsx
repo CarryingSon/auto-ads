@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { HelpButton, OnboardingProvider } from "@/components/onboarding-guide";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { LoginGate } from "@/components/login-gate";
@@ -70,6 +71,7 @@ function DashboardLayout() {
   return (
     <LoginGate>
       <PrefetchProvider>
+        <OnboardingProvider>
         <div className="liquid-bg">
           <div className="blob blob-1" />
           <div className="blob blob-2" />
@@ -81,13 +83,17 @@ function DashboardLayout() {
             <main className="flex-1 overflow-y-auto px-4 py-1.5 scroll-smooth">
               <header className="flex items-center justify-between gap-4 mb-1.5">
                 <SidebarTrigger data-testid="button-sidebar-toggle" className="text-muted-foreground hover:text-foreground" />
-                <ThemeToggle />
+                <div className="flex items-center gap-1">
+                  <HelpButton />
+                  <ThemeToggle />
+                </div>
               </header>
               <MetaConnectionBanner />
               <DashboardRouter />
             </main>
           </div>
         </SidebarProvider>
+        </OnboardingProvider>
       </PrefetchProvider>
     </LoginGate>
   );
