@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { SiFacebook, SiInstagram } from "react-icons/si";
 import { TypewriterProgressBar } from "@/components/typewriter-progress-bar";
+import { useOnboarding } from "@/components/onboarding-guide";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { pluralize } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -1462,7 +1463,6 @@ export default function BulkAds() {
     isValid: boolean;
     errors: string[];
   }> | null>(null);
-  const [showInfoModal, setShowInfoModal] = useState(false);
   const [showCopyEditModal, setShowCopyEditModal] = useState(false);
   const [editingAdSetId, setEditingAdSetId] = useState<string | null>(null);
   const [campaignPopoverOpen, setCampaignPopoverOpen] = useState(false);
@@ -1489,6 +1489,7 @@ export default function BulkAds() {
   const syncStep = syncStore.syncStep;
   const syncStartTime = syncStore.startTime || null;
   const launchStore = useLaunchStore();
+  const { openGuide } = useOnboarding();
   const [syncElapsedTime, setSyncElapsedTime] = useState<number>(0);
   const [importCampaignId, setImportCampaignId] = useState<string>("");
   const [importAdSetId, setImportAdSetId] = useState<string>("");
@@ -2205,7 +2206,7 @@ export default function BulkAds() {
         showTargetingEditDialog ||
         showCreativeEditDialog ||
         showCopyEditModal ||
-        showInfoModal
+        target.closest('[role="dialog"]')
       ) {
         return;
       }
@@ -2239,7 +2240,7 @@ export default function BulkAds() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentStep, folderUrl, launchStatus, showCopyEditor, showCreateCampaignModal, showTargetingEditDialog, showCreativeEditDialog, showCopyEditModal, showInfoModal]);
+  }, [currentStep, folderUrl, launchStatus, showCopyEditor, showCreateCampaignModal, showTargetingEditDialog, showCreativeEditDialog, showCopyEditModal]);
 
   const applySyncResult = (data: any) => {
     setJobId(data.jobId);
@@ -3421,7 +3422,6 @@ export default function BulkAds() {
     setShowCreativeEditDialog(false);
     setEditingAdSetId(null);
     setCurrentAdSetIndex(0);
-    setShowInfoModal(false);
     setImportCampaignId("");
     setImportAdSetId("");
     localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -3600,7 +3600,7 @@ export default function BulkAds() {
           <button
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/60 hover:bg-muted dark:hover:bg-muted transition-all"
             data-testid="button-help"
-            onClick={() => setShowInfoModal(true)}
+            onClick={openGuide}
           >
             <span className="material-symbols-outlined text-[14px]">help_outline</span>
             How it works
@@ -6009,132 +6009,6 @@ export default function BulkAds() {
               )}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showInfoModal} onOpenChange={setShowInfoModal}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto p-0 gap-0 rounded-2xl">
-          <div className="px-8 pt-8 pb-4">
-            <DialogHeader className="space-y-1">
-              <DialogTitle className="text-xl font-semibold tracking-tight">How it works</DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground">
-                A quick guide to importing and launching your ads
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-
-          <div className="px-8 pb-8 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-meta text-lg">lock</span>
-                  </div>
-                  <h4 className="text-sm font-semibold text-foreground">Private Folder</h4>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Share your Google Drive folder with the service account email shown in the app, then paste the folder URL and sync.
-                </p>
-                <ol className="text-xs text-muted-foreground space-y-1.5 list-none">
-                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">1.</span>Copy the service account email</li>
-                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">2.</span>Share your Drive folder with that email</li>
-                  <li className="flex items-start gap-2"><span className="text-meta font-semibold shrink-0">3.</span>Paste the folder URL & click Sync</li>
-                </ol>
-              </div>
-
-              <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-purple-500 text-lg">public</span>
-                  </div>
-                  <h4 className="text-sm font-semibold text-foreground">Public URL</h4>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  If your folder is set to "Anyone with the link can view", just paste the URL and sync. No sharing step needed.
-                </p>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-primary text-lg">description</span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground">DOCX Ad Copy Format</h4>
-                  <p className="text-[11px] text-muted-foreground">Use numbered fields. Separate A/B variants with _1, _2, etc.</p>
-                </div>
-              </div>
-              <div className="rounded-lg bg-card border border-border p-4 font-mono text-xs text-muted-foreground leading-relaxed overflow-x-auto">
-{`DCT 161:
-
-Primary text_1:
-Your first ad copy variation...
-
-Primary text_2:
-Your second ad copy variation...
-
-Headline_1:
-Your headline
-
-Description_1:
-Your description`}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-muted/50 p-5 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-meta text-lg">folder_open</span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground">Folder Structure</h4>
-                  <p className="text-[11px] text-muted-foreground">Each subfolder becomes an Ad Set. One DOCX file for all ad copy.</p>
-                </div>
-              </div>
-              <div className="rounded-lg bg-card border border-border p-4 font-mono text-xs text-muted-foreground leading-relaxed overflow-x-auto">
-                <div className="flex items-center gap-2 text-foreground font-semibold mb-1">
-                  <span className="material-symbols-outlined text-sm text-meta">folder</span>
-                  Campaign Folder/
-                </div>
-                <div className="ml-5 space-y-0.5">
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 161 - Spring_Sale/</div>
-                  <div className="ml-7 text-muted-foreground">creative files</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 162 - Comparison/</div>
-                  <div className="ml-7 text-muted-foreground">creative files</div>
-                  <div className="flex items-center gap-2"><span className="material-symbols-outlined text-sm text-primary">folder</span>DCT 163 - Video_Ads/</div>
-                  <div className="ml-7 text-muted-foreground">video1.mp4</div>
-                  <div className="flex items-center gap-2 text-meta"><span className="material-symbols-outlined text-sm">description</span>ad_copy.docx</div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="rounded-xl border border-border bg-muted/50 p-4 space-y-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-md bg-green-500/10 flex items-center justify-center">
-                    <span className="material-symbols-outlined text-green-500 text-sm">movie</span>
-                  </div>
-                  <h4 className="text-xs font-semibold text-foreground">Videos</h4>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {[".mp4", ".mov", ".avi", ".mkv"].map(f => (
-                    <span key={f} className="px-2 py-0.5 rounded-md bg-card border border-border text-[11px] font-mono text-muted-foreground">{f}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-8 py-4 border-t border-border bg-muted/30 rounded-b-2xl">
-            <Button
-              onClick={() => setShowInfoModal(false)}
-              className="w-full rounded-xl"
-              data-testid="button-close-help"
-            >
-              Got it
-            </Button>
-          </div>
         </DialogContent>
       </Dialog>
 
