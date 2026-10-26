@@ -906,5 +906,26 @@ export const insertBillingPaymentSchema = createInsertSchema(billingPayments).om
 export type InsertBillingPayment = z.infer<typeof insertBillingPaymentSchema>;
 export type BillingPayment = typeof billingPayments.$inferSelect;
 
+// Referral program: each user has one shareable code, and each user can be
+// referred once. A referral earns the referrer bonus launch credits once the
+// referred user's first launch succeeds (rewarded_at is set then).
+export const referralCodes = pgTable("referral_codes", {
+  userId: varchar("user_id").primaryKey(),
+  code: text("code").notNull().unique(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type ReferralCode = typeof referralCodes.$inferSelect;
+
+export const referrals = pgTable("referrals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  referrerUserId: varchar("referrer_user_id").notNull(),
+  referredUserId: varchar("referred_user_id").notNull().unique(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  rewardedAt: timestamp("rewarded_at"),
+});
+
+export type Referral = typeof referrals.$inferSelect;
+
 // Re-export chat models
 export * from "./models/chat.js";

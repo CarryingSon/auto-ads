@@ -2,7 +2,8 @@ import Stripe from "stripe";
 import { eq, or } from "drizzle-orm";
 
 import { db } from "./db.js";
-import { monthlyLaunchCount, monthlyLaunchUsageWhere } from "./job-queue.js";
+import { launchCount, launchUsageWhere } from "./job-queue.js";
+import { countRewardedReferrals, REFERRAL_BONUS_CREDITS } from "./referrals.js";
 import {
   billingPayments,
   billingSubscriptions,
@@ -13,7 +14,13 @@ import {
   type InsertBillingSubscription,
 } from "../shared/schema.js";
 
-export const FREE_MONTHLY_UPLOAD_LIMIT = 3;
+// Free plan: a one-off allowance of successful launches, not a monthly one.
+// Each launch uses one credit however many creatives it has; failed launches
+// use none. Inviting a friend adds REFERRAL_BONUS_CREDITS.
+export const FREE_LAUNCH_CREDITS = 5;
+// Launches before this date were under the old 3-per-month plan and do not
+// use up credits, so existing free users start with a full allowance.
+export const FREE_CREDITS_COUNT_FROM = new Date("2026-10-26T00:00:00Z");
 const FALLBACK_PRICING = {
   monthly: { interval: "month" as const, unitAmountCents: 2900 },
   yearly: { interval: "year" as const, unitAmountCents: 29000 },
@@ -41,12 +48,8 @@ export interface BillingStatus {
   uploadsUsed: number;
   uploadsLimit: number | null;
   uploadsRemaining: number | null;
+  referralBonusCredits: number;
   canLaunch: boolean;
-}
-
-interface UtcMonthBounds {
-  start: Date;
-  end: Date;
 }
 
 function resolveStripeSecretKey(): string {
@@ -196,23 +199,16 @@ function isLegacyPro(globalPlanType: string | null | undefined): boolean {
   return (globalPlanType || "").toLowerCase() === "pro";
 }
 
-export function getUtcMonthBounds(now = new Date()): UtcMonthBounds {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  const start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(year, month + 1, 1, 0, 0, 0, 0));
-  return { start, end };
+export async function countFreeLaunchesUsed(userId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: launchCount })
+    .from(jobQueue)
+    .where(launchUsageWhere(userId, FREE_CREDITS_COUNT_FROM));
+  return Number(row?.count || 0);
 }
 
-export async function countLaunchSlotsForUtcMonth(
-  userId: string,
-  bounds: UtcMonthBounds = getUtcMonthBounds(),
-): Promise<number> {
-  const [row] = await db
-    .select({ count: monthlyLaunchCount })
-    .from(jobQueue)
-    .where(monthlyLaunchUsageWhere(userId, bounds.start, bounds.end));
-  return Number(row?.count || 0);
+export function freeLaunchLimit(rewardedReferrals: number): number {
+  return FREE_LAUNCH_CREDITS + REFERRAL_BONUS_CREDITS * rewardedReferrals;
 }
 
 export async function getBillingSubscriptionForUser(userId: string): Promise<BillingSubscription | null> {
@@ -293,7 +289,7 @@ async function resolveStripeCustomerUserId(
 }
 
 export async function getBillingStatusForUser(userId: string, now = new Date()): Promise<BillingStatus> {
-  const [subscription, settings, uploadsUsed] = await Promise.all([
+  const [subscription, settings, uploadsUsed, rewardedReferrals] = await Promise.all([
     getBillingSubscriptionForUser(userId),
     db
       .select({
@@ -302,14 +298,16 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
       .from(globalSettings)
       .where(eq(globalSettings.userId, userId))
       .limit(1),
-    countLaunchSlotsForUtcMonth(userId),
+    countFreeLaunchesUsed(userId),
+    countRewardedReferrals(userId),
   ]);
 
   const globalPlanType = settings[0]?.planType || "free";
   const hasStripePro = isStripeSubscriptionPro(subscription, now);
   const hasLegacyPro = !hasStripePro && isLegacyPro(globalPlanType);
   const planType: BillingPlanType = hasStripePro || hasLegacyPro ? "pro" : "free";
-  const uploadsLimit = planType === "free" ? FREE_MONTHLY_UPLOAD_LIMIT : null;
+  const referralBonusCredits = REFERRAL_BONUS_CREDITS * rewardedReferrals;
+  const uploadsLimit = planType === "free" ? freeLaunchLimit(rewardedReferrals) : null;
   const uploadsRemaining = uploadsLimit === null ? null : Math.max(0, uploadsLimit - uploadsUsed);
 
   return {
@@ -325,6 +323,7 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
     uploadsUsed,
     uploadsLimit,
     uploadsRemaining,
+    referralBonusCredits,
     canLaunch: planType === "pro" || (uploadsRemaining ?? 0) > 0,
   };
 }

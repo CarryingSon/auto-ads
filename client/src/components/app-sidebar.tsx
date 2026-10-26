@@ -394,7 +394,7 @@ export function AppSidebar() {
   const effectivePlanType = billingStatus?.planType || (settings?.planType || "free");
   const isProPlan = effectivePlanType === "pro";
   const uploadsRemaining = billingStatus?.uploadsRemaining ?? settings?.uploadsRemaining ?? 0;
-  const maxUploads = billingStatus?.uploadsLimit ?? 3;
+  const maxUploads = billingStatus?.uploadsLimit ?? 5;
   const remainingForProgress = typeof uploadsRemaining === "number" ? Math.max(0, uploadsRemaining) : 0;
   const freeLimitForProgress = Math.max(1, maxUploads);
   const progressPercent = isProPlan ? 100 : Math.max(0, Math.min(100, (remainingForProgress / freeLimitForProgress) * 100));
@@ -777,8 +777,20 @@ export function AppSidebar() {
                     : "text-muted-foreground"
                 }`}
               >
-                {isProPlan ? "Unlimited uploads" : `${uploadsRemaining ?? 0} free uploads remaining`}
+                {isProPlan ? "Unlimited uploads" : `${uploadsRemaining ?? 0} of ${maxUploads} free launches left`}
               </p>
+              {!isProPlan && (
+                <Link
+                  href="/settings#invite"
+                  // Already on Settings, the page does not remount, so scroll here.
+                  onClick={() => setTimeout(() => document.getElementById("invite")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50)}
+                  className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-meta hover:text-[hsl(var(--primary))]"
+                  data-testid="link-invite-friends"
+                >
+                  <span className="material-symbols-outlined text-[13px]">redeem</span>
+                  Invite a friend, get +5 launches
+                </Link>
+              )}
             </div>
           </div>
         </div>

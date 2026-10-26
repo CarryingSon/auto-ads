@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, or, sql } from "drizzle-orm";
 
 import { db, pool } from "./db.js";
 import {
@@ -42,23 +42,23 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 // only has to outlast that; anything longer just delays recovery after the
 // platform kills a run.
 const LOCK_WINDOW_MINUTES = 6;
-const MONTHLY_COUNTED_STATUSES: QueueStatus[] = ["queued", "processing", "retrying", "completed"];
+const COUNTED_LAUNCH_STATUSES: QueueStatus[] = ["queued", "processing", "retrying", "completed"];
 
-// What uses up a monthly launch: one launch (job), however many queue rows
-// its retries add. Failed launches are free; a cancelled one counts once it
-// had started running, since it may already have created ads.
-export function monthlyLaunchUsageWhere(userId: string, monthStart: Date, monthEnd: Date) {
+// What uses up a free launch credit: one launch (job), however many queue
+// rows its retries add. Failed launches are free; a cancelled one counts once
+// it had started, since its ads so far stay on Meta. Launches still queued or
+// running hold a credit, so parallel launches cannot overspend.
+export function launchUsageWhere(userId: string, countFrom: Date) {
   return and(
     eq(jobQueue.userId, userId),
-    gte(jobQueue.createdAt, monthStart),
-    lt(jobQueue.createdAt, monthEnd),
+    gte(jobQueue.createdAt, countFrom),
     or(
-      inArray(jobQueue.status, MONTHLY_COUNTED_STATUSES),
+      inArray(jobQueue.status, COUNTED_LAUNCH_STATUSES),
       and(eq(jobQueue.status, "cancelled"), isNotNull(jobQueue.startedAt)),
     ),
   );
 }
-export const monthlyLaunchCount = sql<number>`count(distinct ${jobQueue.jobId})::int`;
+export const launchCount = sql<number>`count(distinct ${jobQueue.jobId})::int`;
 let ensureQueueTablesPromise: Promise<void> | null = null;
 
 async function ensureQueueTables(): Promise<void> {
@@ -133,13 +133,12 @@ export async function enqueueLaunchJob(params: {
   return created;
 }
 
-export async function enqueueLaunchJobWithMonthlyQuotaGuard(params: {
+export async function enqueueLaunchJobWithQuotaGuard(params: {
   jobId: string;
   userId: string;
   payload: LaunchQueuePayload;
-  monthStart: Date;
-  monthEnd: Date;
-  monthlyLimit: number;
+  countFrom: Date;
+  limit: number;
   maxAttempts?: number;
 }): Promise<{
   created: JobQueue | null;
@@ -153,12 +152,12 @@ export async function enqueueLaunchJobWithMonthlyQuotaGuard(params: {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${params.userId}))`);
 
     const [usageRow] = await tx
-      .select({ count: monthlyLaunchCount })
+      .select({ count: launchCount })
       .from(jobQueue)
-      .where(monthlyLaunchUsageWhere(params.userId, params.monthStart, params.monthEnd));
+      .where(launchUsageWhere(params.userId, params.countFrom));
 
     const used = Number(usageRow?.count || 0);
-    if (used >= params.monthlyLimit) {
+    if (used >= params.limit) {
       return {
         created: null,
         used,

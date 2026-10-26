@@ -14,6 +14,7 @@ import { SiFacebook } from "react-icons/si";
 import { useAuth } from "@/hooks/use-auth";
 import type { CampaignSettings, AdSetSettings, AdSettings, CreativeSettings } from "@shared/schema";
 import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
+import { InviteFriendsCard } from "@/components/invite-friends-card";
 
 interface GlobalSettings {
   id?: string;
@@ -61,6 +62,7 @@ interface BillingStatus {
   uploadsUsed: number;
   uploadsLimit: number | null;
   uploadsRemaining: number | null;
+  referralBonusCredits?: number;
   canLaunch: boolean;
 }
 
@@ -885,7 +887,8 @@ export default function Settings() {
   const effectivePlanType = billingStatus?.planType || (settings?.planType === "pro" ? "pro" : "free");
   const isProPlan = effectivePlanType === "pro";
   const isLegacyPro = billingStatus?.subscriptionStatus === "legacy_pro";
-  const uploadsTotal = billingStatus?.uploadsLimit ?? (isProPlan ? null : 3);
+  const uploadsTotal = billingStatus?.uploadsLimit ?? (isProPlan ? null : 5);
+  const referralBonusCredits = billingStatus?.referralBonusCredits ?? 0;
   const uploadsUsed = billingStatus?.uploadsUsed ?? (
     uploadsTotal !== null ? Math.max(0, uploadsTotal - (settings?.uploadsRemaining ?? uploadsTotal)) : 0
   );
@@ -1042,7 +1045,7 @@ export default function Settings() {
                   : "font-medium text-muted-foreground"
               }`}
             >
-              {isProPlan ? (isLegacyPro ? "Legacy Pro access (temporary)" : "Unlimited launches enabled") : "3 launches per UTC month"}
+              {isProPlan ? (isLegacyPro ? "Legacy Pro access (temporary)" : "Unlimited launches enabled") : `${uploadsTotal ?? 5} free launches`}
             </p>
             {isProPlan && billingStatus?.cancelAtPeriodEnd && currentPeriodEndLabel && (
               <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-2 tracking-[0.01em]">
@@ -1115,7 +1118,7 @@ export default function Settings() {
               <h3 className="text-base font-bold">Usage & Limits</h3>
             </div>
             <span className="text-[10px] font-bold bg-white/40 dark:bg-white/5 px-2.5 py-1 rounded-full text-muted-foreground border border-white/20 dark:border-white/5">
-              {isProPlan ? "UNLIMITED" : "RESETS MONTHLY (UTC)"}
+              {isProPlan ? "UNLIMITED" : "ONE-TIME CREDITS"}
             </span>
           </div>
           <div className="space-y-5">
@@ -1123,9 +1126,13 @@ export default function Settings() {
             <div>
               <div className="flex justify-between items-end mb-2">
                 <div>
-                  <p className="text-xs font-bold">Uploads</p>
+                  <p className="text-xs font-bold">Launches</p>
                   <p className="text-[11px] font-medium text-muted-foreground opacity-70">
-                    {isProPlan ? "Unlimited processing volume" : "Monthly processing volume"}
+                    {isProPlan
+                      ? "Unlimited processing volume"
+                      : referralBonusCredits > 0
+                        ? `Successful launches, any number of creatives. Includes +${referralBonusCredits} from invites.`
+                        : "Successful launches, any number of creatives"}
                   </p>
                 </div>
                 <div className="text-right">
@@ -1134,7 +1141,7 @@ export default function Settings() {
                   ) : (
                     <>
                       <span className="text-base font-bold">{uploadsUsed}</span>
-                      <span className="text-xs font-bold text-muted-foreground opacity-40">/ {uploadsTotal ?? 3}</span>
+                      <span className="text-xs font-bold text-muted-foreground opacity-40">/ {uploadsTotal ?? 5}</span>
                     </>
                   )}
                 </div>
@@ -1149,7 +1156,7 @@ export default function Settings() {
                     <div className="bg-gradient-to-r from-primary to-[hsl(224_84%_66%)] h-1.5 rounded-full shadow-[0_0_8px_hsl(var(--primary)/0.4)] transition-all duration-500" style={{ width: `${uploadsPercent}%` }} />
                   </div>
                   <p className="text-[10px] font-semibold text-muted-foreground mt-2">
-                    {uploadsRemaining ?? 0} uploads remaining this month
+                    {uploadsRemaining ?? 0} free launches left · <a href="#invite" className="text-meta hover:underline">invite a friend for +5</a>
                   </p>
                 </>
               )}
@@ -1159,6 +1166,8 @@ export default function Settings() {
       </section>
 
 
+
+      <InviteFriendsCard />
 
       {/* Section: Billing */}
       <section className="glass-card rounded-2xl overflow-hidden" data-testid="section-billing">

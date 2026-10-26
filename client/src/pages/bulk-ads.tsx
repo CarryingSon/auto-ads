@@ -2924,7 +2924,7 @@ export default function BulkAds() {
       if (isFreeLimitReached) {
         toast({
           title: "Free limit reached",
-          description: "Free plan allows 3 launches per UTC month. Upgrade to continue.",
+          description: "You have used all your free launches. Invite a friend for 5 more, or upgrade to Pro.",
           variant: "destructive",
           duration: 15000,
           action: (

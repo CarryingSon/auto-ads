@@ -28,7 +28,7 @@ import {
 import { eq, desc, and, or, sql } from "drizzle-orm";
 import {
   enqueueLaunchJob,
-  enqueueLaunchJobWithMonthlyQuotaGuard,
+  enqueueLaunchJobWithQuotaGuard,
   claimLaunchQueueItems,
   claimLaunchQueueItemById,
   completeQueueItem,
@@ -40,13 +40,13 @@ import {
   yieldQueueItem,
   type LaunchQueuePayload,
 } from "./job-queue.js";
+import { getOrCreateReferralCode, getReferralCounts, REFERRAL_BONUS_CREDITS, rewardReferralOnSuccessfulLaunch } from "./referrals.js";
 import {
   backfillBillingPaymentsFromStripeForUser,
-  FREE_MONTHLY_UPLOAD_LIMIT,
+  FREE_CREDITS_COUNT_FROM,
   createCheckoutSessionForUser,
   createPortalSessionForUser,
   getBillingStatusForUser,
-  getUtcMonthBounds,
   recordInvoicePaymentFromStripeEvent,
   syncSubscriptionFromStripeEvent,
   verifyStripeWebhookSignature,
@@ -1068,6 +1068,28 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Billing] Failed to fetch status:", error);
       res.status(500).json({ error: error?.message || "Failed to fetch billing status" });
+    }
+  });
+
+  // The signed-in user's invite code and how their invites are doing. The
+  // client builds the link from its own origin: /?ref=CODE.
+  app.get("/api/referrals", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const [code, counts] = await Promise.all([getOrCreateReferralCode(userId), getReferralCounts(userId)]);
+      res.json({
+        code,
+        invited: counts.invited,
+        rewarded: counts.rewarded,
+        bonusPerReferral: REFERRAL_BONUS_CREDITS,
+        bonusCreditsEarned: counts.rewarded * REFERRAL_BONUS_CREDITS,
+      });
+    } catch (error: any) {
+      console.error("[Referrals] Failed to fetch referral info:", error);
+      res.status(500).json({ error: error?.message || "Failed to fetch referral info" });
     }
   });
 
@@ -2320,29 +2342,29 @@ export async function registerRoutes(
       const billingStatus = await getBillingStatusForUser(userId);
       let queueItem;
       if (billingStatus.planType === "free") {
-        const monthBounds = getUtcMonthBounds();
-        const queued = await enqueueLaunchJobWithMonthlyQuotaGuard({
+        const freeLimit = billingStatus.uploadsLimit ?? 0;
+        const queued = await enqueueLaunchJobWithQuotaGuard({
           jobId,
           userId,
           payload: queuePayload,
-          monthStart: monthBounds.start,
-          monthEnd: monthBounds.end,
-          monthlyLimit: FREE_MONTHLY_UPLOAD_LIMIT,
+          countFrom: FREE_CREDITS_COUNT_FROM,
+          limit: freeLimit,
         });
 
         if (queued.limitReached || !queued.created) {
-          const uploadsRemaining = Math.max(0, FREE_MONTHLY_UPLOAD_LIMIT - queued.used);
+          const uploadsRemaining = Math.max(0, freeLimit - queued.used);
           return res.status(402).json({
             code: "FREE_LIMIT_REACHED",
-            error: `FREE_LIMIT_REACHED: Free plan includes ${FREE_MONTHLY_UPLOAD_LIMIT} launches per UTC month. Upgrade to continue.`,
+            error: `FREE_LIMIT_REACHED: You have used all ${freeLimit} free launches. Invite a friend for ${REFERRAL_BONUS_CREDITS} more, or upgrade to Pro.`,
             details: [
-              `You have used ${queued.used}/${FREE_MONTHLY_UPLOAD_LIMIT} launches this month.`,
+              `You have used ${queued.used}/${freeLimit} free launches.`,
+              `Each friend who signs up with your invite link and launches gives you ${REFERRAL_BONUS_CREDITS} more.`,
               "Upgrade to Pro to unlock unlimited launches.",
             ],
             billing: {
               ...billingStatus,
               uploadsUsed: queued.used,
-              uploadsLimit: FREE_MONTHLY_UPLOAD_LIMIT,
+              uploadsLimit: freeLimit,
               uploadsRemaining,
               canLaunch: uploadsRemaining > 0,
             },
@@ -2588,6 +2610,16 @@ export async function registerRoutes(
             totalAdsCreated: result.totalAdsCreated,
             adSetCount: result.adSetCount,
           });
+          // A referred user's first successful launch earns their referrer
+          // bonus credits. Never let this fail the launch.
+          try {
+            const rewarded = await rewardReferralOnSuccessfulLaunch(payload.userId);
+            if (rewarded) {
+              console.log("[Referrals] Rewarded referrer", { referrerUserId: rewarded.referrerUserId, referredUserId: payload.userId });
+            }
+          } catch (referralError) {
+            console.warn("[Referrals] Reward check failed", { userId: payload.userId, error: referralError instanceof Error ? referralError.message : referralError });
+          }
           emitJobLog(payload.jobId, "Worker completed launch job", "success", {
             queueId: queueItem.id,
             workerId,
