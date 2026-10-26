@@ -299,7 +299,12 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
       .where(eq(globalSettings.userId, userId))
       .limit(1),
     countFreeLaunchesUsed(userId),
-    countRewardedReferrals(userId),
+    // Invite bonuses only add to the free allowance. If they cannot be read,
+    // the status (and paying users' Pro) must still load, so count none.
+    countRewardedReferrals(userId).catch((error) => {
+      console.warn("[Billing] Could not read referral bonuses", { userId, error: error instanceof Error ? error.message : error });
+      return 0;
+    }),
   ]);
 
   const globalPlanType = settings[0]?.planType || "free";
