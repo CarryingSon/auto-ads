@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
+import { fetchMetaCampaigns, metaCampaignsQueryKey, refreshMetaCampaigns, type MetaCampaignList } from "@/lib/meta-campaigns";
 
 interface Connection {
   id: number;
@@ -14,6 +14,8 @@ const DELAY_BETWEEN_BATCHES_MS = 4000;
 // Only the per-campaign ad set prefetch waits: those are live Meta calls. The
 // campaign list is read from the app's cache and loads right away.
 const PREFETCH_START_DELAY_MS = 2500;
+// Coming back to the tab refreshes campaigns from Meta at most this often.
+const CAMPAIGN_REFRESH_MIN_INTERVAL_MS = 2 * 60 * 1000;
 
 export function usePrefetchMetaData() {
   const prefetchedRef = useRef<Set<string>>(new Set());
@@ -50,6 +52,36 @@ export function usePrefetchMetaData() {
   });
 
   const campaigns = campaignsData?.data || [];
+  const hasCampaignsData = campaignsData !== undefined;
+
+  // The cached list can be days old: it is only rebuilt on login. Once it is
+  // on screen, refresh it from Meta, on every visit to the app and when the
+  // tab is shown again.
+  const lastRefreshRef = useRef<{ adAccountId: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!metaConnected || !selectedAdAccountId || !hasCampaignsData) return;
+
+    const refresh = (force: boolean) => {
+      const last = lastRefreshRef.current;
+      const sameAccount = last?.adAccountId === selectedAdAccountId;
+      if (!force && sameAccount && Date.now() - last.at < CAMPAIGN_REFRESH_MIN_INTERVAL_MS) return;
+      lastRefreshRef.current = { adAccountId: selectedAdAccountId, at: Date.now() };
+      const queryKey = metaCampaignsQueryKey(selectedAdAccountId);
+      refreshMetaCampaigns()
+        .then((fresh) => queryClient.setQueryData(queryKey, fresh))
+        .catch(() => {
+          // Keep showing the cached list; the next visit tries again.
+        });
+    };
+
+    if (lastRefreshRef.current?.adAccountId !== selectedAdAccountId) refresh(true);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh(false);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [metaConnected, selectedAdAccountId, hasCampaignsData]);
 
   useEffect(() => {
     if (!metaConnected || !prefetchReady || campaigns.length === 0 || prefetchingRef.current) return;

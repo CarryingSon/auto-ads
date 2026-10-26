@@ -28,3 +28,11 @@ export async function fetchMetaCampaigns(): Promise<MetaCampaignList> {
   if (!res.ok) throw new Error("Failed to fetch campaigns");
   return res.json();
 }
+
+// Same list, but the server first syncs it from Meta. Slower, so the app
+// shows the cached list first and swaps this in when it arrives.
+export async function refreshMetaCampaigns(): Promise<MetaCampaignList> {
+  const res = await fetch("/api/meta/campaigns?refresh=true", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to refresh campaigns");
+  return res.json();
+}

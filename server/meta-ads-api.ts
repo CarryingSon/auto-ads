@@ -11,7 +11,7 @@ import {
   metaAds,
   metaInsights
 } from "../shared/schema.js";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray, notInArray } from "drizzle-orm";
 import { encrypt, decrypt } from "./auth-routes.js";
 import { 
   prepareVideoForMeta, 
@@ -1588,6 +1588,19 @@ export class MetaAdsApi {
 
     try {
       const campaigns = await this.getCampaigns();
+
+      // Drop cached campaigns that Meta no longer lists (archived or deleted),
+      // so the cache mirrors the account instead of only ever growing.
+      const bareAccountId = this.adAccountId!.replace(/^act_/, "");
+      const accountIds = [bareAccountId, `act_${bareAccountId}`];
+      const liveIds = campaigns.map((c: any) => String(c.id));
+      // 20 pages x 500 is where getCampaigns stops paging; a list that long may
+      // be cut off, so it cannot tell us what is gone.
+      if (campaigns.length < 20 * 500) await db.delete(metaCampaigns).where(and(
+        eq(metaCampaigns.userId, this.userId),
+        inArray(metaCampaigns.adAccountId, accountIds),
+        ...(liveIds.length > 0 ? [notInArray(metaCampaigns.id, liveIds)] : []),
+      ));
 
       for (const campaign of campaigns) {
         try {

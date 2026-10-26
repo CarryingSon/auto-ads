@@ -6971,7 +6971,7 @@ export async function registerRoutes(
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      const { live, pageId } = req.query;
+      const { live, pageId, refresh } = req.query;
 
       if (live === "true") {
         const api = new MetaAdsApi(userId);
@@ -7002,14 +7002,34 @@ export async function registerRoutes(
           )
         : eq(metaCampaigns.userId, userId);
 
+      // refresh=true: bring the cache up to date with Meta before answering.
+      // The app asks for this each time someone opens it, so campaigns created,
+      // paused or deleted in Ads Manager show up without logging in again.
+      let refreshFailed = false;
+      if (refresh === "true" && selectedAdAccountId) {
+        try {
+          const api = new MetaAdsApi(userId);
+          if (await api.initialize()) {
+            api.setAdAccountId(selectedAdAccountId);
+            const syncResult = await api.syncCampaigns();
+            refreshFailed = syncResult.errors.some((e) => e.startsWith("Fetch campaigns failed"));
+          } else {
+            refreshFailed = true;
+          }
+        } catch (refreshError: any) {
+          refreshFailed = true;
+          console.warn("[Campaigns] Refresh failed, serving cache", { userId, error: refreshError?.message });
+        }
+      }
+
       const campaignRows = await db.select()
         .from(metaCampaigns)
         .where(whereClause)
         .orderBy(desc(metaCampaigns.lastSyncedAt));
 
       const campaigns = campaignRows.map(normalizeCachedCampaign);
-      if (campaigns.length > 0 || !selectedAdAccountId) {
-        return res.json({ data: campaigns, source: "cache" });
+      if (campaigns.length > 0 || !selectedAdAccountId || (refresh === "true" && !refreshFailed)) {
+        return res.json({ data: campaigns, source: refresh === "true" && !refreshFailed ? "refreshed" : "cache" });
       }
 
       // Cache miss for selected ad account:
