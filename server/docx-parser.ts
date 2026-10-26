@@ -2,6 +2,7 @@ import AdmZip from "adm-zip";
 import OpenAI from "openai";
 import type { ExtractedAdData, AiExtractionResponse } from "../shared/schema.js";
 import { aiExtractionResponseSchema } from "../shared/schema.js";
+import { cleanCopyText } from "./copy-text.js";
 
 const FIELD_NAMES = ["Primary text", "Headline", "Description", "CTA", "URL", "UTM"] as const;
 const FIELD_BOUNDARY = `(?:Primary text|Headline|Description|CTA|URL|UTM|Ad\\s+\\d|DCT\\s*\\d)`;
@@ -44,8 +45,10 @@ function decodeXmlEntities(text: string): string {
 }
 
 const TEXT_RE = /<w:t[^>]*>([^<]*)<\/w:t>/g;
-const BR_RE = /<w:br[^/]*\/>/g;
-const TAB_RE = /<w:tab[^/]*\/>/g;
+const BR_RE = /<w:(?:br|cr)\b[^/]*\/>/g;
+const TAB_RE = /<w:tab\b[^/]*\/>/g;
+// Paragraph properties hold tab stops (<w:tabs><w:tab .../>), which are not text.
+const PPR_RE = /<w:pPr>[\s\S]*?<\/w:pPr>/;
 
 function extractTextFromDocxZip(buffer: Buffer): string {
   const zip = new AdmZip(buffer);
@@ -70,7 +73,7 @@ function extractTextFromDocxZip(buffer: Buffer): string {
     const pClose = xml.indexOf("</w:p>", pIdx);
     if (pClose === -1) break;
 
-    const pContent = xml.substring(pIdx, pClose + 6);
+    const pContent = xml.substring(pIdx, pClose + 6).replace(PPR_RE, "");
 
     let pText = "";
     const tokens: Array<{ pos: number; type: "text" | "br" | "tab"; value: string }> = [];
@@ -94,7 +97,7 @@ function extractTextFromDocxZip(buffer: Buffer): string {
       pText += tok.value;
     }
 
-    pText = decodeXmlEntities(pText);
+    pText = cleanCopyText(decodeXmlEntities(pText));
 
     if (pText.length > 0) {
       parts.push(pText);
@@ -128,16 +131,6 @@ function extractField(section: string, fieldName: string): string {
   return "";
 }
 
-function normalizeNewlines(text: string): string {
-  return text
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\n{2,}(---+)\n{2,}/g, '\n$1\n')
-    .replace(/\n{2,}(—[-—]+)\n{2,}/g, '\n$1\n')
-    .replace(/\n\n/g, '\n')
-    .trim();
-}
-
 // Just the document's text. Callers that parse the copy themselves use this
 // instead of parseDocx, which may call the AI parser when its own fails.
 export async function extractDocxText(buffer: Buffer): Promise<{ rawText: string; method: "zip" | "mammoth" }> {
@@ -147,7 +140,7 @@ export async function extractDocxText(buffer: Buffer): Promise<{ rawText: string
     console.log("[DOCX Parser] ZIP extraction failed, falling back to mammoth");
     const mammoth = await import("mammoth");
     const result = await mammoth.default.extractRawText({ buffer });
-    return { rawText: result.value, method: "mammoth" };
+    return { rawText: result.value.replace(/[^\S\n]{2,}/g, " "), method: "mammoth" };
   }
 }
 
@@ -175,9 +168,9 @@ export async function parseDocxDeterministic(buffer: Buffer): Promise<{
     const index = parseInt(indexMatch[1], 10);
     if (index < 1 || index > 100) continue;
 
-    const primaryText = normalizeNewlines(extractField(section, "Primary text"));
-    const headline = normalizeNewlines(extractField(section, "Headline"));
-    const description = normalizeNewlines(extractField(section, "Description"));
+    const primaryText = cleanCopyText(extractField(section, "Primary text"));
+    const headline = cleanCopyText(extractField(section, "Headline"));
+    const description = cleanCopyText(extractField(section, "Description"));
     const ctaRaw = extractField(section, "CTA").toUpperCase().replace(/\s+/g, "_");
     const url = extractField(section, "URL");
     const utm = extractField(section, "UTM");
@@ -323,9 +316,9 @@ ${rawText}`;
 
   const cleanedAds = validated.ads.map(ad => ({
     ...ad,
-    primary_text: ad.primary_text?.replace(/\n\n/g, '\n').trim() || "",
-    headline: ad.headline?.replace(/\n\n/g, '\n').trim() || "",
-    description: ad.description?.replace(/\n\n/g, '\n').trim() || "",
+    primary_text: cleanCopyText(ad.primary_text || ""),
+    headline: cleanCopyText(ad.headline || ""),
+    description: cleanCopyText(ad.description || ""),
   }));
 
   console.log(`[DOCX Parser] ChatGPT našel ${cleanedAds.length} oglasov`);

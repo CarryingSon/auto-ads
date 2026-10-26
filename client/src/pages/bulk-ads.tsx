@@ -16,7 +16,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
+import { useToast, toast as showToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, getCsrfHeaders } from "@/lib/queryClient";
 import { filterDisplayableInstagramAccounts } from "@/lib/instagram-accounts";
 import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
@@ -559,10 +559,19 @@ interface CreativeDraft {
   payerName: string;
 }
 
+// Where the browser supports field-sizing, CSS grows a textarea to its text.
+// Elsewhere the height is set by hand, keeping the editor's scroll position:
+// collapsing the textarea to measure it would otherwise make the list jump.
+const SUPPORTS_FIELD_SIZING =
+  typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("field-sizing", "content");
+
 function resizeTextareaToContent(textarea: HTMLTextAreaElement | null) {
-  if (!textarea) return;
+  if (!textarea || SUPPORTS_FIELD_SIZING) return;
+  const scroller = textarea.closest<HTMLElement>("[data-copy-scroll]");
+  const scrollTop = scroller?.scrollTop;
   textarea.style.height = "0px";
   textarea.style.height = `${textarea.scrollHeight}px`;
+  if (scroller && scrollTop !== undefined) scroller.scrollTop = scrollTop;
 }
 
 function cleanCopyList(values: string[]): string[] {
@@ -594,6 +603,195 @@ const COPY_FIELD_LABELS: Record<CopyListField, { title: string; item: string; pl
   descriptions: { title: "Descriptions", item: "Description", placeholder: "Enter description..." },
 };
 
+type UpdateCopyField = (adsetId: string, field: CopyListField, update: (values: string[]) => string[]) => void;
+
+// One list of variations. Memoized so typing in one field leaves the others alone.
+const CopyFieldList = memo(function CopyFieldList({
+  adsetId,
+  field,
+  values,
+  onUpdate,
+}: {
+  adsetId: string;
+  field: CopyListField;
+  values: string[];
+  onUpdate: UpdateCopyField;
+}) {
+  const labels = COPY_FIELD_LABELS[field];
+  const isPrimary = field === "primaryTexts";
+  const setValue = (idx: number, value: string) =>
+    onUpdate(adsetId, field, (list) => list.map((t, i) => (i === idx ? value : t)));
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {labels.title} ({values.length})
+        </Label>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs rounded-lg"
+          onClick={() => onUpdate(adsetId, field, (list) => [...list, ""])}
+          data-testid={`button-add-${field}-${adsetId}`}
+        >
+          <Plus className="h-3 w-3 mr-1" />
+          Add variation
+        </Button>
+      </div>
+      <div className={isPrimary ? "space-y-3" : "space-y-2"}>
+        {values.map((text, idx) => {
+          const removeButton = values.length > 1 && (
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+              aria-label={`Remove ${labels.item.toLowerCase()} ${idx + 1}`}
+              onClick={() => onUpdate(adsetId, field, (list) => list.filter((_, i) => i !== idx))}
+              data-testid={`button-remove-${field}-${adsetId}-${idx}`}
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          );
+          if (isPrimary) {
+            return (
+              <div key={idx} className="rounded-xl border border-border bg-muted/50 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                    {labels.item} {idx + 1}
+                  </span>
+                  {removeButton}
+                </div>
+                <textarea
+                  className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-none overflow-hidden [field-sizing:content]"
+                  value={text}
+                  ref={resizeTextareaToContent}
+                  onChange={(e) => {
+                    resizeTextareaToContent(e.currentTarget);
+                    setValue(idx, e.target.value);
+                  }}
+                  placeholder={labels.placeholder}
+                  data-testid={`textarea-${field}-${adsetId}-${idx}`}
+                />
+              </div>
+            );
+          }
+          return (
+            <div key={idx} className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-muted-foreground w-5 text-right shrink-0">{idx + 1}.</span>
+              <input
+                type="text"
+                className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-border bg-card"
+                value={text}
+                onChange={(e) => setValue(idx, e.target.value)}
+                placeholder={labels.placeholder}
+                data-testid={`input-${field}-${adsetId}-${idx}`}
+              />
+              {removeButton}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+// One ad set's copy. Memoized so typing re-renders only the ad set being edited.
+const AdSetCopySection = memo(function AdSetCopySection({
+  adset,
+  draft,
+  edited,
+  onUpdate,
+  onReplace,
+  registerSection,
+}: {
+  adset: AdSetInfo;
+  draft: ParsedCopy;
+  edited: boolean;
+  onUpdate: UpdateCopyField;
+  onReplace: (adsetId: string, copy: ParsedCopy) => void;
+  registerSection: (adsetId: string, el: HTMLElement | null) => void;
+}) {
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const sectionRef = useCallback((el: HTMLElement | null) => registerSection(adset.id, el), [adset.id, registerSection]);
+
+  const applyPaste = () => {
+    const parsed = parsePastedCopyText(pasteText);
+    if (parsed.primaryTexts.length === 0 && parsed.headlines.length === 0 && parsed.descriptions.length === 0) {
+      showToast({
+        title: "Could not parse text",
+        description: "Use labels like Primary text_1:, Headline_1:, Description_1: (or separate entries with ---).",
+        variant: "destructive",
+      });
+      return;
+    }
+    onReplace(adset.id, copyDraftFrom(parsed));
+    setPasteText("");
+    setPasteOpen(false);
+    const variationCount = Math.max(parsed.primaryTexts.length, parsed.headlines.length, parsed.descriptions.length);
+    showToast({ title: `Parsed ${variationCount} variations from text` });
+  };
+
+  return (
+    <section
+      ref={sectionRef}
+      className="pt-5"
+      aria-label={`Ad copy for ${adset.name}`}
+      data-testid={`section-edit-copy-${adset.id}`}
+    >
+      <div className="sticky top-0 z-10 -mx-6 px-6 py-2.5 bg-background border-b flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground truncate">{adset.name}</p>
+          {adset.folderName && adset.folderName !== adset.name && (
+            <p className="text-xs text-muted-foreground truncate">{adset.folderName}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {edited && (
+            <Badge variant="secondary" className="text-[11px]">Edited</Badge>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => setPasteOpen((prev) => !prev)}
+            data-testid={`button-toggle-paste-${adset.id}`}
+          >
+            <Upload className="h-3.5 w-3.5 mr-1" />
+            Paste text
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-6 pt-4">
+        {pasteOpen && (
+          <div className="rounded-xl border border-dashed border-input bg-muted/50 p-4 space-y-2">
+            <textarea
+              className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-y font-mono"
+              placeholder={"Primary text: Your ad text here\nHeadline: Your headline\nDescription: Your description\n---\nPrimary text: Second variation\nHeadline: Second headline\nDescription: Second description"}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              data-testid={`textarea-paste-copy-${adset.id}`}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs rounded-lg"
+              disabled={!pasteText.trim()}
+              onClick={applyPaste}
+              data-testid={`button-parse-pasted-text-${adset.id}`}
+            >
+              Parse & fill fields
+            </Button>
+          </div>
+        )}
+        <CopyFieldList adsetId={adset.id} field="primaryTexts" values={draft.primaryTexts} onUpdate={onUpdate} />
+        <CopyFieldList adsetId={adset.id} field="headlines" values={draft.headlines} onUpdate={onUpdate} />
+        <CopyFieldList adsetId={adset.id} field="descriptions" values={draft.descriptions} onUpdate={onUpdate} />
+      </div>
+    </section>
+  );
+});
+
 // Edits the copy of every ad set in one scrollable dialog, opened at the ad
 // set whose Edit was clicked. Keeps its own state so typing does not
 // re-render the whole Launch page.
@@ -612,14 +810,12 @@ const AdCopyEditDialog = memo(function AdCopyEditDialog({
   isSaving: boolean;
   onSave: (changes: Array<{ adsetId: string; copy: ParsedCopy }>) => void;
 }) {
-  const { toast } = useToast();
   const [drafts, setDrafts] = useState<Record<string, ParsedCopy>>({});
-  const [pasteTexts, setPasteTexts] = useState<Record<string, string>>({});
-  const [pasteOpen, setPasteOpen] = useState<Record<string, boolean>>({});
   const [activeAdSetId, setActiveAdSetId] = useState<string | null>(null);
   const [draftsReady, setDraftsReady] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const scrollFrame = useRef<number | null>(null);
 
   // Fresh drafts from the saved copy every time the dialog opens.
   useEffect(() => {
@@ -630,13 +826,15 @@ const AdCopyEditDialog = memo(function AdCopyEditDialog({
     const next: Record<string, ParsedCopy> = {};
     for (const adset of adSets) next[adset.id] = copyDraftFrom(adset.parsedCopy);
     setDrafts(next);
-    setPasteTexts({});
-    setPasteOpen({});
     setActiveAdSetId(focusAdSetId ?? adSets[0]?.id ?? null);
     setDraftsReady(true);
     // Only on open: later ad set updates must not wipe what is being typed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => () => {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+  }, []);
 
   const scrollToAdSet = useCallback((adsetId: string, behavior: ScrollBehavior = "smooth") => {
     const container = scrollRef.current;
@@ -654,17 +852,29 @@ const AdCopyEditDialog = memo(function AdCopyEditDialog({
     return () => cancelAnimationFrame(frame);
   }, [draftsReady, focusAdSetId, scrollToAdSet]);
 
+  // At most once a frame, however fast scroll events arrive.
   const handleScroll = () => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const top = container.scrollTop + 24;
-    let current: string | null = adSets[0]?.id ?? null;
-    for (const adset of adSets) {
-      const section = sectionRefs.current[adset.id];
-      if (section && section.offsetTop <= top) current = adset.id;
-    }
-    if (current !== activeAdSetId) setActiveAdSetId(current);
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      const container = scrollRef.current;
+      if (!container) return;
+      const top = container.scrollTop + 24;
+      let current: string | null = adSets[0]?.id ?? null;
+      for (const adset of adSets) {
+        const section = sectionRefs.current[adset.id];
+        if (section && section.offsetTop <= top) current = adset.id;
+      }
+      setActiveAdSetId(current);
+    });
   };
+
+  // The saved copy only changes with the ad sets, not with every keystroke.
+  const savedCopy = useMemo(() => {
+    const saved: Record<string, string> = {};
+    for (const adset of adSets) saved[adset.id] = JSON.stringify(cleanCopy(copyDraftFrom(adset.parsedCopy)));
+    return saved;
+  }, [adSets]);
 
   const changes = useMemo(() => {
     const list: Array<{ adsetId: string; copy: ParsedCopy }> = [];
@@ -672,119 +882,29 @@ const AdCopyEditDialog = memo(function AdCopyEditDialog({
       const draft = drafts[adset.id];
       if (!draft) continue;
       const cleaned = cleanCopy(draft);
-      const original = cleanCopy(copyDraftFrom(adset.parsedCopy));
-      if (JSON.stringify(cleaned) !== JSON.stringify(original)) {
+      if (JSON.stringify(cleaned) !== savedCopy[adset.id]) {
         list.push({ adsetId: adset.id, copy: cleaned });
       }
     }
     return list;
-  }, [adSets, drafts]);
+  }, [adSets, drafts, savedCopy]);
   const changedIds = useMemo(() => new Set(changes.map((change) => change.adsetId)), [changes]);
 
-  const updateField = (adsetId: string, field: CopyListField, update: (values: string[]) => string[]) => {
+  const updateField = useCallback<UpdateCopyField>((adsetId, field, update) => {
     setDrafts((prev) => {
       const current = prev[adsetId];
       if (!current) return prev;
       return { ...prev, [adsetId]: { ...current, [field]: update(current[field]) } };
     });
-  };
+  }, []);
 
-  const applyPaste = (adsetId: string) => {
-    const parsed = parsePastedCopyText(pasteTexts[adsetId] || "");
-    if (parsed.primaryTexts.length === 0 && parsed.headlines.length === 0 && parsed.descriptions.length === 0) {
-      toast({
-        title: "Could not parse text",
-        description: "Use labels like Primary text_1:, Headline_1:, Description_1: (or separate entries with ---).",
-        variant: "destructive",
-      });
-      return;
-    }
-    setDrafts((prev) => ({ ...prev, [adsetId]: copyDraftFrom(parsed) }));
-    setPasteTexts((prev) => ({ ...prev, [adsetId]: "" }));
-    setPasteOpen((prev) => ({ ...prev, [adsetId]: false }));
-    const variationCount = Math.max(parsed.primaryTexts.length, parsed.headlines.length, parsed.descriptions.length);
-    toast({ title: `Parsed ${variationCount} variations from text` });
-  };
+  const replaceDraft = useCallback((adsetId: string, copy: ParsedCopy) => {
+    setDrafts((prev) => ({ ...prev, [adsetId]: copy }));
+  }, []);
 
-  const renderField = (adsetId: string, field: CopyListField, values: string[]) => {
-    const labels = COPY_FIELD_LABELS[field];
-    const isPrimary = field === "primaryTexts";
-    return (
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {labels.title} ({values.length})
-          </Label>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs rounded-lg"
-            onClick={() => updateField(adsetId, field, (list) => [...list, ""])}
-            data-testid={`button-add-${field}-${adsetId}`}
-          >
-            <Plus className="h-3 w-3 mr-1" />
-            Add variation
-          </Button>
-        </div>
-        <div className={isPrimary ? "space-y-3" : "space-y-2"}>
-          {values.map((text, idx) => {
-            const removeButton = values.length > 1 && (
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
-                aria-label={`Remove ${labels.item.toLowerCase()} ${idx + 1}`}
-                onClick={() => updateField(adsetId, field, (list) => list.filter((_, i) => i !== idx))}
-                data-testid={`button-remove-${field}-${adsetId}-${idx}`}
-              >
-                <XCircle className="h-4 w-4" />
-              </button>
-            );
-            if (isPrimary) {
-              return (
-                <div key={idx} className="rounded-xl border border-border bg-muted/50 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-                      {labels.item} {idx + 1}
-                    </span>
-                    {removeButton}
-                  </div>
-                  <textarea
-                    className="w-full min-h-[72px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-none overflow-hidden"
-                    value={text}
-                    ref={resizeTextareaToContent}
-                    onChange={(e) => {
-                      resizeTextareaToContent(e.currentTarget);
-                      const value = e.target.value;
-                      updateField(adsetId, field, (list) => list.map((t, i) => (i === idx ? value : t)));
-                    }}
-                    placeholder={labels.placeholder}
-                    data-testid={`textarea-${field}-${adsetId}-${idx}`}
-                  />
-                </div>
-              );
-            }
-            return (
-              <div key={idx} className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-muted-foreground w-5 text-right shrink-0">{idx + 1}.</span>
-                <input
-                  type="text"
-                  className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-border bg-card"
-                  value={text}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    updateField(adsetId, field, (list) => list.map((t, i) => (i === idx ? value : t)));
-                  }}
-                  placeholder={labels.placeholder}
-                  data-testid={`input-${field}-${adsetId}-${idx}`}
-                />
-                {removeButton}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
+  const registerSection = useCallback((adsetId: string, el: HTMLElement | null) => {
+    sectionRefs.current[adsetId] = el;
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -834,75 +954,25 @@ const AdCopyEditDialog = memo(function AdCopyEditDialog({
           )}
         </div>
 
-        <div ref={scrollRef} onScroll={handleScroll} className="relative flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="relative flex-1 min-h-0 overflow-y-auto px-6 pb-6"
+          data-copy-scroll
+        >
           {adSets.map((adset) => {
             const draft = drafts[adset.id];
             if (!draft) return null;
-            const isPasteOpen = !!pasteOpen[adset.id];
             return (
-              <section
+              <AdSetCopySection
                 key={adset.id}
-                ref={(el) => {
-                  sectionRefs.current[adset.id] = el;
-                }}
-                className="pt-5"
-                aria-label={`Ad copy for ${adset.name}`}
-                data-testid={`section-edit-copy-${adset.id}`}
-              >
-                <div className="sticky top-0 z-10 -mx-6 px-6 py-2.5 bg-background/95 backdrop-blur border-b flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{adset.name}</p>
-                    {adset.folderName && adset.folderName !== adset.name && (
-                      <p className="text-xs text-muted-foreground truncate">{adset.folderName}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {changedIds.has(adset.id) && (
-                      <Badge variant="secondary" className="text-[11px]">Edited</Badge>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs"
-                      onClick={() => setPasteOpen((prev) => ({ ...prev, [adset.id]: !prev[adset.id] }))}
-                      data-testid={`button-toggle-paste-${adset.id}`}
-                    >
-                      <Upload className="h-3.5 w-3.5 mr-1" />
-                      Paste text
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-6 pt-4">
-                  {isPasteOpen && (
-                    <div className="rounded-xl border border-dashed border-input bg-muted/50 p-4 space-y-2">
-                      <textarea
-                        className="w-full min-h-[120px] px-3 py-2.5 text-sm rounded-lg border border-border bg-card resize-y font-mono"
-                        placeholder={"Primary text: Your ad text here\nHeadline: Your headline\nDescription: Your description\n---\nPrimary text: Second variation\nHeadline: Second headline\nDescription: Second description"}
-                        value={pasteTexts[adset.id] || ""}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setPasteTexts((prev) => ({ ...prev, [adset.id]: value }));
-                        }}
-                        data-testid={`textarea-paste-copy-${adset.id}`}
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs rounded-lg"
-                        disabled={!(pasteTexts[adset.id] || "").trim()}
-                        onClick={() => applyPaste(adset.id)}
-                        data-testid={`button-parse-pasted-text-${adset.id}`}
-                      >
-                        Parse & fill fields
-                      </Button>
-                    </div>
-                  )}
-                  {renderField(adset.id, "primaryTexts", draft.primaryTexts)}
-                  {renderField(adset.id, "headlines", draft.headlines)}
-                  {renderField(adset.id, "descriptions", draft.descriptions)}
-                </div>
-              </section>
+                adset={adset}
+                draft={draft}
+                edited={changedIds.has(adset.id)}
+                onUpdate={updateField}
+                onReplace={replaceDraft}
+                registerSection={registerSection}
+              />
             );
           })}
         </div>
