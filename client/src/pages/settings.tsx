@@ -15,6 +15,7 @@ import { useAuth } from "@/hooks/use-auth";
 import type { CampaignSettings, AdSetSettings, AdSettings, CreativeSettings } from "@shared/schema";
 import { fetchMetaCampaigns, metaCampaignsQueryKey, type MetaCampaignList } from "@/lib/meta-campaigns";
 import { InviteFriendsCard } from "@/components/invite-friends-card";
+import { IntroOfferBox } from "@/components/intro-offer";
 
 interface GlobalSettings {
   id?: string;
@@ -63,6 +64,7 @@ interface BillingStatus {
   uploadsLimit: number | null;
   uploadsRemaining: number | null;
   referralBonusCredits?: number;
+  introOfferAvailable?: boolean;
   canLaunch: boolean;
 }
 
@@ -658,7 +660,7 @@ export default function Settings() {
   });
 
   const checkoutMutation = useMutation({
-    mutationFn: async (interval: "monthly" | "yearly") => {
+    mutationFn: async (interval: "monthly" | "yearly" | "intro_offer") => {
       const res = await apiRequest("POST", "/api/billing/checkout", { interval });
       return res.json() as Promise<{ url: string }>;
     },
@@ -1098,7 +1100,7 @@ export default function Settings() {
                 onClick={() => checkoutMutation.mutate(billingPeriod)}
                 disabled={checkoutMutation.isPending}
               >
-                {checkoutMutation.isPending ? "Redirecting..." : "Upgrade Now"}
+                {checkoutMutation.isPending && checkoutMutation.variables !== "intro_offer" ? "Redirecting..." : "Upgrade Now"}
                 <span className="material-symbols-outlined text-base group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
               </button>
             )}
@@ -1106,6 +1108,12 @@ export default function Settings() {
               <p className="text-center text-[10px] font-bold text-muted-foreground">
                 {billingPeriod === "monthly" ? "€29 / month" : "€290 / year (2 months free)"}
               </p>
+            )}
+            {billingStatus?.introOfferAvailable && (
+              <IntroOfferBox
+                onClaim={() => checkoutMutation.mutate("intro_offer")}
+                isPending={checkoutMutation.isPending && checkoutMutation.variables === "intro_offer"}
+              />
             )}
           </div>
         </div>

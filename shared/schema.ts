@@ -927,5 +927,14 @@ export const referrals = pgTable("referrals", {
 
 export type Referral = typeof referrals.$inferSelect;
 
+// One-time pricing offers each user can take once (see INTRO_OFFER in
+// server/billing.ts). A row means the offer's subscription was created.
+export const billingOfferRedemptions = pgTable("billing_offer_redemptions", {
+  userId: varchar("user_id").primaryKey(),
+  offer: text("offer").notNull(),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  redeemedAt: timestamp("redeemed_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 // Re-export chat models
 export * from "./models/chat.js";

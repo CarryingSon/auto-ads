@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { HelpButton, OnboardingProvider } from "@/components/onboarding-guide";
+import { usePendingOfferRedirect } from "@/components/intro-offer";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { LoginGate } from "@/components/login-gate";
@@ -75,6 +76,7 @@ function DashboardRouter() {
 
 function PrefetchProvider({ children }: { children: React.ReactNode }) {
   usePrefetchMetaData();
+  usePendingOfferRedirect();
   return <>{children}</>;
 }
 
