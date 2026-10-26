@@ -599,7 +599,7 @@ function LaunchVisual({ active }: { active: boolean }) {
       <video
         key={src}
         ref={videoRef}
-        className="block w-full aspect-[16/10] object-cover object-top cursor-zoom-in"
+        className="block w-full aspect-[16/10] object-contain cursor-zoom-in"
         onClick={() => void videoRef.current?.requestFullscreen?.().catch(() => {})}
         title="Click to view full screen"
         poster={`${src}.jpg`}
@@ -607,10 +607,11 @@ function LaunchVisual({ active }: { active: boolean }) {
         loop
         playsInline
         preload="metadata"
-        onError={() => setFailed(true)}
         aria-label="Screen recording of pasting a Drive link, syncing and launching ads"
       >
-        <source src={`${src}.mp4`} type="video/mp4" onError={() => setFailed(true)} />
+        <source src={`${src}.mp4`} type="video/mp4" />
+        {/* The browser tries sources in order; only the last one failing means no video. */}
+        <source src={`${src}.webm`} type="video/webm" onError={() => setFailed(true)} />
       </video>
     </div>
   );

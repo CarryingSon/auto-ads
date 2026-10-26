@@ -6,7 +6,11 @@
 // It starts the client on its own and answers every /api and /auth request
 // from mocks.mjs, so nothing reaches the real backend, Meta or Google Drive.
 // The flow stops with the cursor on Publish Ads; it never clicks it.
-// Uses the installed Google Chrome; set CHROME_PATH to use another Chromium.
+//
+// Needs Playwright's headless Chromium, installed once with
+//   npx playwright-core install chromium-headless-shell
+// Installed Google Chrome does not work: its screencast captures a shorter
+// window than the viewport, which squashes the video.
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
 import ffmpeg from "@ffmpeg-installer/ffmpeg";
@@ -25,16 +29,19 @@ const server = await createServer({ configFile: path.join(ROOT, "vite.config.ts"
 await server.listen();
 const base = "http://localhost:5179";
 
-const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: "chrome" });
+const browser = await chromium.launch();
 try {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   for (const theme of ["light", "dark"]) {
     const framesDir = fs.mkdtempSync(path.join(os.tmpdir(), `onboarding-${theme}-`));
     const list = await record(theme, framesDir);
-    stitch(list, path.join(OUT_DIR, `launch-flow-${theme}.mp4`));
+    const mp4 = path.join(OUT_DIR, `launch-flow-${theme}.mp4`);
+    stitch(list, mp4);
+    // WebM for browsers that cannot play H.264, such as plain Chromium builds.
+    execFileSync(ffmpeg.path, ["-loglevel", "error", "-y", "-i", mp4, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "40", "-row-mt", "1", "-an", mp4.replace(/\.mp4$/, ".webm")]);
     execFileSync(ffmpeg.path, ["-loglevel", "error", "-y", "-i", path.join(framesDir, "00000.jpg"), "-vf", "scale=1280:800:flags=lanczos", "-q:v", "4", path.join(OUT_DIR, `launch-flow-${theme}.jpg`)]);
     fs.rmSync(framesDir, { recursive: true, force: true });
-    console.log(`Saved client/public/onboarding/launch-flow-${theme}.mp4`);
+    console.log(`Saved client/public/onboarding/launch-flow-${theme}.mp4 and .webm`);
   }
 } finally {
   await browser.close();
@@ -44,7 +51,7 @@ try {
 function stitch(listFile, out) {
   execFileSync(ffmpeg.path, [
     "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", listFile,
-    "-vf", "fps=30,scale=1280:800:flags=lanczos,format=yuv420p",
+    "-vf", "fps=30,scale=1280:800:flags=lanczos,setsar=1,format=yuv420p",
     "-c:v", "libx264", "-preset", "slow", "-crf", "26", "-movflags", "+faststart", "-an", out,
   ]);
 }
@@ -85,8 +92,12 @@ async function record(theme, framesDir) {
   await page.waitForTimeout(600);
 
   const frames = [];
+  let sizeError = null;
   const cdp = await page.context().newCDPSession(page);
   cdp.on("Page.screencastFrame", async f => {
+    if (f.metadata.deviceWidth !== W || f.metadata.deviceHeight !== H) {
+      sizeError ??= `screencast is ${f.metadata.deviceWidth}x${f.metadata.deviceHeight}, expected ${W}x${H}`;
+    }
     const file = path.join(framesDir, `${String(frames.length).padStart(5, "0")}.jpg`);
     fs.writeFileSync(file, Buffer.from(f.data, "base64"));
     frames.push({ file, t: f.metadata.timestamp });
@@ -147,6 +158,7 @@ async function record(theme, framesDir) {
   await cdp.send("Page.stopScreencast");
   await page.waitForTimeout(200);
   await page.close();
+  if (sizeError) throw new Error(`Recording would be distorted: ${sizeError}`);
 
   const end = frames.at(-1).t + 0.8;
   const lines = frames.map((f, i) => `file '${f.file}'\nduration ${((frames[i + 1]?.t ?? end) - f.t).toFixed(4)}`);
