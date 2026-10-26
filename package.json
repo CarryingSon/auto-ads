@@ -12,7 +12,8 @@
     "test:edge:oauth": "tsx script/test-meta-oauth-access.ts",
     "db:push": "drizzle-kit push",
     "test": "vitest run",
-    "record:onboarding": "node script/onboarding-video/record.mjs"
+    "record:onboarding": "node script/onboarding-video/record.mjs",
+    "render:hero": "node script/hero-video/render.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

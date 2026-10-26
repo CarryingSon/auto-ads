@@ -44,8 +44,10 @@ function DemoVideoPlaceholder() {
           muted
           playsInline
           preload="auto"
+          poster="/auto-ads-hero.jpg"
         >
           <source src="/auto-ads-hero.mp4" type="video/mp4" />
+          <source src="/auto-ads-hero.webm" type="video/webm" />
         </video>
       </div>
     </div>
