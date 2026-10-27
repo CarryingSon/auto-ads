@@ -1,11 +1,12 @@
 import Stripe from "stripe";
-import { eq, or } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 
-import { db } from "./db.js";
+import { db, pool } from "./db.js";
 import { monthlyLaunchCount, monthlyLaunchUsageWhere } from "./job-queue.js";
 import {
   billingPayments,
   billingSubscriptions,
+  complimentaryPro,
   globalSettings,
   jobQueue,
   type BillingSubscription,
@@ -196,6 +197,40 @@ function isLegacyPro(globalPlanType: string | null | undefined): boolean {
   return (globalPlanType || "").toLowerCase() === "pro";
 }
 
+let ensureComplimentaryTablePromise: Promise<void> | null = null;
+
+// Same table as migrations/0010_complimentary_pro.sql, so a deploy works
+// before the migration has been run.
+async function ensureComplimentaryTable(): Promise<void> {
+  if (!ensureComplimentaryTablePromise) {
+    ensureComplimentaryTablePromise = (async () => {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS complimentary_pro (
+          user_id varchar PRIMARY KEY NOT NULL,
+          note text,
+          granted_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          revoked_at timestamp
+        );
+      `);
+      await pool.query(`ALTER TABLE complimentary_pro ENABLE ROW LEVEL SECURITY;`);
+    })().catch((error) => {
+      ensureComplimentaryTablePromise = null;
+      throw error;
+    });
+  }
+  await ensureComplimentaryTablePromise;
+}
+
+export async function hasComplimentaryPro(userId: string): Promise<boolean> {
+  await ensureComplimentaryTable();
+  const [row] = await db
+    .select({ userId: complimentaryPro.userId })
+    .from(complimentaryPro)
+    .where(and(eq(complimentaryPro.userId, userId), isNull(complimentaryPro.revokedAt)))
+    .limit(1);
+  return Boolean(row);
+}
+
 export function getUtcMonthBounds(now = new Date()): UtcMonthBounds {
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
@@ -293,7 +328,7 @@ async function resolveStripeCustomerUserId(
 }
 
 export async function getBillingStatusForUser(userId: string, now = new Date()): Promise<BillingStatus> {
-  const [subscription, settings, uploadsUsed] = await Promise.all([
+  const [subscription, settings, uploadsUsed, complimentary] = await Promise.all([
     getBillingSubscriptionForUser(userId),
     db
       .select({
@@ -303,12 +338,22 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
       .where(eq(globalSettings.userId, userId))
       .limit(1),
     countLaunchSlotsForUtcMonth(userId),
+    hasComplimentaryPro(userId).catch((error) => {
+      console.warn("[Billing] Could not read complimentary Pro", { userId, error: error instanceof Error ? error.message : error });
+      return false;
+    }),
   ]);
 
   const globalPlanType = settings[0]?.planType || "free";
   const hasStripePro = isStripeSubscriptionPro(subscription, now);
-  const hasLegacyPro = !hasStripePro && isLegacyPro(globalPlanType);
-  const planType: BillingPlanType = hasStripePro || hasLegacyPro ? "pro" : "free";
+  const hasComplimentary = !hasStripePro && complimentary;
+  // A hand-set "pro" in global_settings predates Stripe billing. It only
+  // counts for accounts that never had a Stripe subscription: the webhook
+  // also writes "pro" there while a cancelled subscription runs out, and
+  // nothing sets it back afterwards, so honouring it would keep Pro forever.
+  const hasLegacyPro =
+    !hasStripePro && !hasComplimentary && !subscription?.stripeSubscriptionId && isLegacyPro(globalPlanType);
+  const planType: BillingPlanType = hasStripePro || hasComplimentary || hasLegacyPro ? "pro" : "free";
   const uploadsLimit = planType === "free" ? FREE_MONTHLY_UPLOAD_LIMIT : null;
   const uploadsRemaining = uploadsLimit === null ? null : Math.max(0, uploadsLimit - uploadsUsed);
 
@@ -317,9 +362,11 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
     billingInterval: hasStripePro ? (subscription?.interval as BillingInterval) || null : null,
     subscriptionStatus: hasStripePro
       ? subscription?.status || null
-      : hasLegacyPro
-        ? "legacy_pro"
-        : "free",
+      : hasComplimentary
+        ? "complimentary"
+        : hasLegacyPro
+          ? "legacy_pro"
+          : "free",
     cancelAtPeriodEnd: Boolean(subscription?.cancelAtPeriodEnd),
     currentPeriodEnd: subscription?.currentPeriodEnd || null,
     uploadsUsed,
