@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { IntroOfferBanner } from "@/components/intro-offer";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
@@ -791,6 +792,7 @@ export default function Landing() {
               <span className={`text-sm font-medium ${isYearly ? 'text-foreground' : 'text-muted-foreground'}`}>Yearly <span className="text-meta text-xs ml-1 font-bold">(2 months free)</span></span>
             </div>
           </div>
+          <IntroOfferBanner />
           <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
             {/* FREE */}
             <div className="bg-white border border-primary/20 shadow-sm rounded-3xl p-8 border-t-4 border-border hover:border-t-primary/50 transition-colors" data-testid="card-pricing-free">

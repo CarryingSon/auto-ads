@@ -45,6 +45,7 @@ import {
   backfillBillingPaymentsFromStripeForUser,
   FREE_CREDITS_COUNT_FROM,
   createCheckoutSessionForUser,
+  IntroOfferUnavailableError,
   createPortalSessionForUser,
   getBillingStatusForUser,
   recordInvoicePaymentFromStripeEvent,
@@ -1101,16 +1102,19 @@ export async function registerRoutes(
       }
 
       const parsed = z.object({
-        interval: z.enum(["monthly", "yearly"]),
+        interval: z.enum(["monthly", "yearly", "intro_offer"]),
       }).safeParse(req.body);
 
       if (!parsed.success) {
-        return res.status(400).json({ error: "interval must be monthly or yearly" });
+        return res.status(400).json({ error: "interval must be monthly, yearly or intro_offer" });
       }
 
       const currentBilling = await getBillingStatusForUser(userId);
       if (currentBilling.planType === "pro" && currentBilling.subscriptionStatus !== "legacy_pro") {
         return res.status(400).json({ error: "You already have an active Pro plan" });
+      }
+      if (parsed.data.interval === "intro_offer" && !currentBilling.introOfferAvailable) {
+        return res.status(409).json({ error: "This offer is for free plan accounts that have not used it before." });
       }
 
       const { successUrl, cancelUrl } = resolveBillingUrls(req);
@@ -1125,6 +1129,9 @@ export async function registerRoutes(
 
       res.json({ url: checkoutUrl });
     } catch (error: any) {
+      if (error instanceof IntroOfferUnavailableError) {
+        return res.status(409).json({ error: error.message });
+      }
       console.error("[Billing] Failed to create checkout session:", error);
       res.status(500).json({ error: error?.message || "Failed to start checkout" });
     }

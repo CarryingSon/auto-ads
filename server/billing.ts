@@ -5,6 +5,7 @@ import { db, pool } from "./db.js";
 import { launchCount, launchUsageWhere } from "./job-queue.js";
 import { countRewardedReferrals, REFERRAL_BONUS_CREDITS } from "./referrals.js";
 import {
+  billingOfferRedemptions,
   billingPayments,
   billingSubscriptions,
   complimentaryPro,
@@ -22,6 +23,16 @@ export const FREE_LAUNCH_CREDITS = 5;
 // Launches before this date were under the old 3-per-month plan and do not
 // use up credits, so existing free users start with a full allowance.
 export const FREE_CREDITS_COUNT_FROM = new Date("2026-10-26T00:00:00Z");
+// One-time offer for free users, once per account: pay 3 months of the
+// monthly price up front, get 4 months of Pro, then the subscription carries
+// on at the monthly price. Stripe models it as a monthly subscription whose
+// first 4 months are a trial, plus a one-off charge of 3 months at checkout.
+export const INTRO_OFFER = {
+  id: "four_for_three",
+  paidMonths: 3,
+  totalMonths: 4,
+} as const;
+
 const FALLBACK_PRICING = {
   monthly: { interval: "month" as const, unitAmountCents: 2900 },
   yearly: { interval: "year" as const, unitAmountCents: 29000 },
@@ -50,7 +61,50 @@ export interface BillingStatus {
   uploadsLimit: number | null;
   uploadsRemaining: number | null;
   referralBonusCredits: number;
+  introOfferAvailable: boolean;
   canLaunch: boolean;
+}
+
+let ensureOfferTablePromise: Promise<void> | null = null;
+
+// Same table as migrations/0009_billing_offer_redemptions.sql, so a deploy
+// works before the migration has been run.
+async function ensureOfferTable(): Promise<void> {
+  if (!ensureOfferTablePromise) {
+    ensureOfferTablePromise = (async () => {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS billing_offer_redemptions (
+          user_id varchar PRIMARY KEY NOT NULL,
+          offer text NOT NULL,
+          stripe_subscription_id text,
+          redeemed_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL
+        );
+      `);
+      await pool.query(`ALTER TABLE billing_offer_redemptions ENABLE ROW LEVEL SECURITY;`);
+    })().catch((error) => {
+      ensureOfferTablePromise = null;
+      throw error;
+    });
+  }
+  await ensureOfferTablePromise;
+}
+
+export async function hasRedeemedIntroOffer(userId: string): Promise<boolean> {
+  await ensureOfferTable();
+  const [row] = await db
+    .select({ userId: billingOfferRedemptions.userId })
+    .from(billingOfferRedemptions)
+    .where(eq(billingOfferRedemptions.userId, userId))
+    .limit(1);
+  return Boolean(row);
+}
+
+async function recordIntroOfferRedemption(userId: string, stripeSubscriptionId: string): Promise<void> {
+  await ensureOfferTable();
+  await db
+    .insert(billingOfferRedemptions)
+    .values({ userId, offer: INTRO_OFFER.id, stripeSubscriptionId })
+    .onConflictDoNothing({ target: billingOfferRedemptions.userId });
 }
 
 function resolveStripeSecretKey(): string {
@@ -324,7 +378,7 @@ async function resolveStripeCustomerUserId(
 }
 
 export async function getBillingStatusForUser(userId: string, now = new Date()): Promise<BillingStatus> {
-  const [subscription, settings, uploadsUsed, rewardedReferrals, complimentary] = await Promise.all([
+  const [subscription, settings, uploadsUsed, rewardedReferrals, redeemedIntroOffer, complimentary] = await Promise.all([
     getBillingSubscriptionForUser(userId),
     db
       .select({
@@ -334,11 +388,16 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
       .where(eq(globalSettings.userId, userId))
       .limit(1),
     countFreeLaunchesUsed(userId),
-    // Invite bonuses only add to the free allowance. If they cannot be read,
-    // the status (and paying users' Pro) must still load, so count none.
+    // Invite bonuses and the offer flag only add to the free plan. If they
+    // cannot be read, the status (and paying users' Pro) must still load:
+    // count no bonus and hide the offer.
     countRewardedReferrals(userId).catch((error) => {
       console.warn("[Billing] Could not read referral bonuses", { userId, error: error instanceof Error ? error.message : error });
       return 0;
+    }),
+    hasRedeemedIntroOffer(userId).catch((error) => {
+      console.warn("[Billing] Could not read offer redemptions", { userId, error: error instanceof Error ? error.message : error });
+      return true;
     }),
     hasComplimentaryPro(userId).catch((error) => {
       console.warn("[Billing] Could not read complimentary Pro", { userId, error: error instanceof Error ? error.message : error });
@@ -376,6 +435,7 @@ export async function getBillingStatusForUser(userId: string, now = new Date()):
     uploadsLimit,
     uploadsRemaining,
     referralBonusCredits,
+    introOfferAvailable: planType === "free" && !redeemedIntroOffer,
     canLaunch: planType === "pro" || (uploadsRemaining ?? 0) > 0,
   };
 }
@@ -399,13 +459,20 @@ async function getOrCreateStripeCustomerForUser(userId: string, email?: string |
   return customer.id;
 }
 
+export class IntroOfferUnavailableError extends Error {}
+
 export async function createCheckoutSessionForUser(params: {
   userId: string;
   email?: string | null;
-  interval: "monthly" | "yearly";
+  interval: "monthly" | "yearly" | "intro_offer";
   successUrl: string;
   cancelUrl: string;
 }): Promise<string> {
+  if (params.interval === "intro_offer") {
+    const { interval: _offer, ...rest } = params;
+    return createIntroOfferCheckoutSession(rest);
+  }
+
   const stripe = getStripe();
   const customerId = await getOrCreateStripeCustomerForUser(params.userId, params.email);
   const priceId = await resolvePriceId(params.interval);
@@ -425,6 +492,83 @@ export async function createCheckoutSessionForUser(params: {
     subscription_data: {
       metadata: {
         userId: params.userId,
+      },
+    },
+  });
+
+  if (!session.url) {
+    throw new Error("Stripe checkout session URL is missing");
+  }
+  return session.url;
+}
+
+function addUtcMonths(date: Date, months: number): Date {
+  const result = new Date(date);
+  result.setUTCMonth(result.getUTCMonth() + months);
+  return result;
+}
+
+async function createIntroOfferCheckoutSession(params: {
+  userId: string;
+  email?: string | null;
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<string> {
+  if (await hasRedeemedIntroOffer(params.userId)) {
+    throw new IntroOfferUnavailableError("This offer can be used once per account, and it has already been used.");
+  }
+
+  const stripe = getStripe();
+  const customerId = await getOrCreateStripeCustomerForUser(params.userId, params.email);
+  const monthlyPriceId = await resolvePriceId("monthly");
+  const monthlyPrice = await stripe.prices.retrieve(monthlyPriceId);
+  if (!monthlyPrice.unit_amount) {
+    throw new Error("The monthly Stripe price has no fixed amount");
+  }
+
+  const upfrontAmount = monthlyPrice.unit_amount * INTRO_OFFER.paidMonths;
+  const formattedUpfront = new Intl.NumberFormat("en-IE", { style: "currency", currency: monthlyPrice.currency.toUpperCase() }).format(upfrontAmount / 100);
+  const formattedMonthly = new Intl.NumberFormat("en-IE", { style: "currency", currency: monthlyPrice.currency.toUpperCase() }).format(monthlyPrice.unit_amount / 100);
+  // Stripe calls the prepaid months a trial: the monthly price starts
+  // charging when it ends.
+  const prepaidUntil = addUtcMonths(new Date(), INTRO_OFFER.totalMonths);
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    customer: customerId,
+    line_items: [
+      { price: monthlyPriceId, quantity: 1 },
+      {
+        price_data: {
+          currency: monthlyPrice.currency,
+          unit_amount: upfrontAmount,
+          product_data: {
+            name: `Auto-ads Pro: ${INTRO_OFFER.totalMonths} months for the price of ${INTRO_OFFER.paidMonths}`,
+          },
+        },
+        quantity: 1,
+      },
+    ],
+    // The offer is the discount; no codes on top of it.
+    allow_promotion_codes: false,
+    success_url: params.successUrl,
+    cancel_url: params.cancelUrl,
+    client_reference_id: params.userId,
+    metadata: {
+      userId: params.userId,
+      interval: "monthly",
+      offer: INTRO_OFFER.id,
+    },
+    subscription_data: {
+      trial_end: Math.floor(prepaidUntil.getTime() / 1000),
+      metadata: {
+        userId: params.userId,
+        offer: INTRO_OFFER.id,
+      },
+    },
+    custom_text: {
+      submit: {
+        message: `You pay ${formattedUpfront} today for ${INTRO_OFFER.totalMonths} months of Pro. After that, Pro renews at ${formattedMonthly}/month until you cancel.`,
       },
     },
   });
@@ -514,6 +658,10 @@ export async function syncSubscriptionFromStripeEvent(
   };
 
   const upserted = await upsertBillingSubscriptionForUser(userId, updates);
+
+  if (subscription.metadata?.offer === INTRO_OFFER.id) {
+    await recordIntroOfferRedemption(userId, stripeSubscriptionId);
+  }
 
   // Keep global settings aligned for non-legacy users while preserving legacy fallback.
   await db
