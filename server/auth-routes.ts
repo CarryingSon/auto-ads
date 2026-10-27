@@ -12,6 +12,7 @@ declare module "express-session" {
 import { db } from "./db.js";
 import { storage } from "./storage.js";
 import { getClearSessionCookieOptions } from "./session-config.js";
+import { readCookie, recordReferral, REFERRAL_COOKIE } from "./referrals.js";
 import { 
   oauthConnections, 
   metaAssets, 
@@ -890,6 +891,22 @@ router.get("/meta/callback", async (req: Request, res: Response) => {
       updatedAt: new Date(),
     });
     metaLog(traceId, "Inserted fresh oauth_connections row for reconnect", { userId });
+
+    // A first-time sign-up from a friend's invite link (?ref=CODE, kept in a
+    // cookie through the Meta redirect) links this user to the friend. Only
+    // users who never had a Meta connection count, and it never blocks login.
+    const referralCode = readCookie(req.headers.cookie, REFERRAL_COOKIE);
+    if (referralCode) {
+      if (existingMetaConnectionRows.length === 0 && !stateHasExistingAppUser) {
+        try {
+          const referral = await recordReferral(userId, referralCode);
+          metaLog(traceId, "Referral sign-up checked", { userId, recorded: Boolean(referral) });
+        } catch (referralError) {
+          metaLog(traceId, "Referral sign-up failed", { userId, error: getErrorMessage(referralError) });
+        }
+      }
+      res.clearCookie(REFERRAL_COOKIE, { path: "/" });
+    }
     
     const adAccountCandidates: unknown[] = Array.isArray(adAccountsData.data) ? adAccountsData.data : [];
     const rawAdAccounts = adAccountCandidates

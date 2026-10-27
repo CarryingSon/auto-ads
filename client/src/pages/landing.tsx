@@ -29,7 +29,7 @@ const faqItems = [
   { q: "Can I use different aspect ratios in the same ad?", a: "Yes! Auto-ads supports uploading multiple aspect ratios from your Drive folder and will automatically map them to the correct placements." },
 ];
 
-const freePlanFeatures = ["3 launches / month", "Dashboard overview", "Google Drive sync", "No credit card required"];
+const freePlanFeatures = ["5 free launches, any number of creatives", "+5 launches for every friend you invite", "Dashboard overview", "Google Drive sync", "No credit card required"];
 const paidPlanFeatures = ["Unlimited launches", "Unlimited Drive syncs", "Auto-disable enhancements", "Google Drive integration", "Auto-naming from filenames", "Saved ad copy templates"];
 
 function DemoVideoPlaceholder() {

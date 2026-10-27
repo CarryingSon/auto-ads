@@ -29,6 +29,22 @@ const Privacy = lazy(() => import("@/pages/privacy"));
 const Terms = lazy(() => import("@/pages/terms"));
 const DataDeletion = lazy(() => import("@/pages/data-deletion"));
 
+// Invite links look like /?ref=CODE. Keep the code in a cookie so it survives
+// the Meta login redirect; the login callback reads it once and clears it.
+function captureReferralCode() {
+  const params = new URLSearchParams(window.location.search);
+  const ref = params.get("ref");
+  if (!ref) return;
+  if (/^[A-Za-z0-9]{4,16}$/.test(ref)) {
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `aa_ref=${encodeURIComponent(ref.toUpperCase())}; Max-Age=${60 * 60 * 24 * 30}; Path=/; SameSite=Lax${secure}`;
+  }
+  params.delete("ref");
+  const query = params.toString();
+  window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+}
+captureReferralCode();
+
 function PageLoader({ label = "Loading..." }: { label?: string }) {
   return (
     <div className="flex items-center justify-center h-screen">
