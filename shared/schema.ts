@@ -906,5 +906,14 @@ export const insertBillingPaymentSchema = createInsertSchema(billingPayments).om
 export type InsertBillingPayment = z.infer<typeof insertBillingPaymentSchema>;
 export type BillingPayment = typeof billingPayments.$inferSelect;
 
+// Pro without paying, granted by hand (for example to friends of the
+// business). Active while revoked_at is null; Stripe events never change it.
+export const complimentaryPro = pgTable("complimentary_pro", {
+  userId: varchar("user_id").primaryKey(),
+  note: text("note"),
+  grantedAt: timestamp("granted_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  revokedAt: timestamp("revoked_at"),
+});
+
 // Re-export chat models
 export * from "./models/chat.js";
