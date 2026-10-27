@@ -936,5 +936,14 @@ export const billingOfferRedemptions = pgTable("billing_offer_redemptions", {
   redeemedAt: timestamp("redeemed_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// Pro without paying, granted by hand (for example to friends of the
+// business). Active while revoked_at is null; Stripe events never change it.
+export const complimentaryPro = pgTable("complimentary_pro", {
+  userId: varchar("user_id").primaryKey(),
+  note: text("note"),
+  grantedAt: timestamp("granted_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  revokedAt: timestamp("revoked_at"),
+});
+
 // Re-export chat models
 export * from "./models/chat.js";

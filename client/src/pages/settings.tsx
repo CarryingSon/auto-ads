@@ -889,6 +889,7 @@ export default function Settings() {
   const effectivePlanType = billingStatus?.planType || (settings?.planType === "pro" ? "pro" : "free");
   const isProPlan = effectivePlanType === "pro";
   const isLegacyPro = billingStatus?.subscriptionStatus === "legacy_pro";
+  const isComplimentaryPro = billingStatus?.subscriptionStatus === "complimentary";
   const uploadsTotal = billingStatus?.uploadsLimit ?? (isProPlan ? null : 5);
   const referralBonusCredits = billingStatus?.referralBonusCredits ?? 0;
   const uploadsUsed = billingStatus?.uploadsUsed ?? (
@@ -1047,7 +1048,13 @@ export default function Settings() {
                   : "font-medium text-muted-foreground"
               }`}
             >
-              {isProPlan ? (isLegacyPro ? "Legacy Pro access (temporary)" : "Unlimited launches enabled") : `${uploadsTotal ?? 5} free launches`}
+              {isProPlan
+                ? isComplimentaryPro
+                  ? "Complimentary Pro access"
+                  : isLegacyPro
+                    ? "Legacy Pro access (temporary)"
+                    : "Unlimited launches enabled"
+                : `${uploadsTotal ?? 5} free launches`}
             </p>
             {isProPlan && billingStatus?.cancelAtPeriodEnd && currentPeriodEndLabel && (
               <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-2 tracking-[0.01em]">
@@ -1079,7 +1086,7 @@ export default function Settings() {
                 </button>
               </div>
             )}
-            {isProPlan && !isLegacyPro ? (
+            {isComplimentaryPro ? null : isProPlan && !isLegacyPro ? (
               <button
                 type="button"
                 className="w-full py-2.5 px-3 bg-white/60 dark:bg-white/10 border border-white/40 dark:border-white/15 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60"
