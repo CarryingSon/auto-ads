@@ -1,5 +1,6 @@
 // Tidies ad copy taken from a DOCX or a Google Docs export: never two spaces
-// in a row, and every paragraph on its own line with no blank lines between.
+// in a row, every paragraph on its own line, and an empty paragraph kept as
+// one blank line, the way the copy reads in the document.
 export function cleanCopyText(text: string): string {
   return text
     .replace(/\r\n?/g, "\n")
@@ -9,6 +10,6 @@ export function cleanCopyText(text: string): string {
     .replace(/[​﻿]/g, "")
     .replace(/ {2,}/g, " ")
     .replace(/ *\n */g, "\n")
-    .replace(/\n{2,}/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
