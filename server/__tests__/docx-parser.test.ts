@@ -57,8 +57,9 @@ describe("parseDCTCopyFromText", () => {
 });
 
 describe("cleanCopyText", () => {
-  it("never leaves two spaces or a blank line", () => {
-    expect(cleanCopyText("Hello  world\u00A0 again\t!\r\n\r\n\r\nNext   line ")).toBe("Hello world again !\nNext line");
+  it("never leaves two spaces or more than one blank line", () => {
+    expect(cleanCopyText("Hello  world\u00A0 again\t!\r\n\r\n\r\nNext   line ")).toBe("Hello world again !\n\nNext line");
+    expect(cleanCopyText("One\n \u00A0\nTwo\nThree")).toBe("One\n\nTwo\nThree");
   });
 
   it("keeps emoji joined", () => {
@@ -79,22 +80,22 @@ describe("whitespace in a DOCX", () => {
     p("Big  sale"),
   ]);
 
-  it("puts each paragraph on one line with single spaces", async () => {
+  it("puts each paragraph on its own line, keeps an empty one as a blank line", async () => {
     const { rawText } = await extractDocxText(doc);
     const [block] = parseDCTCopyFromText(rawText);
-    expect(block.primaryTexts).toEqual(["First paragraph with spaces.\nSecond paragraph\nLine one\nline two"]);
+    expect(block.primaryTexts).toEqual(["First paragraph with spaces.\n\nSecond paragraph\nLine one\nline two"]);
     expect(block.headlines).toEqual(["Big sale"]);
   });
 
   it("does the same through parseDocx", async () => {
     const result = await parseDocx(doc);
-    expect(result.ads[0].primary_text).toBe("First paragraph with spaces.\nSecond paragraph\nLine one\nline two");
+    expect(result.ads[0].primary_text).toBe("First paragraph with spaces.\n\nSecond paragraph\nLine one\nline two");
     expect(result.ads[0].headline).toBe("Big sale");
   });
 
   it("cleans plain-text Google Docs exports too", () => {
     const [block] = parseDCTCopyFromText("\uFEFFDCT 2:\r\nPrimary text:\r\nOne  two\r\n\r\nThree\r\nHeadline:\r\n Buy  now ");
-    expect(block.primaryTexts).toEqual(["One two\nThree"]);
+    expect(block.primaryTexts).toEqual(["One two\n\nThree"]);
     expect(block.headlines).toEqual(["Buy now"]);
   });
 });

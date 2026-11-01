@@ -60,15 +60,29 @@ function extractTextFromDocxZip(buffer: Buffer): string {
 
   const parts: string[] = [];
 
+  const pushBlankLine = () => {
+    if (parts.length > 0 && parts[parts.length - 1] !== "") {
+      parts.push("");
+    }
+  };
+
   let pStart = 0;
   while (true) {
     const pOpen = xml.indexOf("<w:p ", pStart);
     const pOpen2 = xml.indexOf("<w:p>", pStart);
-    let pIdx = -1;
-    if (pOpen === -1 && pOpen2 === -1) break;
-    if (pOpen === -1) pIdx = pOpen2;
-    else if (pOpen2 === -1) pIdx = pOpen;
-    else pIdx = Math.min(pOpen, pOpen2);
+    const pOpen3 = xml.indexOf("<w:p/>", pStart);
+    const candidates = [pOpen, pOpen2, pOpen3].filter((i) => i !== -1);
+    if (candidates.length === 0) break;
+    const pIdx = Math.min(...candidates);
+
+    // An empty paragraph can be self-closing: <w:p/> or <w:p w:rsidR="..."/>.
+    const tagEnd = xml.indexOf(">", pIdx);
+    if (tagEnd === -1) break;
+    if (xml[tagEnd - 1] === "/") {
+      pushBlankLine();
+      pStart = tagEnd + 1;
+      continue;
+    }
 
     const pClose = xml.indexOf("</w:p>", pIdx);
     if (pClose === -1) break;
@@ -102,9 +116,7 @@ function extractTextFromDocxZip(buffer: Buffer): string {
     if (pText.length > 0) {
       parts.push(pText);
     } else {
-      if (parts.length > 0 && parts[parts.length - 1] !== "") {
-        parts.push("");
-      }
+      pushBlankLine();
     }
 
     pStart = pClose + 6;
@@ -140,7 +152,8 @@ export async function extractDocxText(buffer: Buffer): Promise<{ rawText: string
     console.log("[DOCX Parser] ZIP extraction failed, falling back to mammoth");
     const mammoth = await import("mammoth");
     const result = await mammoth.default.extractRawText({ buffer });
-    return { rawText: result.value.replace(/[^\S\n]{2,}/g, " "), method: "mammoth" };
+    // Mammoth ends every paragraph with a blank line; one newline matches the ZIP extraction.
+    return { rawText: result.value.replace(/\n\n/g, "\n").replace(/[^\S\n]{2,}/g, " "), method: "mammoth" };
   }
 }
 
